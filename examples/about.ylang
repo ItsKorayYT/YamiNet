@@ -1,0 +1,10 @@
+@page 0.1
+  title About YamiNet
+  language en
+
+= Hello from node two
+This document arrived in a custom binary YNP frame.
+:: Experimental network
+  TCP is restricted to numeric loopback addresses.
+  Traffic is plaintext and unauthenticated. Do not send sensitive data.
+  > ynp://127.0.0.1:7301/welcome | Return to the first node

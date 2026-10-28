@@ -1,0 +1,13 @@
+@page 0.1
+  title Welcome to YamiNet
+  language en
+
+= YamiNet
+Experimental local documents. Not secure for sensitive use.
+:: A new document web
+  YLang describes content. YSL describes its presentation.
+  :: Local links
+    > ynp://127.0.0.1:7302/about | Read about the second node
+:: Privacy goals
+  No scripts, remote assets, tracking, or automatic link fetching.
+  Identity, encryption, and anonymous routing are future work.
