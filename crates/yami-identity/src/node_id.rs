@@ -24,6 +24,15 @@ impl NodeId {
     pub(crate) fn key(&self) -> Result<VerifyingKey> {
         VerifyingKey::from_bytes(&self.0).map_err(|_| Error::BadSignature)
     }
+    /// The node ID of a raw Ed25519 public key, with the same checks as parsing.
+    pub fn from_public_key(key: [u8; 32]) -> Result<Self> {
+        let point = VerifyingKey::from_bytes(&key)
+            .map_err(|_| Error::InvalidNodeId("not a valid Ed25519 public key"))?;
+        if point.is_weak() {
+            return Err(Error::InvalidNodeId("small-order Ed25519 public key"));
+        }
+        Ok(Self(key))
+    }
     pub fn public_key(&self) -> [u8; 32] {
         self.0
     }
@@ -70,12 +79,7 @@ impl FromStr for NodeId {
         if body[32..] != checksum(&key) {
             return Err(Error::InvalidNodeId("checksum mismatch; check for typos"));
         }
-        let point = VerifyingKey::from_bytes(&key)
-            .map_err(|_| Error::InvalidNodeId("not a valid Ed25519 public key"))?;
-        if point.is_weak() {
-            return Err(Error::InvalidNodeId("small-order Ed25519 public key"));
-        }
-        Ok(Self(key))
+        Self::from_public_key(key)
     }
 }
 

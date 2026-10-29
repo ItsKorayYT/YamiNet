@@ -6,6 +6,9 @@
 //! exact metadata. It does not encrypt, hide or anonymize anything, does not
 //! authenticate a YNP connection, and says nothing about freshness: an old
 //! signed version stays valid. See `docs/specs/v0.1/identity.md`.
+//!
+//! The same key authenticates the node in the TLS transport (`ynp-tls`),
+//! which signs only TLS-formatted messages; see [`TlsMessage`].
 mod node_id;
 mod signed;
 mod store;
@@ -15,6 +18,7 @@ use std::{fmt, io, path::PathBuf};
 pub use node_id::{NodeId, NODE_ID_PREFIX};
 pub use signed::{
     sha256, Digest, DocumentMetadata, Purpose, Signable, Signature, SignatureFile, SiteManifest,
+    TlsMessage,
 };
 pub use store::{default_dir, NodeIdentity, ID_FILE, KEY_FILE};
 

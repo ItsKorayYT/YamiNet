@@ -107,6 +107,18 @@ or hide who published it, and the browser does not check signatures yet. See
 [node identity](specs/v0.1/identity.md) for the format and limitations. Never
 copy `node.key` into a site directory or repository.
 
+To serve the site over encrypted, authenticated TLS 1.3 instead, add `--tls`.
+Readers then use the printed `ynps://<node-id>@<address>/<key>` URLs, and a
+fetch succeeds only from the node holding that ID's key:
+
+```sh
+cargo run -p yami-node -- serve-dir 127.0.0.1:7443 sites/alice --identity <identity-directory> --tls
+cargo run -p yami-node -- fetch ynps://yn1-...@127.0.0.1:7443/home
+```
+
+Links inside pages stay `ynp://` addresses and the browser does not open
+`ynps://` URLs yet. See [YNP over TLS](specs/v0.1/ynp-tls.md).
+
 ## Two sample sites
 
 The repository includes two linked sample sites. Run each node in its own

@@ -1,6 +1,8 @@
 # YNP 0.1 draft (wire version 1)
 
 **EXPERIMENTAL: plaintext, unauthenticated, not secure for sensitive use.**
+The same frames can be carried over authenticated TLS 1.3; see
+[ynp-tls.md](ynp-tls.md).
 YNP is a custom binary request/response protocol. It does not use HTTP.
 This draft defines one request and one reply per loopback TCP connection.
 There is no negotiation, discovery, compression, routing, encryption or identity.
@@ -81,10 +83,14 @@ handling one connection at a time.
 ## Extension boundary
 
 `Transport::connect` and `Incoming::accept` return a `Connection` implementing
-`Read + Write + Send`, with an explicit protection report. The only protection
-variant today is `ExperimentalPlaintext`. Frame encoding, document parsing and
-layout are independent of sockets; an in-memory test transport exercises this
-boundary. Future identity handshakes, authenticated encryption and anonymous
-routing can be owned by other transports, but require separately specified
-protection states, validation and versioning. Their availability MUST NOT be
-inferred from these traits. No anonymity is implemented in this version.
+`Read + Write + Send`, with an explicit protection report. The loopback TCP
+transport described above reports `ExperimentalPlaintext`; it is kept as the
+legacy, insecure transport for local tests and the original demos.
+`Tls13PinnedServer` is reported by the TLS 1.3 transport specified in
+[ynp-tls.md](ynp-tls.md), which carries these frames unchanged after
+authenticating the server against a pinned node ID. Frame encoding, document
+parsing and layout are independent of sockets; an in-memory test transport
+exercises this boundary. Other handshakes or anonymous routing require their own
+specified protection states, validation and versioning. Their availability
+MUST NOT be inferred from these traits. No anonymity is implemented in this
+version.

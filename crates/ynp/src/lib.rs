@@ -1,6 +1,7 @@
-//! Experimental YNP 0.1. Plaintext, unauthenticated, loopback-only TCP.
-//! Transport and stream interfaces leave room for future secure implementations;
-//! no identity, encryption, or anonymity is provided by this crate.
+//! Experimental YNP 0.1: the frame codec, transport traits and the legacy
+//! plaintext, unauthenticated, loopback-only TCP transport.
+//! This crate provides no identity, encryption or anonymity. The `ynp-tls`
+//! crate carries the same frames over TLS 1.3 to a pinned node identity.
 use std::{
     io::{self, Read, Write},
     net::{SocketAddr, TcpListener, TcpStream},
@@ -187,10 +188,15 @@ pub fn read_frame(reader: &mut (impl Read + ?Sized)) -> io::Result<Frame> {
 /// Report observed protection, rather than implying a secure channel exists.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Protection {
+    /// Legacy loopback TCP: anyone on the machine can read, alter or
+    /// impersonate either side.
     ExperimentalPlaintext,
+    /// TLS 1.3 in which the server proved the key of a node ID the client
+    /// trusted before connecting (`ynp-tls`). The client is not authenticated.
+    Tls13PinnedServer,
 }
-/// Future transports can own identity handshakes and channel protection here.
-/// Adding secure variants will require a new specification and threat model.
+/// Transports own identity handshakes and channel protection. Each protection
+/// state has its own specification and threat model.
 pub trait Connection: Read + Write + Send {
     fn protection(&self) -> Protection;
 }
@@ -205,10 +211,15 @@ pub trait Transport {
 pub trait Incoming {
     fn accept(&self) -> io::Result<Box<dyn Connection>>;
 }
+/// LEGACY, EXPERIMENTAL AND INSECURE: plaintext and unauthenticated. Kept for
+/// local tests and the original demos; use `ynp-tls` for authenticated,
+/// encrypted connections.
 #[derive(Debug, Default)]
 pub struct LoopbackTcp;
+/// LEGACY, EXPERIMENTAL AND INSECURE plaintext listener; see [`LoopbackTcp`].
 pub struct LocalListener(TcpListener);
-fn require_loopback(address: SocketAddr) -> io::Result<()> {
+/// The localhost-only policy shared by every transport in this release.
+pub fn require_loopback(address: SocketAddr) -> io::Result<()> {
     if !address.ip().is_loopback() {
         return Err(io::Error::new(
             io::ErrorKind::PermissionDenied,
@@ -217,7 +228,8 @@ fn require_loopback(address: SocketAddr) -> io::Result<()> {
     }
     Ok(())
 }
-fn configure(stream: &TcpStream) -> io::Result<()> {
+/// Per-operation timeouts and no Nagle delay, for every YNP TCP stream.
+pub fn configure_stream(stream: &TcpStream) -> io::Result<()> {
     stream.set_read_timeout(Some(TIMEOUT))?;
     stream.set_write_timeout(Some(TIMEOUT))?;
     stream.set_nodelay(true)
@@ -226,7 +238,7 @@ impl Transport for LoopbackTcp {
     fn connect(&self, address: SocketAddr) -> io::Result<Box<dyn Connection>> {
         require_loopback(address)?;
         let stream = TcpStream::connect_timeout(&address, TIMEOUT)?;
-        configure(&stream)?;
+        configure_stream(&stream)?;
         Ok(Box::new(stream))
     }
 }
@@ -243,7 +255,7 @@ impl Incoming for LocalListener {
     fn accept(&self) -> io::Result<Box<dyn Connection>> {
         let (stream, peer) = self.0.accept()?;
         require_loopback(peer)?;
-        configure(&stream)?;
+        configure_stream(&stream)?;
         Ok(Box::new(stream))
     }
 }

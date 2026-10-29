@@ -2,3 +2,5 @@
 *.ppm
 # Node secret keys must never be committed (see docs/specs/v0.1/identity.md).
 node.key
+# Identity directories created by the TLS demos in docs/specs/v0.1/ynp-tls.md.
+/demo-ids/

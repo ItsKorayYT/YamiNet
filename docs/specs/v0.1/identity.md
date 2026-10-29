@@ -4,7 +4,9 @@
 lets a node sign metadata so that anyone holding its node ID can check that the
 holder of the matching secret key signed exactly that metadata. Signatures do
 **not** encrypt anything, hide who is talking, authenticate a YNP connection,
-or make communication anonymous. YNP frames are unchanged by this draft.
+or make communication anonymous. YNP frames are unchanged by this draft. The
+same key authenticates a node in the separate TLS transport, specified in
+[ynp-tls.md](ynp-tls.md).
 
 Implemented by the `yami-identity` crate using
 [`ed25519-dalek`](https://crates.io/crates/ed25519-dalek) 3 (Ed25519, RFC 8032)
@@ -111,7 +113,10 @@ verifies for another purpose, even over identical bytes:
 | Site manifest | `yaminet.site-manifest.v1` |
 
 The tag names the version of the canonical encoding; a changed encoding gets a
-new tag. Verification uses `verify_strict`, which rejects non-canonical
+new tag. Every tag starts with `yaminet.`, so no metadata message begins like
+the X.509 certificates (byte `30`) or TLS 1.3 CertificateVerify content (byte
+`20`) that the node key also signs for the TLS transport; that signing API
+refuses any other format (see [ynp-tls.md](ynp-tls.md#signing-domains)). Verification uses `verify_strict`, which rejects non-canonical
 signatures and small-order keys. Integers are unsigned big-endian, and `key` is
 a YNP key (1..128 bytes of `A-Z a-z 0-9 _ -`) prefixed by its u16 length.
 
@@ -154,12 +159,14 @@ expected node ID as an argument rather than trusting the `signer` line.
 
 ## Security limitations
 
-- **No confidentiality or anonymity.** Signing adds no encryption. YNP remains
-  plaintext and unauthenticated; anyone who can read the traffic or the files
-  can read the content and see the node ID.
-- **No transport authentication.** Signatures are not carried in YNP frames, so
-  the browser does not verify documents it fetches, and a YNP peer is not
-  authenticated by its node ID.
+- **No confidentiality or anonymity.** Signing adds no encryption. Plaintext
+  YNP remains unauthenticated; anyone who can read the traffic or the files can
+  read the content and see the node ID. The TLS transport encrypts traffic but
+  does not hide that a connection exists.
+- **Signatures are not transmitted.** Site signatures are not carried in YNP
+  frames, so the browser does not verify documents it fetches. Over plaintext
+  YNP a peer is not authenticated by its node ID at all; over the TLS
+  transport the connection is, but `site.sig` is still not checked.
 - **Trust in node IDs is out of band.** A valid signature proves only that the
   holder of the key for that ID signed the content. Deciding which node ID
   belongs to whom is the reader's job; there is no directory, web of trust or

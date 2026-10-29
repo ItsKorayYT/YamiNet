@@ -9,7 +9,12 @@ yami-browser -> ynp -> transport connection (explicit loopback fetch only)
              -> yami-render -> Layout -> terminal / P6 bitmap
 
 yami-node -> ynp -> in-memory Store or directory Site -> YNP response
+          -> ynp-tls -> TLS 1.3 listener/client pinned to a node ID (optional)
           -> yami-identity -> persistent node key, signed site manifest (local files only)
+
+ynp-tls -> rustls (TLS 1.3, ring) + rcgen (certificate encoding)
+        -> yami-identity -> node key signs certificate and handshake
+        -> ynp -> unchanged frames, loopback policy
 ```
 
 The node treats source and style as bounded UTF-8 blobs. A successful fetch
@@ -52,7 +57,8 @@ sample processes use ports 7301 and 7302 as shown in the README; the automated
 demo and tests use ephemeral ports to avoid collisions.
 
 This is a local architecture prototype, not a distributed or secure network.
-The next designs would need a threat model, identity/authenticated channels,
-routing semantics, robust resource quotas and UI interaction before any broader
+Node identities and an authenticated TLS channel exist for localhost
+([ynp-tls.md](ynp-tls.md)); routing semantics, robust resource quotas, trust
+distribution and browser integration would still be needed before any broader
 network use. No existing web engine, markup translation or script runtime is
 part of the architecture.

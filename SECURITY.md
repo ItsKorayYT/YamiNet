@@ -1,9 +1,11 @@
 # Experimental security status
 
-YamiNet 0.1 is **not secure for sensitive use**. It has no connection
-authentication, encryption, anonymity or protection against a malicious local
-user. Nodes can have persistent signing identities (below), but signatures only
-attribute metadata to a key. Every localhost peer and every received document must be
+YamiNet 0.1 is **not secure for sensitive use**. It has no anonymity and no
+protection against a malicious local user. The default `ynp://` transport, and
+everything the browser fetches, is plaintext and unauthenticated. Nodes can have
+persistent signing identities (below), and an experimental TLS 1.3 transport
+(below) authenticates a node against a pinned node ID; neither has been
+independently reviewed. Every localhost peer and every received document must be
 considered untrusted. Do not put private documents, credentials or personal data
 in this prototype. Do not expose it through port forwarding or a public proxy.
 
@@ -44,14 +46,27 @@ owner-only (0600) and lax permissions are refused; on Windows it inherits its
 directory's ACL and is not checked. Secret keys are never printed, logged or
 transmitted, and `node.key` is ignored by Git.
 
-Authenticated transport, encryption, key rotation and revocation, and anonymous
-routing require separate versioned designs, explicit peer-verification
-semantics and independent review. Merely replacing TCP does not establish
-anonymity.
+The experimental TLS transport (`ynp-tls`, `serve-dir --tls`, `ynps://` URLs)
+carries unchanged YNP frames inside TLS 1.3 from rustls, with Ed25519
+certificates self-signed by the node identity key and valid for 24 hours. A
+client accepts only the node ID it was given before connecting and refuses
+other identities, invalid, altered or expired certificates, copied certificates
+without the key, and tampered traffic. TLS 1.2, resumption, early data and
+plaintext fallback are disabled. Listeners and clients remain loopback-only.
+The node key signs TLS messages only through a format-checked API that cannot
+produce a signature over YamiNet metadata. Clients are not authenticated; there
+is no revocation or key rotation, so a stolen `node.key` impersonates its node
+indefinitely; and which node ID to trust is still learned out of band. The
+threat model and limitations are in
+[docs/specs/v0.1/ynp-tls.md](docs/specs/v0.1/ynp-tls.md).
 
-The desktop UI is not a new trust boundary or a secure transport. Its glass
-status indicators describe the UI and navigation state, not peer authentication
-or encrypted connectivity. Requests run on bounded background workers; stale
+Key rotation and revocation, client authentication, LAN or internet exposure
+and anonymous routing require separate versioned designs and independent
+review. Encrypting a connection does not establish anonymity.
+
+The desktop UI is not a new trust boundary or a secure transport, and it does
+not use the TLS transport. Its glass status indicators describe the UI and
+navigation state, not peer authentication or encrypted connectivity. Requests run on bounded background workers; stale
 responses are discarded using tab identity and navigation generation. This
 prevents navigation races but does not authenticate the responding peer or
 guarantee cancellation of a request already in progress.

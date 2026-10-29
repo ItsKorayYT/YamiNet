@@ -5,10 +5,12 @@ YSL is presentation, YNP carries documents, and Yami Render performs native
 layout and software rasterization. Yami Browser now includes a native desktop
 interface with antialiased typography, tabs and an aqua glass theme.
 
-**Not secure for sensitive use.** Networking is plaintext, unauthenticated and
-restricted to numeric loopback IP addresses. Privacy is a design goal, not a
-security guarantee. Nodes can have persistent Ed25519 identities that sign site
-metadata, but there is no encryption, transport authentication or anonymity.
+**Not secure for sensitive use.** Networking is restricted to numeric loopback
+IP addresses. Privacy is a design goal, not a security guarantee. Nodes can
+have persistent Ed25519 identities that sign site metadata. An experimental
+TLS 1.3 transport encrypts YNP and authenticates a node against a node ID the
+client trusts in advance; the original `ynp://` transport and the browser
+remain plaintext and unauthenticated. There is no anonymity.
 
 ## Run
 
@@ -126,21 +128,43 @@ secret key stays in a per-user directory and is never printed or sent. See the
 [identity format and security limitations](docs/specs/v0.1/identity.md),
 including the Windows file-permission limitation.
 
+## Authenticated, encrypted connections (TLS 1.3)
+
+A node with an identity can serve its site over TLS 1.3 instead of plaintext.
+The node proves its persistent node identity in the handshake, and a client
+connects only to the node ID it was given in the `ynps://` URL:
+
+```sh
+cargo run -p yami-node -- tls-demo ./demo-ids/one ./demo-ids/two
+cargo run -p yami-node -- serve-dir 127.0.0.1:7443 sites/alice --identity ./demo-ids/alice --tls
+cargo run -p yami-node -- fetch ynps://<node-id>@127.0.0.1:7443/home
+```
+
+`tls-demo` runs two nodes with different persistent identities that fetch each
+other's document over TLS, and shows that a client expecting one node refuses
+the other. A `fetch` with the wrong node ID fails without printing anything.
+YNP frames are unchanged inside TLS, there is no plaintext fallback, and
+listeners stay on loopback addresses. The desktop browser does not use TLS yet.
+Keep demo identity directories out of commits; they hold secret keys. See the
+[TLS transport, threat model and limitations](docs/specs/v0.1/ynp-tls.md).
+
 ## Workspace
 
 | Package | Responsibility |
 | --- | --- |
 | `ylang` | Bounded document parser, typed AST, byte spans and line/column errors |
 | `ysl` | Bounded original style parser and typed presentation settings |
-| `ynp` | Binary frame codec, strict limits, transport traits, loopback TCP client/listener |
+| `ynp` | Binary frame codec, strict limits, transport traits, legacy plaintext loopback TCP client/listener |
+| `ynp-tls` | YNP over TLS 1.3 (rustls), authenticated against a pinned node ID, loopback only |
 | `yami-render` | Original terminal/bitmap renderer plus shaped native document layout and antialiased text |
 | `yami-browser` | Native desktop tabs/navigation and preserved terminal/PPM document tools |
 | `yami-identity` | Persistent Ed25519 node identities, node IDs, domain-separated metadata signatures |
-| `yami-node` | Directory-backed multi-page sites, in-memory document server, fetch client, identity CLI and two-node demo |
+| `yami-node` | Directory-backed multi-page sites, in-memory document server, fetch client, identity CLI and two-node demos |
 
 Versioned normative drafts: [YLang](docs/specs/v0.1/ylang.md),
 [YSL](docs/specs/v0.1/ysl.md), [YNP](docs/specs/v0.1/ynp.md),
-[node identity](docs/specs/v0.1/identity.md)
+[node identity](docs/specs/v0.1/identity.md),
+[YNP over TLS](docs/specs/v0.1/ynp-tls.md)
 and [rendering and architecture](docs/specs/v0.1/architecture.md).
 See [SECURITY.md](SECURITY.md) for the experimental trust boundary.
 
@@ -168,6 +192,10 @@ Identity tests cover persistence across restarts, refusal to overwrite or
 silently replace keys, corrupted and mismatched key files, node ID checksums,
 valid signatures, modified content, wrong keys, purpose separation, site
 signing through the CLI, and that secret keys never appear in output.
+TLS tests cover pinned fetches, wrong identities, expired and altered
+certificates, copied certificates, tampering in transit, maximum-size
+documents, no plaintext fallback, failed handshakes, reconnection and restarts,
+and the two-node CLI demonstration.
 Unit tests cover parser locations and limits, nested ASTs, wrapping and pixels,
 golden wire bytes, all truncated prefixes of representative frames, malformed
 headers and payload lengths, Unicode, size boundaries and response correlation.
@@ -186,10 +214,12 @@ to uppercase and unsupported characters to a box; this limitation does not
 describe the desktop font renderer. Oversized layouts and bitmaps fail with
 an error rather than allocating without bounds.
 
-No peer discovery, distributed lookup, authenticated connections, encrypted channel,
-anonymous routing, production networking, protocol negotiation, multiplexing,
-compression, cache or replay protection. Transport seams are API boundaries,
-not implemented security features. See the versioned specs before extending them.
+No peer discovery, distributed lookup, anonymous routing, production or LAN
+networking, protocol negotiation, multiplexing, compression or cache. The TLS
+transport authenticates nodes only on localhost, only from `yami-node` and the
+`ynp-tls` library, and has no revocation or client authentication. The
+plaintext transport has no authentication, encryption or replay protection.
+See the versioned specs before extending them.
 
 ## Project vision
 

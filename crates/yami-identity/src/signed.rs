@@ -156,6 +156,11 @@ impl fmt::Display for Signature {
         f.write_str(&hex(&self.0))
     }
 }
+impl Signature {
+    pub fn to_bytes(&self) -> [u8; 64] {
+        self.0
+    }
+}
 impl fmt::Debug for Signature {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "Signature({self})")
@@ -180,6 +185,52 @@ impl NodeIdentity {
         Signature(self.signing_key().sign(&message(purpose, body)).to_bytes())
     }
 }
+/// Messages of the TLS transport (`ynp-tls`) that a node key signs directly.
+/// The first byte keeps every signing domain apart: YamiNet metadata messages
+/// start with a `yaminet.` tag (`y`), an X.509 `TBSCertificate` with a DER
+/// SEQUENCE (0x30) and TLS 1.3 CertificateVerify content with 64 spaces (0x20).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TlsMessage {
+    /// The DER `TBSCertificate` of the node's own self-signed certificate.
+    Certificate,
+    /// The content a TLS 1.3 server signs in CertificateVerify (RFC 8446
+    /// section 4.4.3): 64 spaces, the server context string, a zero byte and
+    /// the SHA-256 or SHA-384 handshake transcript hash.
+    ServerCertificateVerify,
+}
+impl TlsMessage {
+    const MAX_CERTIFICATE: usize = 4096;
+    const SERVER_CONTEXT: &'static [u8] = b"TLS 1.3, server CertificateVerify\0";
+    fn check(self, message: &[u8]) -> Result<()> {
+        let valid = match self {
+            Self::Certificate => {
+                message.first() == Some(&0x30) && message.len() <= Self::MAX_CERTIFICATE
+            }
+            Self::ServerCertificateVerify => {
+                message.len() > 64 && {
+                    let (padding, rest) = message.split_at(64);
+                    padding.iter().all(|&byte| byte == b' ')
+                        && rest
+                            .strip_prefix(Self::SERVER_CONTEXT)
+                            .is_some_and(|hash| matches!(hash.len(), 32 | 48))
+                }
+            }
+        };
+        valid.then_some(()).ok_or(Error::Malformed(
+            "not a message of the requested TLS format",
+        ))
+    }
+}
+
+impl NodeIdentity {
+    /// Sign a TLS transport message. Anything not in the stated format is
+    /// refused, so this cannot produce a signature over YamiNet metadata.
+    pub fn sign_tls(&self, format: TlsMessage, message: &[u8]) -> Result<Signature> {
+        format.check(message)?;
+        Ok(Signature(self.signing_key().sign(message).to_bytes()))
+    }
+}
+
 impl NodeId {
     /// Strict verification: rejects non-canonical and small-order encodings.
     pub fn verify<T: Signable>(&self, value: &T, signature: &Signature) -> Result<()> {
@@ -296,6 +347,44 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn tls_formats_cannot_overlap_metadata_messages() {
+        for purpose in Purpose::ALL {
+            assert!(purpose.tag().starts_with(b"yaminet."));
+        }
+        let identity = NodeIdentity::generate().unwrap();
+        let mut verify = vec![b' '; 64];
+        verify.extend_from_slice(TlsMessage::SERVER_CONTEXT);
+        for hash in [32, 48] {
+            let mut message = verify.clone();
+            message.resize(verify.len() + hash, 7);
+            let signature = identity
+                .sign_tls(TlsMessage::ServerCertificateVerify, &message)
+                .unwrap();
+            let key = identity.id().key().unwrap();
+            let signature = ed25519_dalek::Signature::from_bytes(&signature.to_bytes());
+            assert!(key.verify_strict(&message, &signature).is_ok());
+        }
+        let mut client = vec![b' '; 64];
+        client.extend_from_slice(b"TLS 1.3, client CertificateVerify\0");
+        client.resize(client.len() + 32, 0);
+        let mut short = verify.clone();
+        short.resize(verify.len() + 20, 0);
+        let tagged = message(Purpose::SiteManifest, &[0x30; 40]);
+        for bad in [&client, &short, &verify, &tagged, &vec![b' '; 128]] {
+            assert!(identity
+                .sign_tls(TlsMessage::ServerCertificateVerify, bad)
+                .is_err());
+            assert!(identity.sign_tls(TlsMessage::Certificate, bad).is_err());
+        }
+        assert!(identity
+            .sign_tls(TlsMessage::Certificate, &[0x30, 0])
+            .is_ok());
+        assert!(identity
+            .sign_tls(TlsMessage::Certificate, &[0x30; 4097])
+            .is_err());
     }
 
     #[test]
