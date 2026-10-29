@@ -5,9 +5,13 @@
 use std::{
     collections::VecDeque,
     io,
+    net::SocketAddr,
     sync::{mpsc, Arc, Condvar, Mutex},
     thread,
 };
+use yami_identity::NodeId;
+use ynp::{DocumentData, Protection, Transport};
+use ynp_tls::{IdentityMismatch, TlsTransport};
 
 pub const MAX_TABS: usize = 12;
 const MAX_HISTORY: usize = 64;
@@ -19,19 +23,27 @@ pub enum Location {
     Home,
     Welcome,
     About,
+    /// Legacy plaintext YNP on loopback.
     Ynp(String),
+    /// YNP over TLS 1.3 to the node ID named in the address.
+    Ynps(String),
 }
 impl Location {
     pub fn parse(input: &str) -> Result<Self, String> {
         let address = input.trim();
+        let unusable = |error: io::Error| {
+            format!("Cannot open this address: {error}. Use ynps://node-id@address:port/key, a localhost ynp:// address or local:welcome.")
+        };
         match address {
             "" => Ok(Self::Home),
             "local:welcome" => Ok(Self::Welcome),
             "local:about" => Ok(Self::About),
+            _ if address.starts_with(ynp_tls::SCHEME) => {
+                ynp_tls::parse_url(address).map_err(unusable)?;
+                Ok(Self::Ynps(address.into()))
+            }
             _ => {
-                ynp::parse_url(address).map_err(|error| {
-                    format!("Cannot open this address: {error}. Use a localhost ynp:// address or local:welcome.")
-                })?;
+                ynp::parse_url(address).map_err(unusable)?;
                 Ok(Self::Ynp(address.into()))
             }
         }
@@ -41,7 +53,7 @@ impl Location {
             Self::Home => String::new(),
             Self::Welcome => "local:welcome".into(),
             Self::About => "local:about".into(),
-            Self::Ynp(address) => address.clone(),
+            Self::Ynp(address) | Self::Ynps(address) => address.clone(),
         }
     }
     fn label(&self) -> &str {
@@ -49,15 +61,28 @@ impl Location {
             Self::Home => "New tab",
             Self::Welcome => "Welcome to YamiNet",
             Self::About => "About YamiNet",
-            Self::Ynp(_) => "YNP document",
+            Self::Ynp(_) | Self::Ynps(_) => "YNP document",
         }
     }
+}
+
+/// How the page on screen reached the browser, taken from the connection
+/// that delivered it rather than from the address that was typed.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Security {
+    /// Compiled into the browser; no network.
+    BuiltIn,
+    /// Legacy loopback YNP: not encrypted, sender not verified.
+    Plaintext,
+    /// TLS 1.3 in which the node proved this node ID before any request.
+    Verified(NodeId),
 }
 
 #[derive(Debug, Clone)]
 pub struct Page {
     pub document: ylang::Document,
     pub style: ysl::Stylesheet,
+    pub security: Security,
 }
 #[derive(Debug)]
 pub enum PageState {
@@ -101,6 +126,32 @@ impl Tab {
             PageState::Error(_) => "Could not open page",
             PageState::Home => self.location().label(),
         }
+    }
+    /// Only a loaded page has a connection to describe.
+    pub fn security(&self) -> Option<&Security> {
+        match &self.state {
+            PageState::Ready(page) => Some(&page.security),
+            _ => None,
+        }
+    }
+    /// A link `ynp://A/key` on a page loaded from `ynps://N@A/...` names the
+    /// same node, so it opens as `ynps://N@A/key` with the same pinned
+    /// identity. YLang links are always written `ynp://`; this keeps a LAN
+    /// site navigable without ever sending a plaintext request. Every other
+    /// link is used exactly as written.
+    pub fn resolve_link(&self, target: &str) -> String {
+        if let (Location::Ynps(current), Some(rest)) =
+            (self.location(), target.strip_prefix("ynp://"))
+        {
+            if let (Ok((id, address, _)), Ok((linked, key))) =
+                (ynp_tls::parse_url(current), ynp::parse_endpoint(rest))
+            {
+                if linked == address {
+                    return ynp_tls::format_url(&id, address, &key);
+                }
+            }
+        }
+        target.into()
     }
     pub fn can_back(&self) -> bool {
         self.cursor > 0
@@ -204,6 +255,11 @@ impl Browser {
         };
         self.navigate_location(location, loader);
         Ok(())
+    }
+    /// Open a link from the active page (see [`Tab::resolve_link`]).
+    pub fn follow(&mut self, target: &str, loader: &Loader) -> Result<(), String> {
+        let address = self.active().resolve_link(target);
+        self.navigate(&address, loader)
     }
     pub fn navigate_location(&mut self, location: Location, loader: &Loader) {
         let tab = self.active_mut();
@@ -388,15 +444,17 @@ impl Drop for Loader {
     }
 }
 fn load_page(location: &Location) -> Result<Page, String> {
-    let (source, style) = match location {
+    let (source, style, security) = match location {
         Location::Home => return Err("The start page does not require document loading.".into()),
         Location::Welcome => (
             include_str!("../../../examples/welcome.ylang").to_string(),
             include_str!("../../../examples/default.ysl").to_string(),
+            Security::BuiltIn,
         ),
         Location::About => (
             include_str!("../../../examples/about.ylang").to_string(),
             include_str!("../../../examples/default.ysl").to_string(),
+            Security::BuiltIn,
         ),
         Location::Ynp(address) => {
             // Validate again at the transport boundary even when constructed
@@ -405,7 +463,11 @@ fn load_page(location: &Location) -> Result<Page, String> {
             let data = ynp::fetch(&ynp::LoopbackTcp, endpoint, &key).map_err(|error| {
                 format!("The local node could not return this document: {error}")
             })?;
-            (data.source, data.style)
+            (data.source, data.style, Security::Plaintext)
+        }
+        Location::Ynps(address) => {
+            let (data, id) = fetch_verified(address)?;
+            (data.source, data.style, Security::Verified(id))
         }
     };
     let document = ylang::parse(&source).map_err(|error| format!("YLang {error}"))?;
@@ -414,7 +476,42 @@ fn load_page(location: &Location) -> Result<Page, String> {
     } else {
         ysl::parse(&style).map_err(|error| format!("YSL {error}"))?
     };
-    Ok(Page { document, style })
+    Ok(Page {
+        document,
+        style,
+        security,
+    })
+}
+/// Fetch a `ynps://` address from exactly the node ID it names. Nothing is
+/// requested unless the TLS 1.3 handshake proved that identity, and a failed
+/// handshake is reported, never retried in plaintext.
+pub fn fetch_verified(address: &str) -> Result<(DocumentData, NodeId), String> {
+    let (id, endpoint, key) = ynp_tls::parse_url(address).map_err(|error| error.to_string())?;
+    let transport = TlsTransport::new(id).map_err(|error| error.to_string())?;
+    let mut connection = transport
+        .connect(endpoint)
+        .map_err(|error| handshake_failure(&id, endpoint, &error))?;
+    if connection.protection() != Protection::Tls13PinnedServer {
+        return Err(
+            "Authentication failed: the connection is not TLS 1.3 to a pinned node.".into(),
+        );
+    }
+    let data = ynp::request(&mut *connection, &key)
+        .map_err(|error| format!("Verified node {id} could not return this document: {error}"))?;
+    Ok((data, id))
+}
+fn handshake_failure(id: &NodeId, endpoint: SocketAddr, error: &io::Error) -> String {
+    match error
+        .get_ref()
+        .and_then(|inner| inner.downcast_ref::<IdentityMismatch>())
+    {
+        Some(mismatch) => format!(
+            "Authentication failed at {endpoint}: {mismatch}. Nothing was requested from it."
+        ),
+        None => format!(
+            "Could not open an authenticated TLS 1.3 connection to node {id} at {endpoint}: {error}. Nothing was requested, and YNP never falls back to plaintext."
+        ),
+    }
 }
 
 #[cfg(test)]
@@ -426,6 +523,7 @@ mod tests {
         Page {
             document: ylang::parse(&format!("@page 0.1\n  title {title}\n= {title}")).unwrap(),
             style: ysl::Stylesheet::default(),
+            security: Security::BuiltIn,
         }
     }
     fn loader() -> Loader {
@@ -646,6 +744,8 @@ mod tests {
             .navigate(&format!("ynp://{a}/home"), &loader)
             .unwrap();
         assert_eq!(ready_title(&mut browser, &loader), "Alice home");
+        // Plaintext pages are never described as verified.
+        assert_eq!(browser.active().security(), Some(&Security::Plaintext));
         for expected in ["Alice about", "Bob home", "Alice home"] {
             let PageState::Ready(page) = &browser.active().state else {
                 unreachable!()
@@ -699,5 +799,249 @@ mod tests {
         }));
         assert!(browser.back(&loader));
         assert!(matches!(browser.active().state, PageState::Home));
+    }
+
+    fn node_id() -> NodeId {
+        *yami_identity::NodeIdentity::generate().unwrap().id()
+    }
+    #[test]
+    fn ynps_addresses_are_validated_and_plaintext_never_leaves_loopback() {
+        let id = node_id();
+        for address in [
+            format!("ynps://{id}@192.168.1.50:7443/home"),
+            format!("ynps://{id}@10.0.0.7:7443/home"),
+            format!("ynps://{id}@127.0.0.1:7443/home"),
+        ] {
+            assert_eq!(
+                Location::parse(&address).unwrap(),
+                Location::Ynps(address.clone())
+            );
+        }
+        for invalid in [
+            "ynps://192.168.1.50:7443/home".to_owned(),
+            format!(
+                "ynps://{}@192.168.1.50:7443/home",
+                id.to_string().to_uppercase()
+            ),
+            format!("ynps://{id}@8.8.8.8:7443/home"),
+            format!("ynps://{id}@0.0.0.0:7443/home"),
+            format!("ynps://{id}@lan-host:7443/home"),
+            format!("ynps://{id}@192.168.1.50:0/home"),
+            format!("ynps://{id}@192.168.1.50:7443/../home"),
+            // A LAN address is reachable only through authenticated TLS.
+            "ynp://192.168.1.50:7443/home".to_owned(),
+        ] {
+            let error = Location::parse(&invalid).unwrap_err();
+            assert!(error.contains("Cannot open this address"), "{invalid}");
+        }
+    }
+    #[test]
+    fn links_on_a_verified_page_stay_on_the_same_pinned_node() {
+        let id = node_id();
+        let mut tab = Tab::new(1);
+        tab.history = vec![Location::Ynps(format!(
+            "ynps://{id}@192.168.1.50:7443/home"
+        ))];
+        assert_eq!(
+            tab.resolve_link("ynp://192.168.1.50:7443/about"),
+            format!("ynps://{id}@192.168.1.50:7443/about")
+        );
+        // Another node, another port or a loopback node keeps its own address,
+        // which for a LAN address means it is refused rather than downgraded.
+        for other in [
+            "ynp://192.168.1.51:7443/about",
+            "ynp://192.168.1.50:7444/about",
+            "ynp://127.0.0.1:7301/about",
+            "ynp://192.168.1.50:7443/../about",
+        ] {
+            assert_eq!(tab.resolve_link(other), other);
+        }
+        // Plaintext pages never produce verified addresses.
+        tab.history = vec![Location::Ynp("ynp://127.0.0.1:7443/home".into())];
+        assert_eq!(
+            tab.resolve_link("ynp://127.0.0.1:7443/about"),
+            "ynp://127.0.0.1:7443/about"
+        );
+    }
+
+    /// A private IPv4 address of this machine, so browser tests reach a real
+    /// LAN listener when one exists; loopback otherwise.
+    fn test_address() -> std::net::IpAddr {
+        if let Ok(text) = std::env::var("YAMINET_TEST_LAN_ADDRESS") {
+            return text.parse().unwrap();
+        }
+        // Connecting a UDP socket sends nothing; it only selects a route.
+        std::net::UdpSocket::bind("0.0.0.0:0")
+            .and_then(|socket| {
+                socket.connect("192.168.0.1:9")?;
+                socket.local_addr()
+            })
+            .map(|local| local.ip())
+            .ok()
+            .filter(|ip| ynp_tls::is_private_lan(*ip))
+            .unwrap_or_else(|| {
+                eprintln!("no private IPv4 address; using loopback for TLS browser tests");
+                [127, 0, 0, 1].into()
+            })
+    }
+    /// Serve `dir` over TLS as a fresh identity, on the LAN when possible.
+    fn tls_site(dir: &std::path::Path) -> (SocketAddr, NodeId) {
+        let identity = Arc::new(yami_identity::NodeIdentity::generate().unwrap());
+        let id = *identity.id();
+        let ip = test_address();
+        let listener = if ip.is_loopback() {
+            ynp_tls::TlsListener::bind((ip, 0).into(), identity)
+        } else {
+            ynp_tls::TlsListener::bind_lan((ip, 0).into(), identity)
+        }
+        .unwrap();
+        let address = listener.local_addr().unwrap();
+        let site = yami_node::Site::open(dir).unwrap();
+        thread::spawn(move || yami_node::serve_concurrently(&listener, &site, 2, &|_| {}));
+        (address, id)
+    }
+    fn site_dir(name: &str) -> std::path::PathBuf {
+        let dir =
+            std::env::temp_dir().join(format!("yaminet-browser-tls-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+    fn write_page(dir: &std::path::Path, key: &str, title: &str, link: &str) {
+        let source =
+            format!("@page 0.1\n  title {title}\n= {title}\n:: Links\n  > {link} | Next\n");
+        std::fs::write(dir.join(format!("{key}.ylang")), source).unwrap();
+    }
+
+    /// The production loader against a real TLS node: typed address, links
+    /// written as `ynp://` on the node's own address, history, reload, tabs.
+    #[test]
+    fn navigates_a_site_over_verified_tls() {
+        let dir = site_dir("navigate");
+        let (address, id) = tls_site(&dir);
+        write_page(
+            &dir,
+            "home",
+            "Secure home",
+            &format!("ynp://{address}/about"),
+        );
+        write_page(
+            &dir,
+            "about",
+            "Secure about",
+            &format!("ynp://{address}/home"),
+        );
+        let loader = Loader::new(Arc::new(|| {})).unwrap();
+        let mut browser = Browser::new();
+        let home = ynp_tls::format_url(&id, address, "home");
+        browser.navigate(&home, &loader).unwrap();
+        assert_eq!(ready_title(&mut browser, &loader), "Secure home");
+        assert_eq!(browser.active().security(), Some(&Security::Verified(id)));
+
+        let PageState::Ready(page) = &browser.active().state else {
+            unreachable!()
+        };
+        let link = links(&page.document.nodes).remove(0);
+        assert_eq!(link, format!("ynp://{address}/about"));
+        browser.follow(&link, &loader).unwrap();
+        assert_eq!(ready_title(&mut browser, &loader), "Secure about");
+        assert_eq!(
+            browser.active().location(),
+            &Location::Ynps(ynp_tls::format_url(&id, address, "about"))
+        );
+        assert_eq!(browser.active().security(), Some(&Security::Verified(id)));
+
+        assert!(browser.back(&loader));
+        assert_eq!(ready_title(&mut browser, &loader), "Secure home");
+        write_page(
+            &dir,
+            "home",
+            "Secure home edited",
+            &format!("ynp://{address}/about"),
+        );
+        browser.reload(&loader);
+        assert_eq!(ready_title(&mut browser, &loader), "Secure home edited");
+        assert!(browser.forward(&loader));
+        assert_eq!(ready_title(&mut browser, &loader), "Secure about");
+        assert_eq!(browser.active().history.len(), 3);
+
+        // A second tab loads independently; closing it returns to the first.
+        assert!(browser.open_tab());
+        browser.navigate(&home, &loader).unwrap();
+        assert_eq!(ready_title(&mut browser, &loader), "Secure home edited");
+        browser.close_tab(1);
+        assert_eq!(browser.active().title(), "Secure about");
+
+        browser
+            .navigate(&ynp_tls::format_url(&id, address, "missing"), &loader)
+            .unwrap();
+        wait(&mut browser, &loader);
+        assert!(
+            matches!(&browser.active().state, PageState::Error(message) if message.contains("not found"))
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn failed_authentication_is_shown_and_the_browser_keeps_working() {
+        let dir = site_dir("refused");
+        let (address, id) = tls_site(&dir);
+        write_page(
+            &dir,
+            "home",
+            "Pinned home",
+            &format!("ynp://{address}/home"),
+        );
+        let loader = Loader::new(Arc::new(|| {})).unwrap();
+        let mut browser = Browser::new();
+
+        // The node at this address is not the one named in the URL.
+        let expected = node_id();
+        let impostor = ynp_tls::format_url(&expected, address, "home");
+        browser.navigate(&impostor, &loader).unwrap();
+        wait(&mut browser, &loader);
+        let PageState::Error(message) = &browser.active().state else {
+            panic!("an unexpected identity loaded a page")
+        };
+        assert!(message.starts_with("Authentication failed"), "{message}");
+        assert!(message.contains(&expected.to_string()), "{message}");
+        assert!(message.contains(&id.to_string()), "{message}");
+        assert_eq!(browser.active().security(), None);
+        assert_eq!(browser.active().title(), "Could not open page");
+
+        // Reload checks again and fails again; nothing falls back.
+        browser.reload(&loader);
+        wait(&mut browser, &loader);
+        assert!(matches!(browser.active().state, PageState::Error(_)));
+
+        // A plaintext node at a ynps:// address is an error, never plaintext.
+        let legacy = ynp::LocalListener::bind("127.0.0.1:0".parse().unwrap()).unwrap();
+        let legacy_address = legacy.local_addr().unwrap();
+        let site = yami_node::Site::open(&dir).unwrap();
+        thread::spawn(move || yami_node::serve_concurrently(&legacy, &site, 1, &|_| {}));
+        browser
+            .navigate(&ynp_tls::format_url(&id, legacy_address, "home"), &loader)
+            .unwrap();
+        wait(&mut browser, &loader);
+        assert!(
+            matches!(&browser.active().state, PageState::Error(message) if message.contains("never falls back to plaintext"))
+        );
+        assert_eq!(browser.active().security(), None);
+
+        // The right node ID at the same address then works normally.
+        browser
+            .navigate(&ynp_tls::format_url(&id, address, "home"), &loader)
+            .unwrap();
+        assert_eq!(ready_title(&mut browser, &loader), "Pinned home");
+        assert_eq!(browser.active().security(), Some(&Security::Verified(id)));
+        assert!(browser.back(&loader));
+        wait(&mut browser, &loader);
+        assert!(matches!(browser.active().state, PageState::Error(_)));
+        assert!(browser.forward(&loader));
+        assert_eq!(ready_title(&mut browser, &loader), "Pinned home");
+        browser.navigate("local:welcome", &loader).unwrap();
+        wait(&mut browser, &loader);
+        assert_eq!(browser.active().security(), Some(&Security::BuiltIn));
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

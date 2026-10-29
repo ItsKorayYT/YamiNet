@@ -5,7 +5,7 @@ use std::{
 };
 use ynp::LoopbackTcp;
 
-const USAGE: &str = "yami-browser [document.ylang | ynp://loopback-IP:port/key] [--style theme.ysl] [--ppm output.ppm]\nWithout a source, opens the built-in sample. Links are displayed, never automatically fetched.\nEXPERIMENTAL: plaintext and unauthenticated; not secure for sensitive use.";
+const USAGE: &str = "yami-browser [document.ylang | ynp://loopback-IP:port/key | ynps://node-id@IP:port/key] [--style theme.ysl] [--ppm output.ppm]\nWithout a source, opens the built-in sample. Links are displayed, never automatically fetched.\nEXPERIMENTAL: ynp:// is plaintext and unauthenticated; ynps:// is TLS 1.3 to the node ID in the address. Neither is reviewed or anonymous.";
 fn read_file(path: &str, limit: usize) -> io::Result<String> {
     let mut text = String::new();
     File::open(path)?
@@ -40,11 +40,26 @@ pub fn run(arguments: Vec<String>) -> Result<(), Box<dyn Error>> {
             _ => return Err(USAGE.into()),
         }
     }
-    eprintln!("{}", ynp::WARNING);
+    let verified = source
+        .as_deref()
+        .is_some_and(|url| url.starts_with(ynp_tls::SCHEME));
+    eprintln!(
+        "{}",
+        if verified {
+            ynp_tls::WARNING
+        } else {
+            ynp::WARNING
+        }
+    );
     let (text, remote_style) = match source.as_deref() {
         Some(url) if url.starts_with("ynp://") => {
             let (address, key) = ynp::parse_url(url)?;
             let data = ynp::fetch(&LoopbackTcp, address, &key)?;
+            (data.source, Some(data.style))
+        }
+        Some(url) if verified => {
+            let (data, id) = crate::model::fetch_verified(url)?;
+            eprintln!("Verified node {id} over TLS 1.3");
             (data.source, Some(data.style))
         }
         Some(path) if path.contains("://") => return Err("only YNP URLs are supported".into()),

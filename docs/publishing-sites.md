@@ -1,8 +1,10 @@
 # Creating and publishing a YamiNet site
 
-**EXPERIMENTAL: plaintext, unauthenticated, localhost only. Not secure for
-sensitive use.** "Publishing" here means serving a directory from a node on
-your own machine. Nothing is reachable from other computers.
+**EXPERIMENTAL. Not secure for sensitive use.** "Publishing" here means
+serving a directory from a node on your own machine. Plaintext nodes are
+reachable from this computer only. A TLS node started with `--lan` is
+reachable from other computers on your private network (see below); nothing
+is reachable from the internet.
 
 A YamiNet site is a directory of YLang pages plus one shared YSL stylesheet.
 `yami-node serve-dir` serves every page in that directory over YNP.
@@ -116,8 +118,22 @@ cargo run -p yami-node -- serve-dir 127.0.0.1:7443 sites/alice --identity <ident
 cargo run -p yami-node -- fetch ynps://yn1-...@127.0.0.1:7443/home
 ```
 
-Links inside pages stay `ynp://` addresses and the browser does not open
-`ynps://` URLs yet. See [YNP over TLS](specs/v0.1/ynp-tls.md).
+Open these URLs in Yami Browser's address field, or with
+`cargo run -p yami-browser -- --desktop ynps://yn1-...@127.0.0.1:7443/home`.
+
+To let other computers on your private network read the site, serve it on
+this computer's private IPv4 address with `--lan` (which requires `--tls`):
+
+```sh
+cargo run -p yami-node -- serve-dir 192.168.1.50:7443 sites/alice --identity <identity-directory> --tls --lan
+```
+
+Links inside pages stay `ynp://` addresses. On a page opened over `ynps://`,
+the browser opens links to the node's own address and port as `ynps://` with
+the same node ID, so a LAN site links its pages with that address, for example
+`> ynp://192.168.1.50:7443/about | About`. See [LAN testing](lan-testing.md)
+for the firewall and a two-computer walkthrough, and
+[YNP over TLS](specs/v0.1/ynp-tls.md) for the threat model.
 
 ## Two sample sites
 

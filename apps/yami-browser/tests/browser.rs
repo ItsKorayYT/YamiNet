@@ -82,3 +82,35 @@ fn browser_opens_pages_from_a_directory_site_node() {
     assert!(!output.status.success());
     assert!(String::from_utf8_lossy(&output.stderr).contains("not found"));
 }
+#[test]
+fn opens_ynps_addresses_only_from_the_named_node() {
+    use std::sync::Arc;
+    let identity = Arc::new(yami_identity::NodeIdentity::generate().unwrap());
+    let id = *identity.id();
+    let listener = ynp_tls::TlsListener::bind("127.0.0.1:0".parse().unwrap(), identity).unwrap();
+    let address = listener.local_addr().unwrap();
+    let site = Site::open(concat!(env!("CARGO_MANIFEST_DIR"), "/../../sites/alice")).unwrap();
+    thread::spawn(move || serve_concurrently(&listener, &site, 2, &|_| {}));
+    let open = |url: String| {
+        Command::new(env!("CARGO_BIN_EXE_yami-browser"))
+            .arg(url)
+            .output()
+            .unwrap()
+    };
+    let output = open(ynp_tls::format_url(&id, address, "projects"));
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(String::from_utf8_lossy(&output.stdout).contains("Alice's Projects"));
+    assert!(String::from_utf8_lossy(&output.stderr).contains(&format!("Verified node {id}")));
+
+    let other = *yami_identity::NodeIdentity::generate().unwrap().id();
+    let output = open(ynp_tls::format_url(&other, address, "projects"));
+    assert!(!output.status.success());
+    assert!(output.stdout.is_empty());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("Authentication failed"), "{stderr}");
+    assert!(!stderr.contains("Verified node"), "{stderr}");
+}

@@ -20,15 +20,17 @@ const USAGE: &str = "yami-node demo
 yami-node tls-demo <identity-directory-1> <identity-directory-2>
 yami-node serve <loopback-IP:port> <key> <document.ylang> <style.ysl>
 yami-node serve-dir <loopback-IP:port> <site-directory> [--workers 1..32] [--identity <identity-directory> [--tls]]
+yami-node serve-dir <private-LAN-IPv4:port> <site-directory> --identity <identity-directory> --tls --lan [--workers 1..32]
 yami-node fetch <loopback-IP:port> <key>
-yami-node fetch <ynps://node-id@loopback-IP:port/key>
+yami-node fetch <ynps://node-id@loopback-or-private-LAN-IP:port/key>
 yami-node identity new [--dir <identity-directory>]
 yami-node identity show [--dir <identity-directory>]
 yami-node identity inspect <node-id>
 yami-node identity sign-site <site-directory> [--dir <identity-directory>]
 yami-node identity verify-site <site-directory> <node-id>
 EXPERIMENTAL: ynp:// and commands without --tls are plaintext and unauthenticated.
-ynps://, --tls and tls-demo use TLS 1.3 to a pinned node ID. Neither is reviewed or anonymous.";
+ynps://, --tls and tls-demo use TLS 1.3 to a pinned node ID. Neither is reviewed or anonymous.
+--lan listens on one private IPv4 address (10/8, 172.16/12, 192.168/16) and requires --tls.";
 const IDENTITY_NOTE: &str = "EXPERIMENTAL: node signatures attribute metadata to a key. They do not encrypt, hide or anonymize anything.";
 #[cfg(unix)]
 const PROTECTION: &str = "owner-only permissions (0600), checked on every load";
@@ -176,6 +178,18 @@ fn tls_demo(dir_one: &Path, dir_two: &Path) -> Result<()> {
 }
 const DEFAULT_WORKERS: usize = 4;
 fn serve_dir(address: SocketAddr, root: &str, options: ServeOptions) -> Result<()> {
+    if !options.lan && !address.ip().is_loopback() {
+        return Err(format!(
+            "only loopback addresses are allowed without --lan; serving on {address} needs --identity <identity-directory> --tls --lan"
+        )
+        .into());
+    }
+    if options.lan && !ynp_tls::is_private_lan(address.ip()) {
+        return Err(format!(
+            "--lan needs one specific private IPv4 address (10.x.x.x, 172.16-31.x.x or 192.168.x.x); {address} is not one, and 0.0.0.0 is never allowed"
+        )
+        .into());
+    }
     let site = open_site(root)?;
     let mut identity = None;
     if let Some(dir) = &options.identity {
@@ -192,9 +206,19 @@ fn serve_dir(address: SocketAddr, root: &str, options: ServeOptions) -> Result<(
     match identity {
         Some(identity) if options.tls => {
             let id = *identity.id();
-            let listener = TlsListener::bind(address, identity)?;
+            let listener = if options.lan {
+                TlsListener::bind_lan(address, identity)?
+            } else {
+                TlsListener::bind(address, identity)?
+            };
             let address = listener.local_addr()?;
             eprintln!("Serving site {root} via YNP over TLS 1.3 on {address} as {id}");
+            if options.lan {
+                eprintln!(
+                    "LAN: computers on this private network can connect to {address}; nothing listens on other interfaces. Allow inbound TCP port {} for Private networks only.",
+                    address.port()
+                );
+            }
             serve_site(&listener, &site, options.workers, &|key| {
                 ynp_tls::format_url(&id, address, key)
             })
@@ -224,6 +248,9 @@ fn serve_site(
     for key in &pages {
         eprintln!("  {}", url(key));
     }
+    if let Some(start) = pages.iter().find(|key| *key == "home").or(pages.first()) {
+        eprintln!("Open in Yami Browser: {}", url(start));
+    }
     serve_concurrently(listener, site, workers, &|outcome| match outcome {
         Ok(Reply::Document(key)) => eprintln!("Served {key}"),
         Ok(Reply::NotFound(key)) => eprintln!("NotFound {key}"),
@@ -238,9 +265,10 @@ struct ServeOptions {
     workers: usize,
     identity: Option<PathBuf>,
     tls: bool,
+    lan: bool,
 }
 fn serve_dir_options(options: &[String]) -> Result<ServeOptions> {
-    let (mut workers, mut identity, mut tls) = (None, None, false);
+    let (mut workers, mut identity, mut tls, mut lan) = (None, None, false, false);
     let mut options = options.iter();
     while let Some(flag) = options.next() {
         match flag.as_str() {
@@ -251,8 +279,12 @@ fn serve_dir_options(options: &[String]) -> Result<ServeOptions> {
                 identity = Some(PathBuf::from(options.next().ok_or(USAGE)?))
             }
             "--tls" if !tls => tls = true,
+            "--lan" if !lan => lan = true,
             _ => return Err(USAGE.into()),
         }
+    }
+    if lan && !tls {
+        return Err("--lan needs --tls: YNP is never served in plaintext beyond loopback".into());
     }
     if tls && identity.is_none() {
         return Err(
@@ -264,6 +296,7 @@ fn serve_dir_options(options: &[String]) -> Result<ServeOptions> {
         workers: workers.unwrap_or(DEFAULT_WORKERS),
         identity,
         tls,
+        lan,
     })
 }
 fn identity_dir(options: &[String]) -> Result<PathBuf> {

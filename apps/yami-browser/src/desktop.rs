@@ -23,7 +23,7 @@ use yami_render::native::{NativeDocument, TextEngine};
 
 pub fn run(args: Vec<String>) -> Result<(), Box<dyn Error>> {
     if args.len() > 1 {
-        return Err("--desktop accepts at most one localhost YNP address or built-in local:welcome/local:about".into());
+        return Err("--desktop accepts at most one ynps:// address, localhost ynp:// address or built-in local:welcome/local:about".into());
     }
     let event_loop = EventLoop::<()>::with_user_event().build()?;
     let proxy = event_loop.create_proxy();
@@ -34,7 +34,7 @@ pub fn run(args: Vec<String>) -> Result<(), Box<dyn Error>> {
     if let Some(address) = args.first() {
         let _ = app.browser.navigate(address, &app.loader);
     }
-    eprintln!("{}", ynp::WARNING);
+    eprintln!("{}\n{}", ynp::WARNING, ynp_tls::WARNING);
     event_loop.run_app(&mut app)?;
     if let Some(error) = app.fatal {
         return Err(error.into());
@@ -391,8 +391,13 @@ impl Desktop {
             PageState::Home => chrome::home(&mut c, &mut scene, &ui),
             PageState::Loading => {
                 chrome::document_viewport(&mut c, &mut scene, &ui);
+                let verifying = matches!(self.browser.active().location(), Location::Ynps(_));
                 c.text(
-                    "Opening document…",
+                    if verifying {
+                        "Verifying node identity…"
+                    } else {
+                        "Opening document…"
+                    },
                     viewport.x + viewport.w / 2.0 - 60.0,
                     viewport.y + viewport.h / 2.0 - 10.0,
                     200.0,
@@ -742,7 +747,7 @@ impl ApplicationHandler<()> for Desktop {
                 if let Some(action) = self.scene.hit(self.mouse.0, self.mouse.1) {
                     self.act(action);
                 } else if let Some(target) = self.link() {
-                    let _ = self.browser.navigate(&target, &self.loader);
+                    let _ = self.browser.follow(&target, &self.loader);
                     self.clear_focus();
                     self.redraw();
                 } else {
@@ -855,6 +860,98 @@ mod tests {
         assert!(matches!(app.browser.active().state, PageState::Home));
     }
 
+    /// A long page over TLS: the sidebar shows the verified node, the page
+    /// scrolls, and a plaintext page in another tab gets no verified marking.
+    #[test]
+    fn verified_page_shows_the_node_and_scrolls() {
+        let dir = std::env::temp_dir().join(format!("yaminet-desktop-tls-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut source = String::from("@page 0.1\n  title Long secure page\n= Long secure page\n");
+        for line in 0..120 {
+            source.push_str(&format!(
+                "Paragraph {line} of a document fetched over TLS 1.3.\n"
+            ));
+        }
+        std::fs::write(dir.join("long.ylang"), source).unwrap();
+        let identity = Arc::new(yami_identity::NodeIdentity::generate().unwrap());
+        let id = *identity.id();
+        let listener =
+            ynp_tls::TlsListener::bind("127.0.0.1:0".parse().unwrap(), identity).unwrap();
+        let address = listener.local_addr().unwrap();
+        let site = yami_node::Site::open(&dir).unwrap();
+        std::thread::spawn(move || yami_node::serve_concurrently(&listener, &site, 2, &|_| {}));
+
+        let mut app = headless(1440.0, 900.0);
+        frame(&mut app);
+        let pin_y = |app: &Desktop| {
+            app.scene
+                .hits
+                .iter()
+                .find(|hit| hit.action == Action::Navigate("local:welcome"))
+                .unwrap()
+                .rect
+                .y
+        };
+        let home_pins = pin_y(&app);
+        app.browser
+            .navigate(&ynp_tls::format_url(&id, address, "long"), &app.loader)
+            .unwrap();
+        settle(&mut app);
+        assert_eq!(
+            app.browser.active().security(),
+            Some(&crate::model::Security::Verified(id))
+        );
+        frame(&mut app);
+        // The identity block sits between the address field and the pins.
+        assert!(pin_y(&app) > home_pins + 40.0);
+        assert!(app.scroll_limit() > 0.0);
+        app.browser.active_mut().target_scroll = 300.0;
+        for _ in 0..30 {
+            frame(&mut app);
+        }
+        assert!(app.browser.active().scroll > 250.0);
+        // Reload keeps the verified marking; a failure removes it.
+        app.act(Action::Reload);
+        settle(&mut app);
+        assert!(app.browser.active().security().is_some());
+        let other = *yami_identity::NodeIdentity::generate().unwrap().id();
+        app.browser
+            .navigate(&ynp_tls::format_url(&other, address, "long"), &app.loader)
+            .unwrap();
+        settle(&mut app);
+        assert!(matches!(app.browser.active().state, PageState::Error(_)));
+        frame(&mut app);
+        assert_eq!(pin_y(&app), home_pins);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Writes a 1440×900 capture of a page fetched over TLS, showing the
+    /// verified node in the sidebar. Run with `-- --ignored capture_verified`.
+    #[test]
+    #[ignore = "writes target/screenshots/desktop-verified.png"]
+    fn capture_verified() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let identity = Arc::new(yami_identity::NodeIdentity::generate().unwrap());
+        let id = *identity.id();
+        let listener =
+            ynp_tls::TlsListener::bind("127.0.0.1:0".parse().unwrap(), identity).unwrap();
+        let address = listener.local_addr().unwrap();
+        let site = yami_node::Site::open(root.join("sites/alice")).unwrap();
+        std::thread::spawn(move || yami_node::serve_concurrently(&listener, &site, 2, &|_| {}));
+        let dir = root.join("target/screenshots");
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut app = headless(1440.0, 900.0);
+        app.browser
+            .navigate(&ynp_tls::format_url(&id, address, "home"), &app.loader)
+            .unwrap();
+        settle(&mut app);
+        frame(&mut app);
+        frame(&mut app)
+            .save_png(dir.join("desktop-verified.png"))
+            .unwrap();
+    }
+
     /// Writes 1440×900 captures of the start page and a YLang document to
     /// `target/screenshots`. Run with `cargo test -p yami-browser -- --ignored`.
     #[test]
@@ -888,7 +985,7 @@ mod tests {
             while x < area.x + area.w {
                 app.mouse = (x, y);
                 if app.link().as_deref() == Some(target) {
-                    app.browser.navigate(target, &app.loader).unwrap();
+                    app.browser.follow(target, &app.loader).unwrap();
                     settle(app);
                     return;
                 }

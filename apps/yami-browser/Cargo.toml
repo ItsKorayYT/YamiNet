@@ -12,6 +12,8 @@ workspace = true
 ylang = { path = "../../crates/ylang" }
 ysl = { path = "../../crates/ysl" }
 ynp = { path = "../../crates/ynp" }
+ynp-tls = { path = "../../crates/ynp-tls" }
+yami-identity = { path = "../../crates/yami-identity" }
 yami-render = { path = "../../crates/yami-render", features = ["native"] }
 winit = { version = "0.30", default-features = false, features = ["x11", "rwh_06"] }
 softbuffer = { version = "0.4", default-features = false, features = ["x11", "x11-dlopen"] }

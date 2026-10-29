@@ -2250,10 +2250,12 @@ dependencies = [
  "softbuffer",
  "tiny-skia",
  "winit",
+ "yami-identity",
  "yami-node",
  "yami-render",
  "ylang",
  "ynp",
+ "ynp-tls",
  "ysl",
 ]
 

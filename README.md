@@ -6,11 +6,13 @@ layout and software rasterization. Yami Browser now includes a native desktop
 interface with antialiased typography, tabs and an aqua glass theme.
 
 **Not secure for sensitive use.** Networking is restricted to numeric loopback
-IP addresses. Privacy is a design goal, not a security guarantee. Nodes can
-have persistent Ed25519 identities that sign site metadata. An experimental
-TLS 1.3 transport encrypts YNP and authenticates a node against a node ID the
-client trusts in advance; the original `ynp://` transport and the browser
-remain plaintext and unauthenticated. There is no anonymity.
+IP addresses, plus private IPv4 LAN addresses for the authenticated transport
+when a node explicitly opts in with `--lan`. Privacy is a design goal, not a
+security guarantee. Nodes can have persistent Ed25519 identities that sign
+site metadata. An experimental TLS 1.3 transport encrypts YNP and
+authenticates a node against a node ID the client trusts in advance; the
+browser uses it for `ynps://` addresses. The original `ynp://` transport
+remains plaintext, unauthenticated and loopback-only. There is no anonymity.
 
 ## Run
 
@@ -36,7 +38,7 @@ cd /workspace/YamiNet
 
 The default command opens the native desktop browser. Its new-tab page has
 local document shortcuts and sample-node bookmarks; the address bar accepts
-existing localhost YNP URLs. Tabs, Back, Forward, Reload, document links and
+`ynps://` addresses and localhost `ynp://` URLs. Tabs, Back, Forward, Reload, document links and
 scrolling operate on actual YLang documents. Network work runs in bounded
 background workers, with stale-response protection.
 
@@ -143,10 +145,33 @@ cargo run -p yami-node -- fetch ynps://<node-id>@127.0.0.1:7443/home
 `tls-demo` runs two nodes with different persistent identities that fetch each
 other's document over TLS, and shows that a client expecting one node refuses
 the other. A `fetch` with the wrong node ID fails without printing anything.
-YNP frames are unchanged inside TLS, there is no plaintext fallback, and
-listeners stay on loopback addresses. The desktop browser does not use TLS yet.
+YNP frames are unchanged inside TLS and there is no plaintext fallback.
 Keep demo identity directories out of commits; they hold secret keys. See the
 [TLS transport, threat model and limitations](docs/specs/v0.1/ynp-tls.md).
+
+### On a private LAN, in Yami Browser
+
+With `--lan`, a TLS node listens on one private IPv4 address of its computer
+(never `0.0.0.0`, never plaintext) and prints its full `ynps://` address:
+
+```sh
+cargo run -p yami-node -- serve-dir 192.168.1.50:7443 sites/alice --identity ./node-identity --tls --lan
+```
+
+On another computer, open the printed `Open in Yami Browser:` address in the
+address field, or:
+
+```sh
+cargo run -p yami-browser -- --desktop ynps://<node-id>@192.168.1.50:7443/home
+```
+
+The browser connects only if the node proves exactly that node ID, then shows
+a padlock, **Verified node · TLS 1.3** and the node ID under the address field.
+Links on the page to the node's own address stay on the same verified node.
+A different node ID fails with `Authentication failed`, and plaintext pages
+are marked **Not encrypted · not verified**. The steps for two Windows
+computers, including the firewall, are in [LAN testing](docs/lan-testing.md);
+that two-machine procedure has not yet been run as part of development.
 
 ## Workspace
 
@@ -155,7 +180,7 @@ Keep demo identity directories out of commits; they hold secret keys. See the
 | `ylang` | Bounded document parser, typed AST, byte spans and line/column errors |
 | `ysl` | Bounded original style parser and typed presentation settings |
 | `ynp` | Binary frame codec, strict limits, transport traits, legacy plaintext loopback TCP client/listener |
-| `ynp-tls` | YNP over TLS 1.3 (rustls), authenticated against a pinned node ID, loopback only |
+| `ynp-tls` | YNP over TLS 1.3 (rustls), authenticated against a pinned node ID, loopback or opt-in private LAN |
 | `yami-render` | Original terminal/bitmap renderer plus shaped native document layout and antialiased text |
 | `yami-browser` | Native desktop tabs/navigation and preserved terminal/PPM document tools |
 | `yami-identity` | Persistent Ed25519 node identities, node IDs, domain-separated metadata signatures |
@@ -195,7 +220,10 @@ signing through the CLI, and that secret keys never appear in output.
 TLS tests cover pinned fetches, wrong identities, expired and altered
 certificates, copied certificates, tampering in transit, maximum-size
 documents, no plaintext fallback, failed handshakes, reconnection and restarts,
-and the two-node CLI demonstration.
+and the two-node CLI demonstration. LAN tests bind a real private IPv4 address
+of the test machine (client and node on that one machine) for encrypted
+fetches, wrong identities, refused plaintext and refused addresses, and the
+browser tests navigate verified sites and recover from failed authentication.
 Unit tests cover parser locations and limits, nested ASTs, wrapping and pixels,
 golden wire bytes, all truncated prefixes of representative frames, malformed
 headers and payload lengths, Unicode, size boundaries and response correlation.
@@ -214,11 +242,12 @@ to uppercase and unsupported characters to a box; this limitation does not
 describe the desktop font renderer. Oversized layouts and bitmaps fail with
 an error rather than allocating without bounds.
 
-No peer discovery, distributed lookup, anonymous routing, production or LAN
-networking, protocol negotiation, multiplexing, compression or cache. The TLS
-transport authenticates nodes only on localhost, only from `yami-node` and the
-`ynp-tls` library, and has no revocation or client authentication. The
-plaintext transport has no authentication, encryption or replay protection.
+No peer discovery, distributed lookup, anonymous routing, internet or
+production networking, NAT traversal, protocol negotiation, multiplexing,
+compression or cache. The TLS transport reaches loopback and private IPv4 LAN
+addresses only, and has no revocation or client authentication: anyone on the
+LAN who can reach a node can read its pages. The plaintext transport has no
+authentication, encryption or replay protection and stays on loopback.
 See the versioned specs before extending them.
 
 ## Project vision

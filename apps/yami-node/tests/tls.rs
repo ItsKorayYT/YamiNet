@@ -306,7 +306,7 @@ fn never_falls_back_to_plaintext() {
     let _ = raw.read(&mut [0; 64]);
     assert!(server.join().unwrap().iter().all(Result::is_err));
 
-    // Neither side accepts non-loopback addresses.
+    // Neither side accepts public or wildcard addresses (LAN: see lan.rs).
     for address in ["192.0.2.1:7301", "0.0.0.0:0", "[::]:0"] {
         let address: SocketAddr = address.parse().unwrap();
         assert!(transport.connect(address).is_err(), "{address}");

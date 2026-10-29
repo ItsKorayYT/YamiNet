@@ -1,15 +1,18 @@
 # Experimental security status
 
 YamiNet 0.1 is **not secure for sensitive use**. It has no anonymity and no
-protection against a malicious local user. The default `ynp://` transport, and
-everything the browser fetches, is plaintext and unauthenticated. Nodes can have
-persistent signing identities (below), and an experimental TLS 1.3 transport
-(below) authenticates a node against a pinned node ID; neither has been
-independently reviewed. Every localhost peer and every received document must be
-considered untrusted. Do not put private documents, credentials or personal data
-in this prototype. Do not expose it through port forwarding or a public proxy.
+protection against a malicious local user. The default `ynp://` transport is
+plaintext, unauthenticated and loopback-only. Nodes can have persistent signing
+identities (below), and an experimental TLS 1.3 transport (below), used by the
+browser for `ynps://` addresses, authenticates a node against a pinned node ID
+on loopback or, by explicit opt-in, a private IPv4 LAN; neither has been
+independently reviewed. Every peer on the machine or the LAN and every received
+document must be considered untrusted. Do not put private documents,
+credentials or personal data in this prototype. Do not expose it through port
+forwarding or a public proxy.
 
-The concrete restrictions are numeric loopback-only TCP, strict binary field
+The concrete restrictions are numeric loopback-only TCP for plaintext YNP,
+numeric loopback or private IPv4 addresses for TLS, strict binary field
 and frame bounds, UTF-8 validation, a bounded document/style parser, rejection
 of control characters in parsed content, no executable content, no automatic
 network requests and no DNS resolution. These reduce accidental exposure but
@@ -52,7 +55,12 @@ certificates self-signed by the node identity key and valid for 24 hours. A
 client accepts only the node ID it was given before connecting and refuses
 other identities, invalid, altered or expired certificates, copied certificates
 without the key, and tampered traffic. TLS 1.2, resumption, early data and
-plaintext fallback are disabled. Listeners and clients remain loopback-only.
+plaintext fallback are disabled. Listeners are loopback-only unless started
+with `serve-dir --tls --lan`, which binds exactly one private IPv4 address
+(never a wildcard or public address) and drops non-private peers; clients
+reach loopback and private IPv4 addresses only. Any host on that LAN can
+connect and read every page the node serves, so restrict the port with the
+operating system firewall ([docs/lan-testing.md](docs/lan-testing.md)).
 The node key signs TLS messages only through a format-checked API that cannot
 produce a signature over YamiNet metadata. Clients are not authenticated; there
 is no revocation or key rotation, so a stolen `node.key` impersonates its node
@@ -60,13 +68,18 @@ indefinitely; and which node ID to trust is still learned out of band. The
 threat model and limitations are in
 [docs/specs/v0.1/ynp-tls.md](docs/specs/v0.1/ynp-tls.md).
 
-Key rotation and revocation, client authentication, LAN or internet exposure
-and anonymous routing require separate versioned designs and independent
-review. Encrypting a connection does not establish anonymity.
+Key rotation and revocation, client authentication, internet exposure, NAT
+traversal and anonymous routing require separate versioned designs and
+independent review. Encrypting a connection does not establish anonymity.
 
-The desktop UI is not a new trust boundary or a secure transport, and it does
-not use the TLS transport. Its glass status indicators describe the UI and
-navigation state, not peer authentication or encrypted connectivity. Requests run on bounded background workers; stale
+The desktop UI is not a new trust boundary. It opens `ynps://` addresses only
+through the TLS transport and requests nothing until the node proved the node
+ID in the address. The padlock and **Verified node** marking under the address
+field come from the connection that delivered the page on screen; plaintext
+pages are marked **Not encrypted · not verified**, and the glass styling of the
+UI says nothing about the connection. A link on a verified page to the same
+node's address stays on that node and identity; no link can choose a new node
+ID. Requests run on bounded background workers; stale
 responses are discarded using tab identity and navigation generation. This
 prevents navigation races but does not authenticate the responding peer or
 guarantee cancellation of a request already in progress.

@@ -264,14 +264,20 @@ pub fn parse_url(url: &str) -> io::Result<(SocketAddr, String)> {
     let rest = url
         .strip_prefix("ynp://")
         .ok_or_else(|| invalid("expected ynp://numeric-loopback:port/key"))?;
-    let (address, key) = rest
+    let (address, key) = parse_endpoint(rest)?;
+    require_loopback(address)?;
+    Ok((address, key))
+}
+/// `<numeric-IP>:<nonzero-port>/<key>`, the part of a URL after its scheme.
+/// Applies no address policy; callers add the one their transport enforces.
+pub fn parse_endpoint(text: &str) -> io::Result<(SocketAddr, String)> {
+    let (address, key) = text
         .split_once('/')
         .ok_or_else(|| invalid("missing document key"))?;
     validate_key(key)?;
     let address = address
         .parse::<SocketAddr>()
         .map_err(|_| invalid("expected numeric IP and port"))?;
-    require_loopback(address)?;
     if address.port() == 0 {
         return Err(invalid("destination port must be nonzero"));
     }
@@ -286,14 +292,20 @@ pub fn fetch(
 ) -> io::Result<DocumentData> {
     validate_key(key)?;
     let mut connection = transport.connect(address)?;
+    request(&mut *connection, key)
+}
+/// The Get exchange of [`fetch`] on a connection the caller already holds,
+/// for example after checking its [`Connection::protection`].
+pub fn request(connection: &mut dyn Connection, key: &str) -> io::Result<DocumentData> {
+    validate_key(key)?;
     write_frame(
-        &mut *connection,
+        connection,
         &Frame {
             request_id: 1,
             message: Message::Get { key: key.into() },
         },
     )?;
-    let response = read_frame(&mut *connection)?;
+    let response = read_frame(connection)?;
     if response.request_id != 1 {
         return Err(invalid("response request ID mismatch"));
     }
@@ -477,6 +489,7 @@ mod tests {
             "http://127.0.0.1:9/a",
             "ynp://example.com:9/a",
             "ynp://192.0.2.1:9/a",
+            "ynp://192.168.1.50:7443/a",
             "ynp://0.0.0.0:9/a",
             "ynp://127.0.0.1:0/a",
             "ynp://127.0.0.1:9/../a",
@@ -484,8 +497,24 @@ mod tests {
             assert!(parse_url(url).is_err(), "{url}");
         }
         assert!(parse_url("ynp://[::1]:7301/a").is_ok());
-        assert!(LoopbackTcp.connect("192.0.2.1:9".parse().unwrap()).is_err());
+        // Plaintext never leaves loopback, not even for a private LAN address.
+        for address in ["192.0.2.1:9", "192.168.1.50:9", "10.0.0.1:9"] {
+            let address = address.parse().unwrap();
+            assert!(LoopbackTcp.connect(address).is_err(), "{address}");
+            assert!(LocalListener::bind(address).is_err(), "{address}");
+        }
         assert!(LocalListener::bind("0.0.0.0:0".parse().unwrap()).is_err());
+        // Without policy, the endpoint grammar is unchanged: numeric, nonzero
+        // port, valid key.
+        assert!(parse_endpoint("192.168.1.50:7443/home").is_ok());
+        for bad in [
+            "host:1/a",
+            "192.168.1.50:0/a",
+            "192.168.1.50:1",
+            "1.2.3.4:1/a/b",
+        ] {
+            assert!(parse_endpoint(bad).is_err(), "{bad}");
+        }
     }
     struct MockTransport(Vec<u8>);
     struct MockConnection {

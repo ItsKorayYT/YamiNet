@@ -1,5 +1,6 @@
 //! Experimental authenticated, encrypted YNP: unchanged YNP frames inside
-//! TLS 1.3 (rustls with the ring provider), between loopback addresses only.
+//! TLS 1.3 (rustls with the ring provider), between loopback addresses or,
+//! when a listener explicitly opts in, on a private IPv4 LAN ([`Scope`]).
 //!
 //! A node's TLS key is its persistent Ed25519 node identity key. The node
 //! presents a short-lived X.509 certificate for that key, self-signed by it,
@@ -19,7 +20,7 @@ use rustls::{
 };
 use std::{
     io::{self, Read, Write},
-    net::{SocketAddr, TcpListener, TcpStream},
+    net::{IpAddr, SocketAddr, TcpListener, TcpStream},
     ops::{Deref, DerefMut},
     sync::Arc,
     time::{Duration, Instant},
@@ -30,7 +31,7 @@ use ynp::{Connection, Incoming, Protection, Transport};
 pub use credential::{Credential, BACKDATE};
 pub use verify::IdentityMismatch;
 
-pub const WARNING: &str = "EXPERIMENTAL: TLS 1.3 to a pinned node ID, localhost only. Not independently reviewed; no anonymity.";
+pub const WARNING: &str = "EXPERIMENTAL: TLS 1.3 to a pinned node ID, loopback or private LAN only. Not independently reviewed; no anonymity.";
 /// Negotiated by both sides, so a YNP peer never talks to another TLS service.
 pub const ALPN: &[u8] = b"ynp/1";
 pub const SCHEME: &str = "ynps://";
@@ -45,6 +46,35 @@ fn invalid(message: impl Into<String>) -> io::Error {
 }
 fn other(error: impl std::error::Error + Send + Sync + 'static) -> io::Error {
     io::Error::other(error)
+}
+
+/// Which peer addresses a listener or client may use. Plaintext YNP stays
+/// loopback-only in the `ynp` crate; only this authenticated transport, and
+/// only after a listener opts in, reaches beyond the machine.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Scope {
+    /// Numeric loopback addresses only, the default for every listener.
+    Loopback,
+    /// Loopback and private IPv4 addresses (RFC 1918: 10.0.0.0/8,
+    /// 172.16.0.0/12, 192.168.0.0/16). Never public, link-local, multicast,
+    /// broadcast or unspecified addresses, and no IPv6 beyond `::1`.
+    Lan,
+}
+impl Scope {
+    pub fn check(self, address: SocketAddr) -> io::Result<()> {
+        match self {
+            Self::Loopback => ynp::require_loopback(address),
+            Self::Lan if address.ip().is_loopback() || is_private_lan(address.ip()) => Ok(()),
+            Self::Lan => Err(io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                "only loopback and private IPv4 LAN addresses (10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16) are allowed",
+            )),
+        }
+    }
+}
+/// A private IPv4 address (RFC 1918), the only kind a LAN listener binds.
+pub fn is_private_lan(ip: IpAddr) -> bool {
+    matches!(ip, IpAddr::V4(ip) if ip.is_private())
 }
 
 /// TLS 1.3 only, every ring cipher suite and key exchange group of it.
@@ -84,9 +114,10 @@ impl TlsTransport {
 }
 impl Transport for TlsTransport {
     /// Completes the handshake before returning, so no request is written
-    /// until the server has proved the trusted identity.
+    /// until the server has proved the trusted identity. Reaches loopback and
+    /// private LAN addresses; the pinned identity is checked on both alike.
     fn connect(&self, address: SocketAddr) -> io::Result<Box<dyn Connection>> {
-        ynp::require_loopback(address)?;
+        Scope::Lan.check(address)?;
         let name = ServerName::try_from(self.trusted.to_string()).map_err(other)?;
         let tls = ClientConnection::new(Arc::clone(&self.config), name).map_err(other)?;
         let stream = TcpStream::connect_timeout(&address, ynp::TIMEOUT)?;
@@ -111,29 +142,49 @@ fn mismatch(error: &io::Error) -> Option<IdentityMismatch> {
     }
 }
 
-/// Accepts loopback clients and authenticates as one node identity.
+/// Accepts clients within its [`Scope`] and authenticates as one node identity.
 pub struct TlsListener {
     listener: TcpListener,
     config: Arc<ServerConfig>,
     id: NodeId,
+    scope: Scope,
 }
 impl TlsListener {
-    /// Serve as `identity`, issuing and renewing certificates as needed.
+    /// Serve as `identity` on a loopback address, issuing and renewing
+    /// certificates as needed.
     pub fn bind(address: SocketAddr, identity: Arc<NodeIdentity>) -> io::Result<Self> {
         let id = *identity.id();
-        Self::with_resolver(address, credential::Resolver::renewing(identity)?, id)
+        let resolver = credential::Resolver::renewing(identity)?;
+        Self::with_resolver(address, Scope::Loopback, resolver, id)
     }
-    /// Present exactly this credential until the listener is dropped.
+    /// Serve as `identity` on one explicitly chosen private IPv4 LAN address:
+    /// never a wildcard, loopback or public address. Clients from outside
+    /// loopback and private IPv4 ranges are dropped before the handshake.
+    pub fn bind_lan(address: SocketAddr, identity: Arc<NodeIdentity>) -> io::Result<Self> {
+        if !is_private_lan(address.ip()) {
+            return Err(io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                "a LAN listener needs one specific private IPv4 address (10.x.x.x, 172.16-31.x.x or 192.168.x.x), never 0.0.0.0, loopback or a public address",
+            ));
+        }
+        let id = *identity.id();
+        let resolver = credential::Resolver::renewing(identity)?;
+        Self::with_resolver(address, Scope::Lan, resolver, id)
+    }
+    /// Present exactly this credential on a loopback address until the
+    /// listener is dropped.
     pub fn bind_with_credential(address: SocketAddr, credential: &Credential) -> io::Result<Self> {
         let id = *credential.node_id();
-        Self::with_resolver(address, credential::Resolver::fixed(credential), id)
+        let resolver = credential::Resolver::fixed(credential);
+        Self::with_resolver(address, Scope::Loopback, resolver, id)
     }
     fn with_resolver(
         address: SocketAddr,
+        scope: Scope,
         resolver: credential::Resolver,
         id: NodeId,
     ) -> io::Result<Self> {
-        ynp::require_loopback(address)?;
+        scope.check(address)?;
         let mut config = ServerConfig::builder_with_provider(provider())
             .with_protocol_versions(&[&rustls::version::TLS13])
             .map_err(other)?
@@ -146,6 +197,7 @@ impl TlsListener {
             listener: TcpListener::bind(address)?,
             config: Arc::new(config),
             id,
+            scope,
         })
     }
     pub fn local_addr(&self) -> io::Result<SocketAddr> {
@@ -154,6 +206,9 @@ impl TlsListener {
     pub fn node_id(&self) -> &NodeId {
         &self.id
     }
+    pub fn scope(&self) -> Scope {
+        self.scope
+    }
 }
 impl Incoming for TlsListener {
     /// Returns once TCP is accepted. The handshake runs on first use of the
@@ -161,7 +216,7 @@ impl Incoming for TlsListener {
     /// that connection.
     fn accept(&self) -> io::Result<Box<dyn Connection>> {
         let (stream, peer) = self.listener.accept()?;
-        ynp::require_loopback(peer)?;
+        self.scope.check(peer)?;
         ynp::configure_stream(&stream)?;
         let tls = ServerConnection::new(Arc::clone(&self.config)).map_err(other)?;
         Ok(Box::new(TlsConnection::new(tls, stream)))
@@ -271,21 +326,132 @@ where
     }
 }
 
-/// `ynps://<node-id>@<numeric-loopback-IP>:<port>/<key>`. The node ID is the
-/// identity the client requires; address and key follow the `ynp://` rules.
+/// `ynps://<node-id>@<numeric-IP>:<port>/<key>`. The node ID is the identity
+/// the client requires. The address is a numeric loopback or private IPv4 LAN
+/// address ([`Scope::Lan`]) with a nonzero port, never a name; the key
+/// follows the `ynp://` rules.
 pub fn parse_url(url: &str) -> io::Result<(NodeId, SocketAddr, String)> {
     let rest = url
         .strip_prefix(SCHEME)
-        .ok_or_else(|| invalid("expected ynps://node-id@numeric-loopback:port/key"))?;
+        .ok_or_else(|| invalid("expected ynps://node-id@numeric-IP:port/key"))?;
     let (id, rest) = rest
         .split_once('@')
         .ok_or_else(|| invalid("missing trusted node ID: ynps://node-id@address/key"))?;
     let id: NodeId = id
         .parse()
         .map_err(|error| invalid(format!("trusted node ID: {error}")))?;
-    let (address, key) = ynp::parse_url(&format!("ynp://{rest}"))?;
+    let (address, key) = ynp::parse_endpoint(rest)?;
+    Scope::Lan.check(address)?;
     Ok((id, address, key))
 }
 pub fn format_url(id: &NodeId, address: SocketAddr, key: &str) -> String {
     format!("{SCHEME}{id}@{address}/{key}")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn lan_scope_admits_only_loopback_and_private_ipv4() {
+        for allowed in [
+            "127.0.0.1:7443",
+            "127.8.9.10:7443",
+            "[::1]:7443",
+            "10.0.0.1:7443",
+            "10.255.255.254:7443",
+            "172.16.0.1:7443",
+            "172.31.255.254:7443",
+            "192.168.0.1:7443",
+            "192.168.1.50:7443",
+        ] {
+            let address: SocketAddr = allowed.parse().unwrap();
+            assert!(Scope::Lan.check(address).is_ok(), "{allowed}");
+        }
+        for refused in [
+            "0.0.0.0:7443",
+            "255.255.255.255:7443",
+            "8.8.8.8:7443",
+            "192.0.2.1:7443",
+            "172.15.255.255:7443",
+            "172.32.0.1:7443",
+            "192.169.0.1:7443",
+            "169.254.1.1:7443",
+            "100.64.0.1:7443",
+            "224.0.0.1:7443",
+            "[::]:7443",
+            "[fe80::1]:7443",
+            "[fd00::1]:7443",
+            "[2001:db8::1]:7443",
+            "[::ffff:192.168.1.50]:7443",
+        ] {
+            let address: SocketAddr = refused.parse().unwrap();
+            let error = Scope::Lan.check(address).unwrap_err();
+            assert_eq!(error.kind(), io::ErrorKind::PermissionDenied, "{refused}");
+        }
+        // The default stays loopback, so LAN reach is always an explicit choice.
+        assert!(Scope::Loopback
+            .check("192.168.1.50:7443".parse().unwrap())
+            .is_err());
+        assert!(Scope::Loopback
+            .check("127.0.0.1:7443".parse().unwrap())
+            .is_ok());
+    }
+
+    #[test]
+    fn lan_listeners_need_one_specific_private_address() {
+        let identity = Arc::new(NodeIdentity::generate().unwrap());
+        for refused in [
+            "0.0.0.0:0",
+            "127.0.0.1:0",
+            "[::]:0",
+            "[::1]:0",
+            "8.8.8.8:0",
+            "169.254.1.1:0",
+        ] {
+            let address: SocketAddr = refused.parse().unwrap();
+            let error = TlsListener::bind_lan(address, Arc::clone(&identity))
+                .err()
+                .unwrap_or_else(|| panic!("bound {refused}"));
+            assert_eq!(error.kind(), io::ErrorKind::PermissionDenied, "{refused}");
+        }
+        // Without opting in, a listener refuses a private address too.
+        let lan: SocketAddr = "192.168.1.50:0".parse().unwrap();
+        assert!(TlsListener::bind(lan, identity).is_err());
+    }
+
+    #[test]
+    fn ynps_urls_reach_private_lan_addresses_only() {
+        let id = NodeIdentity::generate().unwrap().id().to_string();
+        for (url, address) in [
+            (
+                format!("ynps://{id}@192.168.1.50:7443/home"),
+                "192.168.1.50:7443",
+            ),
+            (format!("ynps://{id}@10.1.2.3:1/a-b_c"), "10.1.2.3:1"),
+            (format!("ynps://{id}@127.0.0.1:7443/home"), "127.0.0.1:7443"),
+        ] {
+            let (parsed, endpoint, _) = parse_url(&url).unwrap();
+            assert_eq!(parsed.to_string(), id);
+            assert_eq!(endpoint, address.parse().unwrap());
+        }
+        for bad in [
+            format!("ynps://{id}@0.0.0.0:7443/home"),
+            format!("ynps://{id}@8.8.8.8:7443/home"),
+            format!("ynps://{id}@169.254.1.1:7443/home"),
+            format!("ynps://{id}@[fd00::1]:7443/home"),
+            format!("ynps://{id}@192.168.1.50:0/home"),
+            format!("ynps://{id}@192.168.1.50/home"),
+            format!("ynps://{id}@192.168.1.50:7443"),
+            format!("ynps://{id}@192.168.1.50:7443/"),
+            format!("ynps://{id}@192.168.1.50:7443/a/b"),
+            format!("ynps://{id}@lan-host:7443/home"),
+            format!("ynps://{id}@192.168.001.050:7443/home"),
+            format!("ynps://{id}@ 192.168.1.50:7443/home"),
+            "ynps://192.168.1.50:7443/home".to_owned(),
+            "ynp://192.168.1.50:7443/home".to_owned(),
+        ] {
+            assert!(parse_url(&bad).is_err(), "{bad}");
+        }
+    }
 }

@@ -1,6 +1,6 @@
 #![allow(clippy::too_many_arguments)]
 //! The browser theme is independent of YSL document presentation.
-use crate::model::{Browser, PageState};
+use crate::model::{Browser, PageState, Security};
 use tiny_skia::{
     Color, FillRule, GradientStop, LinearGradient, Paint, PathBuilder, Pixmap, Point,
     RadialGradient, SpreadMode, Stroke, Transform,
@@ -15,6 +15,8 @@ const MAIN_BG: [u8; 4] = [73, 68, 71, 255]; // #494447
 const PLUM_GLOW: [u8; 4] = [117, 80, 93, 255]; // #75505D
 const HOVER_BG: [u8; 4] = [53, 43, 48, 255]; // #352B30
 const ACTIVE_TAB: [u8; 4] = [70, 57, 64, 255]; // #463940
+const VERIFIED: [u8; 4] = [156, 204, 170, 255]; // Pinned node proved #9CCCAA
+const PLAINTEXT: [u8; 4] = [222, 164, 150, 255]; // No protection #DEA496
 
 pub const SIDEBAR_WIDTH: f32 = 230.0;
 pub const MARGIN: f32 = 8.0;
@@ -383,6 +385,17 @@ impl<'a> Canvas<'a> {
                 self.line(&[(x, y - 0.5), (x, y + 3.0)], ink, 1.4);
                 self.line(&[(x, y - 3.0), (x, y - 2.9)], ink, 1.6);
             }
+            // Closed padlock for a verified node.
+            "lock" => {
+                self.round(Rect::new(x - 4.0, y - 1.0, 8.0, 6.5), 1.5, ink, ink, None);
+                let shackle: Vec<(f32, f32)> = (0..=12)
+                    .map(|i| {
+                        let a = std::f32::consts::PI * (1.0 + i as f32 / 12.0);
+                        (x + 2.6 * a.cos(), y - 1.0 + 3.4 * a.sin())
+                    })
+                    .collect();
+                self.line(&shackle, ink, 1.3);
+            }
             // Three linked nodes for a YNP peer.
             "node" => {
                 let pts = [(x - 5.0, y + 4.0), (x, y - 5.0), (x + 5.0, y + 4.0)];
@@ -510,11 +523,12 @@ pub fn paint(c: &mut Canvas<'_>, browser: &Browser, ui: &ChromeState<'_>) -> Sce
     // Address / search field.
     let address = Rect::new(left, top.y + top.h + 12.0, inner, ROW);
     address_field(c, &mut scene, address, Action::Address, ui, ui.editing);
+    let below = connection_status(c, browser.active().security(), left, address.y + address.h);
 
     // Pinned sites.
     let gap = 6.0;
     let pin_w = (inner - 2.0 * gap) / 3.0;
-    let pins_y = address.y + address.h + 10.0;
+    let pins_y = below + 10.0;
     for (i, (icon, target)) in PINS.into_iter().enumerate() {
         let r = Rect::new(left + i as f32 * (pin_w + gap), pins_y, pin_w, 36.0);
         let action = Action::Navigate(target);
@@ -612,6 +626,68 @@ pub fn paint(c: &mut Canvas<'_>, browser: &Browser, ui: &ChromeState<'_>) -> Sce
     scene.add(home, Action::Home);
 
     scene
+}
+/// What the connection that delivered the page on screen proved, drawn under
+/// the address field. Only TLS to a pinned node ID gets the padlock; plaintext
+/// pages say so. Returns the bottom edge of what was drawn.
+fn connection_status(c: &mut Canvas<'_>, security: Option<&Security>, left: f32, top: f32) -> f32 {
+    let inner = SIDEBAR_WIDTH - 2.0 * PAD;
+    let row = |i: f32| Rect::new(left, top + 4.0 + i * 16.0, inner, 16.0);
+    match security {
+        None | Some(Security::BuiltIn) => top,
+        Some(Security::Plaintext) => {
+            let r = row(0.0);
+            c.text(
+                "Not encrypted · not verified",
+                r.x + 8.0,
+                text_y(r, 10.5),
+                inner - 16.0,
+                10.5,
+                PLAINTEXT,
+                false,
+            );
+            r.y + r.h
+        }
+        Some(Security::Verified(id)) => {
+            let r = row(0.0);
+            c.icon("lock", r.x + 12.0, r.y + r.h / 2.0, VERIFIED);
+            c.text(
+                "Verified node · TLS 1.3",
+                r.x + 22.0,
+                text_y(r, 10.5),
+                inner - 30.0,
+                10.5,
+                VERIFIED,
+                true,
+            );
+            // The full node ID, so it can be compared with the one expected,
+            // wrapped by measured width so no character is clipped. IDs are ASCII.
+            let id = id.to_string();
+            let mut rest = id.as_str();
+            let mut lines = 0.0;
+            while !rest.is_empty() {
+                let mut end = rest.len();
+                while end > 1
+                    && c.text.measure(&rest[..end], 10.5 * c.scale, false) / c.scale > inner - 16.0
+                {
+                    end -= 1;
+                }
+                lines += 1.0;
+                let r = row(lines);
+                c.text(
+                    &rest[..end],
+                    r.x + 8.0,
+                    text_y(r, 10.5),
+                    inner - 16.0,
+                    10.5,
+                    MUTED,
+                    false,
+                );
+                rest = &rest[end..];
+            }
+            row(lines).y + 16.0
+        }
+    }
 }
 fn address_field(
     c: &mut Canvas<'_>,

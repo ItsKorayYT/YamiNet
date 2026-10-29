@@ -1,6 +1,7 @@
 # YNP over TLS 1.3 0.1 draft
 
-**EXPERIMENTAL. Not independently reviewed. Localhost only. No anonymity.**
+**EXPERIMENTAL. Not independently reviewed. Loopback, or one private IPv4 LAN
+address by explicit opt-in. No anonymity.**
 This draft gives YNP an encrypted, integrity-protected connection in which the
 client verifies that the server holds the key of one node ID that the client
 trusted before connecting. It builds on the persistent node identities in
@@ -22,8 +23,23 @@ Syncthing device IDs and libp2p peer IDs.
 ```sh
 cargo run -p yami-node -- tls-demo <identity-directory-1> <identity-directory-2>
 cargo run -p yami-node -- serve-dir 127.0.0.1:7443 sites/alice --identity <identity-directory> --tls
+cargo run -p yami-node -- serve-dir 192.168.1.50:7443 sites/alice --identity <identity-directory> --tls --lan
 cargo run -p yami-node -- fetch ynps://<node-id>@127.0.0.1:7443/home
+cargo run -p yami-browser -- --desktop ynps://<node-id>@192.168.1.50:7443/home
 ```
+
+### Private LAN
+
+`--lan` makes `serve-dir` listen on one private IPv4 address of the computer
+instead of loopback; see [Network scope](#network-scope). It requires `--tls`
+and therefore `--identity`: YNP is never served in plaintext beyond loopback.
+Without `--lan`, any non-loopback address is refused, and with it, `0.0.0.0`,
+loopback, link-local and public addresses are refused before an identity is
+loaded. The node prints its node ID, the `ynps://` URL of every page and an
+`Open in Yami Browser:` line with the full address of its start page (`home`
+if present). Clients need no option: a `ynps://` URL may name a loopback or
+private LAN address. Step-by-step instructions for two Windows computers,
+including the firewall, are in [LAN testing](../../lan-testing.md).
 
 ### Two-node demonstration
 
@@ -38,7 +54,7 @@ connection is refused:
 
 ```console
 $ cargo run -p yami-node -- tls-demo ./demo-ids/one ./demo-ids/two
-EXPERIMENTAL: TLS 1.3 to a pinned node ID, localhost only. Not independently reviewed; no anonymity.
+EXPERIMENTAL: TLS 1.3 to a pinned node ID, loopback or private LAN only. Not independently reviewed; no anonymity.
 Node one  yn1-sp2hcdqey6gfx62bqb3vzymxh4hjsjv2ocfqk4hecwplc77pkh2yatmgrq (created in ./demo-ids/one)
 Node two  yn1-imc2rmri54qbb6f3msck3fm5x7k3my4eik6phfbbi7hiv5npbs4usbyivy (created in ./demo-ids/two)
 Node one received about from ynps://yn1-imc2…@127.0.0.1:30862/about over TLS 1.3 (328 bytes).
@@ -88,16 +104,52 @@ legacy plaintext transport, even when `--identity` is given.
 ## Addresses
 
 ```text
-ynps://<node-id>@<numeric-loopback-IP>:<port>/<key>
+ynps://<node-id>@<numeric-IP>:<port>/<key>
 ```
 
 The node ID before `@` is the identity the client requires. It MUST parse as a
 `yn1-` node ID (exact canonical spelling, checksum, valid non-weak key). The
-remainder follows the `ynp://` rules: numeric loopback IP, nonzero port, no
-DNS, and a valid YNP key. A `ynps://` URL without a node ID is rejected rather
+remainder follows the `ynp://` grammar (numeric IP, nonzero port, no DNS, and a
+valid YNP key), except that the IP may be a loopback or private IPv4 LAN
+address ([Network scope](#network-scope)). A `ynps://` URL without a node ID is rejected rather
 than connected to without verification, and a `ynp://` URL never selects TLS.
 The node ID in the URL is the trust decision; the address only says where to
 connect, so a wrong or swapped address fails rather than reaching another node.
+
+### Links between pages
+
+YLang links are always `ynp://<address>/<key>` ([ylang.md](ylang.md)); this
+draft does not change YLang. When the browser shows a page fetched from
+`ynps://<node-id>@<address>/...`, a link whose numeric address and port equal
+`<address>` exactly is opened as `ynps://<node-id>@<address>/<key>`: the same
+node under the same pinned identity. Every other link is used as written, so a
+link to another LAN address is refused (plaintext YNP is loopback-only) rather
+than sent unprotected, and no link ever selects a node ID the user did not
+open. A LAN site therefore links its own pages with the node's LAN address and
+port.
+
+## Network scope
+
+| Scope | Addresses | Used by |
+| --- | --- | --- |
+| Loopback | `127.0.0.0/8`, `::1` | Every listener by default; `TlsListener::bind` |
+| LAN | Loopback plus private IPv4 `10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16` (RFC 1918) | Every client (`TlsTransport::connect`, `ynps://` parsing); listeners from `TlsListener::bind_lan` |
+
+- `TlsListener::bind_lan` binds exactly one private IPv4 address. It refuses
+  `0.0.0.0` and every other wildcard, loopback, link-local (`169.254.0.0/16`),
+  shared (`100.64.0.0/10`), multicast, broadcast and public addresses before
+  creating a socket. There is no option to listen on all interfaces.
+- A LAN listener accepts TCP only from loopback or private IPv4 peers and
+  closes other connections before the handshake, so a public source forwarded
+  to it by a misconfigured router is dropped.
+- IPv6 is limited to `::1`. Unique local (`fc00::/7`) and link-local IPv6
+  addresses are refused.
+- Plaintext YNP is unchanged: `LoopbackTcp`, `LocalListener` and `ynp://`
+  parsing accept loopback only, so LAN traffic is always TLS 1.3 to a pinned
+  node ID.
+- Which machines on the LAN may connect is not configurable: any host that can
+  reach the address and port can fetch every page. Restrict it with the
+  operating system firewall (see [LAN testing](../../lan-testing.md)).
 
 ## Node credential
 
@@ -185,11 +237,32 @@ There is no negotiation between plaintext and TLS: a TLS client meeting a
 plaintext node, or a plaintext client meeting a TLS node, fails. Nothing falls
 back to plaintext.
 
+## Browser
+
+Yami Browser opens `ynps://` addresses in the desktop window, the address
+field, links and the terminal viewer. It fetches through `TlsTransport` and
+sends the Get request only after `connect` returned a connection whose
+protection is `Tls13PinnedServer`. The verification state belongs to the
+loaded page, taken from that connection, not to the address:
+
+- A page loaded over TLS shows a padlock, **Verified node · TLS 1.3** and the
+  full node ID under the address field.
+- A page loaded over plaintext `ynp://` shows **Not encrypted · not
+  verified**. Built-in pages, the start page, loading and error states show
+  neither.
+- An identity mismatch is shown as `Authentication failed at <address>: ...`,
+  naming the expected and the presented node ID. Other handshake failures say
+  that nothing was requested and that nothing fell back to plaintext. The
+  failed page is an ordinary error page: tabs, history, Reload (which verifies
+  again) and other pages keep working.
+
 ## Limits
 
-- Loopback only: `TlsListener::bind` refuses non-loopback and wildcard
-  addresses before creating a socket, `accept` drops non-loopback peers and
-  `TlsTransport::connect` refuses non-loopback destinations.
+- Addresses follow [Network scope](#network-scope): `TlsListener::bind`
+  refuses non-loopback addresses, `TlsListener::bind_lan` refuses everything
+  but one private IPv4 address, both check before creating a socket, `accept`
+  drops peers outside the listener's scope, and `TlsTransport::connect`
+  refuses destinations outside loopback and private IPv4.
 - Three-second socket timeouts per operation, as for plaintext YNP, and a
   ten-second total deadline per connection, including the handshake, on both
   the client and the node.
@@ -207,14 +280,15 @@ client's assurance that it is talking to the node whose ID it chose.
 **Protected against**, assuming the node's secret key is secret and the
 libraries are correct:
 
-- A local process that reads loopback traffic: it sees TLS records, not YNP
-  frames or document keys.
-- A local process that modifies, truncates, reorders or injects traffic: the
-  record protection or handshake transcript check fails and the client gets an
-  error, never a modified document.
-- A local process that listens on the expected port first, a node at a wrong
-  or swapped address, or a stale process holding another identity: the
-  identity check fails.
+- A local process, or another host on the LAN, that reads the traffic: it
+  sees TLS records, not YNP frames or document keys.
+- A local process or LAN host that modifies, truncates, reorders or injects
+  traffic, including an on-path attacker on the LAN (ARP spoofing, a rogue
+  access point): the record protection or handshake transcript check fails
+  and the client gets an error, never a modified document.
+- A process or host that takes over the expected address or port first, a
+  node at a wrong or swapped address (for example after a DHCP change), or a
+  stale process holding another identity: the identity check fails.
 - Replaying a node's certificate, which every client receives: without the
   secret key the CertificateVerify signature fails.
 - An expired or not yet valid certificate, a certificate edited after signing,
@@ -237,26 +311,34 @@ libraries are correct:
   client's clock; a client with a wrong clock may accept an expired
   certificate or refuse a valid one.
 - **Traffic analysis.** Connection timing, sizes and the fact that YNP is in
-  use (the ALPN value is sent in clear) are visible to a local observer. This
-  is not anonymity.
-- **Malicious clients.** Clients are not authenticated; any local process can
-  fetch any page a node serves, as with plaintext YNP.
+  use (the ALPN value is sent in clear) are visible to a local or LAN
+  observer, as are both IP addresses. This is not anonymity.
+- **Malicious clients.** Clients are not authenticated; any local process, and
+  for a LAN listener any host that can reach its address and port, can fetch
+  any page the node serves. Only the operating system firewall narrows who
+  can connect.
 - **Malicious content.** A verified node can still serve hostile documents.
   Verification says who sent a document, not that it is safe; the browser's
   bounded, inert parsers remain the defence.
-- **Denial of service.** Handshakes cost CPU; a local process can occupy all
-  workers until their deadlines.
+- **Denial of service.** Handshakes cost CPU; a local process or LAN host can
+  occupy all workers until their deadlines. There are no quotas or rate
+  limits.
+- **Network exposure beyond the LAN.** Public addresses are refused and LAN
+  listeners drop public peers, but nothing stops a router from forwarding a
+  port with source NAT, which makes internet clients appear as a private
+  address. Do not forward the port.
 - **Past content.** A recorded session cannot be decrypted later without the
   ephemeral key exchange secrets (TLS 1.3 forward secrecy), but nothing here
   protects content the node itself stores.
 
 ## Limitations
 
-- Localhost only. LAN and internet listeners are deliberately not enabled;
-  doing so needs a separate review of exposure, quotas and abuse handling.
-- The desktop and terminal browsers still fetch only `ynp://` plaintext URLs.
-  Retrieval over TLS is available from `yami-node fetch` and the `ynp-tls`
-  library. Browser status indicators do not describe TLS.
+- Private IPv4 LAN at most. Internet listeners, IPv6 LAN addresses, discovery,
+  names and NAT traversal are deliberately not supported; each needs a
+  separate review of exposure, quotas and abuse handling.
+- LAN listening has been tested with client and node on one computer bound to
+  its private address, not yet across two physical machines (see
+  [LAN testing](../../lan-testing.md)).
 - Documents fetched over TLS are attributed to the connection's node, but the
   site signatures (`site.sig`) are still not transmitted or checked by clients.
 - No client authentication, revocation, key rotation, certificate
@@ -276,4 +358,21 @@ addresses; clients without `ynp/1` ALPN or Ed25519; many sequential and
 concurrent reconnections, a node restarted with its persistent identity, and a
 replaced identity; `ynps://` URL parsing; and the CLI demo, `serve-dir --tls`
 and `fetch ynps://` end to end. Unit tests cover the signing-domain checks and
-certificate renewal.
+certificate renewal, and the network scope: allowed and refused addresses,
+`bind_lan` refusals and `ynps://` LAN URL parsing.
+
+`apps/yami-node/tests/lan.rs` binds a real private IPv4 address of the test
+machine (`YAMINET_TEST_LAN_ADDRESS` overrides the choice; without one these
+tests report that they skipped) and covers: an encrypted fetch from a pinned
+LAN node; refusal of a LAN node with another identity before any request;
+refusal of plaintext listeners, clients, URLs and raw plaintext requests on
+the LAN; the CLI refusing LAN listening without `--tls --lan` or on wildcard,
+loopback, public and link-local addresses; and `serve-dir --tls --lan`
+printing a `ynps://` address that `fetch` opens, that the wrong ID cannot.
+
+The browser tests cover `ynps://` address validation, links on a verified page
+staying on the same pinned node, navigation, links, history, reload, tabs and
+NotFound over TLS (on the LAN address when one exists), authentication
+failures followed by normal use, a plaintext node behind a `ynps://` address,
+the sidebar indicator and scrolling of a verified page, and the terminal viewer
+refusing the wrong node ID.

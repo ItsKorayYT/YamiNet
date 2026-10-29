@@ -12,10 +12,11 @@ text. A bundled sans-serif font makes basic typography available without an
 Internet font download. No Chromium, WebView, HTML, CSS or JavaScript is involved.
 The original YLang, YSL and YNP architecture remains intact.
 
-**Experimental: not secure for sensitive use.** YNP is plaintext and
-unauthenticated. The desktop viewer only connects to numeric loopback addresses.
-There is no identity, encryption, anonymity, discovery, HTTP support or DNS
-resolution. See [the security notes](../SECURITY.md).
+**Experimental: not secure for sensitive use.** `ynp://` is plaintext,
+unauthenticated and limited to numeric loopback addresses. `ynps://` addresses
+use TLS 1.3 to the node ID named in the address and may point at a numeric
+loopback or private IPv4 LAN address. There is no anonymity, discovery, HTTP
+support or DNS resolution. See [the security notes](../SECURITY.md).
 
 ## Launch on Windows
 
@@ -80,6 +81,22 @@ For two multi-page sites with links between them, run
 `cargo run --release -p yami-node -- serve-dir 127.0.0.1:7302 sites/bob`
 instead, then open `ynp://127.0.0.1:7301/home`. See
 [Creating and publishing a YamiNet site](publishing-sites.md).
+
+### Verified nodes (`ynps://`)
+
+Enter an address such as `ynps://yn1-...@192.168.1.50:7443/home`, as printed
+by `yami-node serve-dir ... --tls` (add `--lan` for another computer on the
+LAN). While connecting, the page area shows `Verifying node identity…`. The
+page is requested only after the node proved exactly that node ID. Under the
+address field the sidebar then shows a padlock, **Verified node · TLS 1.3**
+and the full node ID; compare it with the ID the node printed. Plaintext
+`ynp://` pages show **Not encrypted · not verified** instead.
+
+Links on a verified page that name the node's own address and port open as
+`ynps://` with the same node ID. If the node at the address has another
+identity, the page shows `Authentication failed at <address>: ...` with both
+IDs, and nothing is requested from it. Reload verifies the node again. See
+[LAN testing](lan-testing.md) for two Windows computers.
 
 Stop each sample node with Ctrl-C in its terminal. Do not forward its ports or
 bind it publicly. `yami://` addresses are not supported. All peer application
