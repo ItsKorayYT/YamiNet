@@ -1,5 +1,5 @@
 //! Small document nodes: an in-memory store and a directory-backed site.
-//! No discovery, caching or background fetches.
+//! Optional LAN discovery is provided separately by `ynp-discovery`.
 mod signing;
 mod site;
 

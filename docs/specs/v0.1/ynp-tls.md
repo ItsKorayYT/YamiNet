@@ -333,9 +333,13 @@ libraries are correct:
 
 ## Limitations
 
-- Private IPv4 LAN at most. Internet listeners, IPv6 LAN addresses, discovery,
+- Private IPv4 LAN at most. Internet listeners, IPv6 LAN addresses,
   names and NAT traversal are deliberately not supported; each needs a
   separate review of exposure, quotas and abuse handling.
+- Optional LAN discovery is a separate, unauthenticated query-response
+  protocol. It supplies an untrusted candidate ID and endpoint; the existing
+  TLS verifier still requires proof of that exact key. See
+  [LAN discovery](lan-discovery.md).
 - LAN listening has been tested with client and node on one computer bound to
   its private address, not yet across two physical machines (see
   [LAN testing](../../lan-testing.md)).

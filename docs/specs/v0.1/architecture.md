@@ -63,6 +63,12 @@ explicit opt-in, one private IPv4 LAN address, and the browser opens `ynps://`
 addresses through it ([ynp-tls.md](ynp-tls.md)). Address policy is a
 transport concern (`ynp_tls::Scope`), so other transports, such as privacy
 routing, can be added beside it. Routing semantics, robust resource quotas,
-discovery and trust distribution would still be needed before any broader
+internet-wide discovery and trust distribution would still be needed before any broader
 network use. No existing web engine, markup translation or script runtime is
 part of the architecture.
+
+Local discovery is an optional separate `ynp-discovery` crate. Explicit
+multicast queries on selected private IPv4 interfaces return untrusted public
+IDs and TLS endpoints; nodes respond only in `--discoverable` mode. The browser
+requires selection and an explicit open action, then uses the existing pinned
+TLS transport unchanged. See [lan-discovery.md](lan-discovery.md).

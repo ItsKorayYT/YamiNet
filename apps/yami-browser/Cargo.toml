@@ -9,6 +9,7 @@ license.workspace = true
 workspace = true
 
 [dependencies]
+ynp-discovery = { path = "../../crates/ynp-discovery" }
 ylang = { path = "../../crates/ylang" }
 ysl = { path = "../../crates/ysl" }
 ynp = { path = "../../crates/ynp" }

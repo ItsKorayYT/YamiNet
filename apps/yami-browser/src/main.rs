@@ -1,5 +1,6 @@
 mod chrome;
 mod desktop;
+mod discovery;
 mod model;
 mod terminal;
 

@@ -15,8 +15,13 @@ The original YLang, YSL and YNP architecture remains intact.
 **Experimental: not secure for sensitive use.** `ynp://` is plaintext,
 unauthenticated and limited to numeric loopback addresses. `ynps://` addresses
 use TLS 1.3 to the node ID named in the address and may point at a numeric
-loopback or private IPv4 LAN address. There is no anonymity, discovery, HTTP
-support or DNS resolution. See [the security notes](../SECURITY.md).
+loopback or private IPv4 LAN address. Opt-in LAN discovery is available through
+**Find local nodes** in the sidebar; select a private interface, search, inspect
+the full untrusted ID, and explicitly open its `ynps://` homepage. The existing
+TLS connection must prove that ID before requesting the page. Discovery never
+opens sites automatically or saves trust. There is no anonymity, HTTP support
+or DNS resolution. See [the security notes](../SECURITY.md) and
+[Windows discovery/firewall testing](discovery-testing.md).
 
 ## Launch on Windows
 

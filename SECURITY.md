@@ -24,7 +24,7 @@ Connections use three-second per-operation socket timeouts, and the node also
 ends any connection after ten seconds in total. `serve-dir` handles at most its
 configured number of workers (1..32) at once; other clients wait in the
 operating system's accept queue, so a few slow local clients can still delay
-others for up to that deadline. There are no quotas, rate limits, hardened multi-client scheduling,
+others for up to that deadline. Document serving has no quotas, rate limits, hardened multi-client scheduling,
 authorization checks, sandboxing, or robust denial-of-service protections.
 The frame codec bounds allocation before reading payloads but this is not a
 claim of comprehensive resistance to resource exhaustion.
@@ -83,6 +83,26 @@ ID. Requests run on bounded background workers; stale
 responses are discarded using tab identity and navigation generation. This
 prevents navigation races but does not authenticate the responding peer or
 guarantee cancellation of a request already in progress.
+
+Opt-in LAN discovery (`--tls --lan --discoverable`) answers only multicast
+queries on the explicitly selected private interface and subnet. It is off
+by default and never periodically announces nodes. Browser searches send one
+bounded query only after the user selects an interface and starts a search.
+Packets and result counts are bounded, matched to a random current request ID,
+deduplicated and rate limited. OS packet-info enforces the receiving interface
+and destination even though multicast reception uses a wildcard UDP bind on
+Windows. TLS listeners continue to bind one specific address.
+
+Discovery exposes public IDs, addresses, ports and homepage keys to LAN
+observers. Advertisements are untrusted claims; a malicious peer can advertise
+its own ID or forge another one. The user must explicitly select and open a
+result before the unchanged TLS verifier checks the advertised key. Proving
+that key does not establish the owner's identity. Discoveries are never saved
+as trusted identities or substituted for existing pins. Private keys and
+document contents are never in discovery packets. No anonymity, LAN observer
+protection, general denial-of-service resistance or firewall configuration is
+provided. See [the protocol](docs/specs/v0.1/lan-discovery.md) and
+[Windows discovery testing](docs/discovery-testing.md).
 
 The native text and graphics libraries, bundled font, window-system backend and
 clipboard integration expand the local dependency surface. Documents still

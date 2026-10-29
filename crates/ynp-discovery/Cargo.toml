@@ -1,0 +1,18 @@
+[package]
+name = "ynp-discovery"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+getrandom = "0.4.3"
+if-addrs = "0.15"
+socket2 = "0.6"
+socket-pktinfo = "0.4.1"
+yami-identity = { path = "../yami-identity" }
+ynp = { path = "../ynp" }
+ynp-tls = { path = "../ynp-tls" }

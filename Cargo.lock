@@ -628,6 +628,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "if-addrs"
+version = "0.15.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c0a05c691e1fae256cf7013d99dad472dc52d5543322761f83ec8d47eab40d2b"
+dependencies = [
+ "libc",
+ "windows-sys 0.61.2",
+]
+
+[[package]]
 name = "indexmap"
 version = "2.14.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1623,6 +1633,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "socket-pktinfo"
+version = "0.4.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "612942246d0cc239cfd83af1dfd39be47f649208a3524e5e9da651910128e0ac"
+dependencies = [
+ "libc",
+ "socket2",
+ "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "socket2"
+version = "0.6.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c3d1e2c7f27f8d4cb10542a02c49005dbd6e93095799d6f3be745fae9f8fedd4"
+dependencies = [
+ "libc",
+ "windows-sys 0.61.2",
+]
+
+[[package]]
 name = "softbuffer"
 version = "0.4.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2255,6 +2286,7 @@ dependencies = [
  "yami-render",
  "ylang",
  "ynp",
+ "ynp-discovery",
  "ynp-tls",
  "ysl",
 ]
@@ -2278,6 +2310,7 @@ dependencies = [
  "yami-identity",
  "ylang",
  "ynp",
+ "ynp-discovery",
  "ynp-tls",
 ]
 
@@ -2314,6 +2347,19 @@ version = "0.1.0"
 [[package]]
 name = "ynp"
 version = "0.1.0"
+
+[[package]]
+name = "ynp-discovery"
+version = "0.1.0"
+dependencies = [
+ "getrandom 0.4.3",
+ "if-addrs",
+ "socket-pktinfo",
+ "socket2",
+ "yami-identity",
+ "ynp",
+ "ynp-tls",
+]
 
 [[package]]
 name = "ynp-tls"

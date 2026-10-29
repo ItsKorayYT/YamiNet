@@ -27,10 +27,12 @@ pub fn run(args: Vec<String>) -> Result<(), Box<dyn Error>> {
     }
     let event_loop = EventLoop::<()>::with_user_event().build()?;
     let proxy = event_loop.create_proxy();
-    let loader = Loader::new(Arc::new(move || {
+    let wake: Arc<dyn Fn() + Send + Sync> = Arc::new(move || {
         let _ = proxy.send_event(());
-    }))?;
+    });
+    let loader = Loader::new(Arc::clone(&wake))?;
     let mut app = Desktop::new(loader);
+    app.discovery = crate::discovery::Discovery::new(wake);
     if let Some(address) = args.first() {
         let _ = app.browser.navigate(address, &app.loader);
     }
@@ -119,6 +121,7 @@ struct Desktop {
     text: TextEngine,
     browser: Browser,
     loader: Loader,
+    discovery: crate::discovery::Discovery,
     scene: Scene,
     editor: Editor,
     mouse: (f32, f32),
@@ -144,6 +147,7 @@ impl Desktop {
             text: TextEngine::new(),
             browser: Browser::new(),
             loader,
+            discovery: crate::discovery::Discovery::new(Arc::new(|| {})),
             scene: Scene::default(),
             editor: Editor::default(),
             mouse: (-1.0, -1.0),
@@ -194,6 +198,32 @@ impl Desktop {
     }
     fn act(&mut self, action: Action) {
         match action {
+            Action::FindLocal => {
+                self.discovery.toggle();
+                self.clear_focus();
+            }
+            Action::SelectLan => self.discovery.choose_next_interface(),
+            Action::SearchLan => self.discovery.search(),
+            Action::LocalNode(index) => {
+                if index < self.discovery.results.len() {
+                    self.discovery.selected = Some(index);
+                }
+            }
+            Action::OpenLocal => {
+                if let Some(url) = self.discovery.selected_url() {
+                    let _ = self.browser.navigate(&url, &self.loader);
+                    self.discovery.open = false;
+                    self.clear_focus();
+                }
+            }
+            Action::LocalPage(next) => {
+                if next && (self.discovery.page + 1) * 4 < self.discovery.results.len() {
+                    self.discovery.page += 1;
+                } else if !next {
+                    self.discovery.page = self.discovery.page.saturating_sub(1);
+                }
+            }
+            Action::DiscoveryPanel => {}
             Action::Address => {
                 self.composing = false;
                 self.editor.activate(&self.browser.active().address);
@@ -272,6 +302,12 @@ impl Desktop {
         tab.scroll = tab.target_scroll;
     }
     fn link(&self) -> Option<String> {
+        let (width, height, _) = self.size();
+        if self.discovery.open
+            && chrome::discovery_rect(width, height).contains(self.mouse.0, self.mouse.1)
+        {
+            return None;
+        }
         let area = self.viewport();
         if !area.contains(self.mouse.0, self.mouse.1) {
             return None;
@@ -481,6 +517,7 @@ impl Desktop {
                 chrome::round_viewport(&mut c, &ui);
             }
         }
+        chrome::discovery_panel(&mut c, &mut scene, &ui, &self.discovery);
         self.scene = scene;
     }
     fn keyboard(&mut self, key: &Key, text: Option<&str>, event_loop: &ActiveEventLoop) {
@@ -558,6 +595,7 @@ impl Desktop {
         }
         match key {
             Key::Named(NamedKey::Escape) => {
+                self.discovery.open = false;
                 self.clear_focus();
             }
             Key::Named(NamedKey::Tab) if command => {
@@ -682,7 +720,8 @@ impl ApplicationHandler<()> for Desktop {
         }
     }
     fn user_event(&mut self, _: &ActiveEventLoop, _: ()) {
-        if self.browser.poll(&self.loader) {
+        let discovery_changed = self.discovery.poll();
+        if self.browser.poll(&self.loader) || discovery_changed {
             self.redraw();
         }
     }
@@ -832,6 +871,176 @@ mod tests {
         let mut pix = Pixmap::new(w as u32, h as u32).unwrap();
         app.compose(&mut pix);
         pix
+    }
+
+    #[test]
+    fn discovery_selection_is_untrusted_and_does_not_navigate_or_replace_tabs() {
+        let mut app = headless(1440.0, 900.0);
+        app.browser.navigate("local:welcome", &app.loader).unwrap();
+        settle(&mut app);
+        app.browser.open_tab();
+        let original = app.browser.active().address.clone();
+        let id = *yami_identity::NodeIdentity::generate().unwrap().id();
+        let advert =
+            ynp_discovery::Advertisement::new(id, "192.168.1.20:7443".parse().unwrap(), "home")
+                .unwrap();
+        app.discovery.open = true;
+        app.discovery.results = vec![advert.clone()];
+        let pix = frame(&mut app);
+        assert!(app
+            .scene
+            .hits
+            .iter()
+            .any(|hit| hit.action == Action::FindLocal));
+        let hit = app
+            .scene
+            .hits
+            .iter()
+            .find(|hit| hit.action == Action::LocalNode(0))
+            .unwrap();
+        let action = app.scene.hit(hit.rect.x + 5.0, hit.rect.y + 5.0).unwrap();
+        app.act(action);
+        frame(&mut app);
+        assert_eq!(app.discovery.selected_url(), Some(advert.url()));
+        assert_eq!(app.browser.active().address, original);
+        assert_eq!(app.browser.tabs.len(), 2);
+        assert_eq!(app.browser.tabs[0].address, "local:welcome");
+        assert!(app.browser.active().security().is_none());
+        assert!(app
+            .scene
+            .hits
+            .iter()
+            .any(|hit| hit.action == Action::OpenLocal));
+        assert!(pix.width() > 0);
+        app.discovery.choose_next_interface(); // no interface selected: no traffic
+        app.act(Action::FindLocal);
+        assert!(!app.discovery.open);
+        assert_eq!(app.browser.active().address, original);
+    }
+
+    #[test]
+    #[ignore = "uses selected private interface and multicast; set YAMINET_TEST_LAN_ADDRESS"]
+    fn discovered_node_opens_via_verified_tls_and_preserves_navigation() {
+        use ynp_discovery::{Advertisement, Config, Responder};
+        let ip: std::net::Ipv4Addr = std::env::var("YAMINET_TEST_LAN_ADDRESS")
+            .expect("select a private LAN interface")
+            .parse()
+            .unwrap();
+        let interface = ynp_discovery::interface(ip).unwrap();
+        let config = Config::from_env().unwrap();
+        let identity = Arc::new(yami_identity::NodeIdentity::generate().unwrap());
+        let id = *identity.id();
+        let listener = ynp_tls::TlsListener::bind_lan((ip, 0).into(), identity).unwrap();
+        let std::net::SocketAddr::V4(endpoint) = listener.local_addr().unwrap() else {
+            unreachable!()
+        };
+        let mut store = yami_node::Store::default();
+        store
+            .insert(ynp::DocumentData {
+                key: "home".into(),
+                source: "@page 0.1\n  title Discovered home\n= Discovered home\n".into(),
+                style: String::new(),
+            })
+            .unwrap();
+        let server = std::thread::spawn(move || {
+            // Two successful loads (open and back), then a forged claim.
+            for _ in 0..3 {
+                let _ = yami_node::serve_once(&listener, &store);
+            }
+        });
+        let responder = Responder::start(
+            interface.clone(),
+            config,
+            Advertisement::new(id, endpoint, "home").unwrap(),
+        )
+        .unwrap();
+        let mut app = headless(1440.0, 900.0);
+        app.browser.navigate("local:welcome", &app.loader).unwrap();
+        settle(&mut app);
+        app.browser.open_tab();
+        app.discovery.open = true;
+        app.discovery.interfaces = vec![interface];
+        app.act(Action::SelectLan);
+        app.act(Action::SearchLan);
+        assert!(app.discovery.searching());
+        // A repeated search click cannot replace the current worker.
+        app.act(Action::SearchLan);
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while app.discovery.searching() {
+            assert!(matches!(app.browser.active().state, PageState::Home));
+            app.discovery.poll();
+            assert!(
+                Instant::now() < deadline,
+                "browser discovery exceeded its deadline"
+            );
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        assert!(
+            app.discovery.selected.is_none(),
+            "responses never select a node"
+        );
+        let index = app
+            .discovery
+            .results
+            .iter()
+            .position(|node| node.id() == id)
+            .expect("browser discovers the node");
+        app.act(Action::LocalNode(index));
+        assert!(matches!(app.browser.active().state, PageState::Home));
+        app.act(Action::OpenLocal);
+        settle(&mut app);
+        assert_eq!(
+            app.browser.active().security(),
+            Some(&crate::model::Security::Verified(id))
+        );
+        assert_eq!(app.browser.active().title(), "Discovered home");
+        assert_eq!(app.browser.tabs.len(), 2);
+        app.act(Action::Navigate("local:about"));
+        settle(&mut app);
+        app.act(Action::Back);
+        settle(&mut app);
+        assert_eq!(app.browser.active().title(), "Discovered home");
+        let forged = *yami_identity::NodeIdentity::generate().unwrap().id();
+        app.discovery.results = vec![Advertisement::new(forged, endpoint, "home").unwrap()];
+        app.discovery.selected = Some(0);
+        app.act(Action::OpenLocal);
+        settle(&mut app);
+        assert!(
+            matches!(&app.browser.active().state, PageState::Error(error) if error.contains("Authentication failed"))
+        );
+        assert!(app.browser.active().security().is_none());
+        app.act(Action::Navigate("local:welcome"));
+        settle(&mut app);
+        assert_eq!(app.browser.active().title(), "Welcome to YamiNet");
+        drop(responder);
+        server.join().unwrap();
+    }
+
+    #[test]
+    #[ignore = "writes a manual visual QA screenshot under target/screenshots"]
+    fn capture_discovery() {
+        let mut app = headless(1440.0, 900.0);
+        app.discovery.open = true;
+        app.discovery.results = (20..23)
+            .map(|host| {
+                ynp_discovery::Advertisement::new(
+                    *yami_identity::NodeIdentity::generate().unwrap().id(),
+                    format!("192.168.1.{host}:7443").parse().unwrap(),
+                    "home",
+                )
+                .unwrap()
+            })
+            .collect();
+        app.discovery.selected = Some(0);
+        app.discovery.status = "3 untrusted node(s). Select one to inspect.".into();
+        let output = std::path::Path::new(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../target/screenshots"
+        ));
+        std::fs::create_dir_all(output).unwrap();
+        frame(&mut app)
+            .save_png(output.join("discovery.png"))
+            .unwrap();
     }
 
     #[test]

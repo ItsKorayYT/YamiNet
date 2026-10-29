@@ -1,5 +1,9 @@
 # Testing YamiNet between two Windows computers
 
+For opt-in discovery without typing the remote address into the browser, see
+[Windows LAN discovery testing](discovery-testing.md), including the separate
+Private-network UDP firewall rules and physical validation checklist.
+
 **EXPERIMENTAL. TLS 1.3 to a pinned node ID on a private LAN. Not
 independently reviewed. No anonymity.** Read the threat model in
 [YNP over TLS](specs/v0.1/ynp-tls.md#threat-model) before serving anything over

@@ -38,6 +38,13 @@ impl Rect {
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Action {
+    FindLocal,
+    SelectLan,
+    SearchLan,
+    LocalNode(usize),
+    OpenLocal,
+    LocalPage(bool),
+    DiscoveryPanel,
     Tab(usize),
     Close(usize),
     NewTab,
@@ -625,7 +632,236 @@ pub fn paint(c: &mut Canvas<'_>, browser: &Browser, ui: &ChromeState<'_>) -> Sce
     c.icon("home", home.x + 13.0, home.y + 13.0, MUTED);
     scene.add(home, Action::Home);
 
+    let find = Rect::new(left + 32.0, home.y, inner - 32.0, 26.0);
+    ghost(
+        c,
+        find,
+        false,
+        hover(find) || ui.focus == Some(&Action::FindLocal),
+    );
+    c.text(
+        "Find local nodes",
+        find.x + 5.0,
+        text_y(find, 12.0),
+        find.w - 10.0,
+        12.0,
+        MUTED,
+        false,
+    );
+    scene.add(find, Action::FindLocal);
+
     scene
+}
+
+/// A small flyout anchored beside the existing sidebar. It never navigates on
+/// receipt or selection; Open homepage is a separate, explicit action.
+pub fn discovery_panel(
+    c: &mut Canvas<'_>,
+    scene: &mut Scene,
+    ui: &ChromeState<'_>,
+    discovery: &crate::discovery::Discovery,
+) {
+    if !discovery.open {
+        return;
+    }
+    let panel = discovery_rect(ui.width, ui.height);
+    // Prevent clicks inside the flyout from falling through to a document.
+    scene.add(panel, Action::DiscoveryPanel);
+    c.round(panel, 10.0, SIDEBAR_BG, SIDEBAR_BG, Some(ACTIVE_TAB));
+    let x = panel.x + 14.0;
+    let width = panel.w - 28.0;
+    let mut y = panel.y + 12.0;
+    c.text("Find local nodes", x, y, width - 40.0, 15.0, INK, true);
+    let close = Rect::new(panel.x + panel.w - 38.0, y, 25.0, 24.0);
+    c.text("Close", close.x - 10.0, y + 2.0, 40.0, 11.0, MUTED, false);
+    scene.add(Rect::new(close.x - 10.0, y, 40.0, 24.0), Action::FindLocal);
+    y += 30.0;
+    let interface = discovery
+        .interface
+        .and_then(|i| discovery.interfaces.get(i));
+    let label = interface.map_or_else(
+        || "Choose LAN interface (click to cycle)".into(),
+        |i| {
+            format!(
+                "{} - {} (click to cycle)",
+                i.address(),
+                i.name
+                    .chars()
+                    .filter(|c| !c.is_control())
+                    .take(40)
+                    .collect::<String>()
+            )
+        },
+    );
+    panel_button(
+        c,
+        scene,
+        ui,
+        Rect::new(x, y, width, 30.0),
+        &label,
+        Action::SelectLan,
+        !discovery.searching() && !discovery.interfaces.is_empty(),
+    );
+    y += 36.0;
+    panel_button(
+        c,
+        scene,
+        ui,
+        Rect::new(x, y, width, 28.0),
+        "Search selected LAN",
+        Action::SearchLan,
+        interface.is_some() && !discovery.searching(),
+    );
+    y += 34.0;
+    c.text(&discovery.status, x, y, width, 11.0, MUTED, false);
+    y += 22.0;
+    c.text(
+        "Visible to LAN observers. No anonymity.",
+        x,
+        y,
+        width,
+        11.0,
+        MUTED,
+        false,
+    );
+    y += 25.0;
+    for (index, node) in discovery
+        .results
+        .iter()
+        .enumerate()
+        .skip(discovery.page * 4)
+        .take(4)
+    {
+        let row = Rect::new(x, y, width, 35.0);
+        let action = Action::LocalNode(index);
+        ghost(
+            c,
+            row,
+            discovery.selected == Some(index),
+            row.contains(ui.mouse.0, ui.mouse.1) || ui.focus == Some(&action),
+        );
+        c.text(
+            &format!("{}  Untrusted", node.endpoint()),
+            x + 7.0,
+            y + 1.0,
+            width - 14.0,
+            12.0,
+            INK,
+            false,
+        );
+        c.text(
+            &format!("{}...", &node.id().to_string()[..24]),
+            x + 7.0,
+            y + 19.0,
+            width - 14.0,
+            10.0,
+            MUTED,
+            false,
+        );
+        scene.add(row, action);
+        y += 39.0;
+    }
+    // Fixed footer leaves all result pages and the full selected ID accessible.
+    y = panel.y + 344.0;
+    panel_button(
+        c,
+        scene,
+        ui,
+        Rect::new(x, y, width / 2.0 - 3.0, 25.0),
+        "Previous",
+        Action::LocalPage(false),
+        discovery.page > 0,
+    );
+    panel_button(
+        c,
+        scene,
+        ui,
+        Rect::new(x + width / 2.0 + 3.0, y, width / 2.0 - 3.0, 25.0),
+        "Next",
+        Action::LocalPage(true),
+        (discovery.page + 1) * 4 < discovery.results.len(),
+    );
+    y += 34.0;
+    if let Some(node) = discovery.selected.and_then(|i| discovery.results.get(i)) {
+        c.text(
+            "Claimed ID - untrusted until TLS verifies:",
+            x,
+            y,
+            width,
+            11.0,
+            PLAINTEXT,
+            false,
+        );
+        let id = node.id().to_string();
+        // Full ID, split without ellipsis; no trust record is created.
+        for (i, part) in id.as_bytes().chunks(31).enumerate() {
+            c.text(
+                std::str::from_utf8(part).unwrap(),
+                x,
+                y + 19.0 + i as f32 * 17.0,
+                width,
+                12.0,
+                INK,
+                false,
+            );
+        }
+        panel_button(
+            c,
+            scene,
+            ui,
+            Rect::new(x, y + 59.0, width, 29.0),
+            "Open homepage (ynps://)",
+            Action::OpenLocal,
+            true,
+        );
+    } else {
+        c.text(
+            "Select a result to inspect its full node ID.",
+            x,
+            y,
+            width,
+            11.0,
+            MUTED,
+            false,
+        );
+    }
+}
+
+pub fn discovery_rect(width: f32, height: f32) -> Rect {
+    Rect::new(
+        SIDEBAR_WIDTH + 8.0,
+        (height - 486.0).max(8.0),
+        (width - SIDEBAR_WIDTH - 24.0).clamp(1.0, 490.0),
+        474.0,
+    )
+}
+fn panel_button(
+    c: &mut Canvas<'_>,
+    scene: &mut Scene,
+    ui: &ChromeState<'_>,
+    rect: Rect,
+    label: &str,
+    action: Action,
+    enabled: bool,
+) {
+    let fill = if enabled && (rect.contains(ui.mouse.0, ui.mouse.1) || ui.focus == Some(&action)) {
+        ACTIVE_TAB
+    } else {
+        HOVER_BG
+    };
+    c.round(rect, 5.0, fill, fill, None);
+    c.text(
+        label,
+        rect.x + 7.0,
+        text_y(rect, 11.0),
+        rect.w - 14.0,
+        11.0,
+        if enabled { INK } else { MUTED },
+        false,
+    );
+    if enabled {
+        scene.add(rect, action);
+    }
 }
 /// What the connection that delivered the page on screen proved, drawn under
 /// the address field. Only TLS to a pinned node ID gets the padlock; plaintext

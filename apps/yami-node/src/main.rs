@@ -20,7 +20,7 @@ const USAGE: &str = "yami-node demo
 yami-node tls-demo <identity-directory-1> <identity-directory-2>
 yami-node serve <loopback-IP:port> <key> <document.ylang> <style.ysl>
 yami-node serve-dir <loopback-IP:port> <site-directory> [--workers 1..32] [--identity <identity-directory> [--tls]]
-yami-node serve-dir <private-LAN-IPv4:port> <site-directory> --identity <identity-directory> --tls --lan [--workers 1..32]
+yami-node serve-dir <private-LAN-IPv4:port> <site-directory> --identity <identity-directory> --tls --lan [--discoverable] [--workers 1..32]
 yami-node fetch <loopback-IP:port> <key>
 yami-node fetch <ynps://node-id@loopback-or-private-LAN-IP:port/key>
 yami-node identity new [--dir <identity-directory>]
@@ -30,7 +30,10 @@ yami-node identity sign-site <site-directory> [--dir <identity-directory>]
 yami-node identity verify-site <site-directory> <node-id>
 EXPERIMENTAL: ynp:// and commands without --tls are plaintext and unauthenticated.
 ynps://, --tls and tls-demo use TLS 1.3 to a pinned node ID. Neither is reviewed or anonymous.
---lan listens on one private IPv4 address (10/8, 172.16/12, 192.168/16) and requires --tls.";
+--lan listens on one private IPv4 address (10/8, 172.16/12, 192.168/16) and requires --tls.
+--discoverable requires --tls --lan and answers local multicast queries only on that interface.
+Discovery defaults to 239.255.89.78:39817/UDP; configure YAMINET_DISCOVERY_GROUP/PORT on both computers.
+Discovery exposes your public ID and address to LAN observers; it provides no anonymity.";
 const IDENTITY_NOTE: &str = "EXPERIMENTAL: node signatures attribute metadata to a key. They do not encrypt, hide or anonymize anything.";
 #[cfg(unix)]
 const PROTECTION: &str = "owner-only permissions (0600), checked on every load";
@@ -212,6 +215,27 @@ fn serve_dir(address: SocketAddr, root: &str, options: ServeOptions) -> Result<(
                 TlsListener::bind(address, identity)?
             };
             let address = listener.local_addr()?;
+            // Keep the guard alive alongside the TLS listener. Without the flag
+            // no discovery socket is created, even on an opted-in LAN listener.
+            let _discovery = if options.discoverable {
+                let SocketAddr::V4(endpoint) = address else {
+                    return Err("discovery requires private IPv4".into());
+                };
+                let interface = ynp_discovery::interface(*endpoint.ip())?;
+                let config = ynp_discovery::Config::from_env()?;
+                let pages = site.pages()?;
+                let home = pages
+                    .iter()
+                    .find(|key| *key == "home")
+                    .or(pages.first())
+                    .ok_or("--discoverable needs at least one page to advertise")?;
+                let advert = ynp_discovery::Advertisement::new(id, endpoint, home)?;
+                let responder = ynp_discovery::Responder::start(interface, config, advert)?;
+                eprintln!("Discoverable on {} via {}:{}/UDP (TTL 1). Public ID and address are visible to LAN observers.", endpoint.ip(), config.group, config.port);
+                Some(responder)
+            } else {
+                None
+            };
             eprintln!("Serving site {root} via YNP over TLS 1.3 on {address} as {id}");
             if options.lan {
                 eprintln!(
@@ -266,9 +290,11 @@ struct ServeOptions {
     identity: Option<PathBuf>,
     tls: bool,
     lan: bool,
+    discoverable: bool,
 }
 fn serve_dir_options(options: &[String]) -> Result<ServeOptions> {
     let (mut workers, mut identity, mut tls, mut lan) = (None, None, false, false);
+    let mut discoverable = false;
     let mut options = options.iter();
     while let Some(flag) = options.next() {
         match flag.as_str() {
@@ -280,8 +306,12 @@ fn serve_dir_options(options: &[String]) -> Result<ServeOptions> {
             }
             "--tls" if !tls => tls = true,
             "--lan" if !lan => lan = true,
+            "--discoverable" if !discoverable => discoverable = true,
             _ => return Err(USAGE.into()),
         }
+    }
+    if discoverable && (!tls || !lan) {
+        return Err("--discoverable needs --tls --lan and a selected private LAN interface".into());
     }
     if lan && !tls {
         return Err("--lan needs --tls: YNP is never served in plaintext beyond loopback".into());
@@ -297,6 +327,7 @@ fn serve_dir_options(options: &[String]) -> Result<ServeOptions> {
         identity,
         tls,
         lan,
+        discoverable,
     })
 }
 fn identity_dir(options: &[String]) -> Result<PathBuf> {

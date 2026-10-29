@@ -173,6 +173,22 @@ are marked **Not encrypted · not verified**. The steps for two Windows
 computers, including the firewall, are in [LAN testing](docs/lan-testing.md);
 that two-machine procedure has not yet been run as part of development.
 
+To find nodes without entering their IP addresses, start the node with
+`--tls --lan --discoverable` (and its `--identity` directory). In the browser,
+click **Find local nodes**, choose your private LAN interface, then click
+**Search selected LAN**. Select a result to inspect its full claimed node ID,
+then **Open homepage (ynps://)** to verify that key over TLS 1.3 and load its
+homepage. Results stay marked untrusted; discovery does not recognize a node's
+owner or add it to saved identities. Sites never open automatically.
+
+Discovery uses one UDP multicast query per search to `239.255.89.78:39817`,
+TTL 1, and unicast responses. It has no periodic announcements. Nodes without
+`--discoverable` never answer. Configure `YAMINET_DISCOVERY_GROUP` and
+`YAMINET_DISCOVERY_PORT` identically on both computers if needed. Discovery
+metadata is visible to LAN observers and provides no anonymity. See
+[Windows discovery/firewall testing](docs/discovery-testing.md) and the
+[versioned discovery protocol](docs/specs/v0.1/lan-discovery.md).
+
 ## Workspace
 
 | Package | Responsibility |
@@ -181,6 +197,7 @@ that two-machine procedure has not yet been run as part of development.
 | `ysl` | Bounded original style parser and typed presentation settings |
 | `ynp` | Binary frame codec, strict limits, transport traits, legacy plaintext loopback TCP client/listener |
 | `ynp-tls` | YNP over TLS 1.3 (rustls), authenticated against a pinned node ID, loopback or opt-in private LAN |
+| `ynp-discovery` | Opt-in IPv4 LAN multicast queries, bounded untrusted advertisements and rate-limited responses |
 | `yami-render` | Original terminal/bitmap renderer plus shaped native document layout and antialiased text |
 | `yami-browser` | Native desktop tabs/navigation and preserved terminal/PPM document tools |
 | `yami-identity` | Persistent Ed25519 node identities, node IDs, domain-separated metadata signatures |
@@ -242,7 +259,8 @@ to uppercase and unsupported characters to a box; this limitation does not
 describe the desktop font renderer. Oversized layouts and bitmaps fail with
 an error rather than allocating without bounds.
 
-No peer discovery, distributed lookup, anonymous routing, internet or
+Peer discovery is limited to explicitly selected private IPv4 LAN interfaces.
+There is no distributed lookup, anonymous routing, internet or
 production networking, NAT traversal, protocol negotiation, multiplexing,
 compression or cache. The TLS transport reaches loopback and private IPv4 LAN
 addresses only, and has no revocation or client authentication: anyone on the
