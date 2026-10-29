@@ -15,7 +15,7 @@ The original YLang, YSL and YNP architecture remains intact.
 **Experimental: not secure for sensitive use.** `ynp://` is plaintext,
 unauthenticated and limited to numeric loopback addresses. `ynps://` addresses
 use TLS 1.3 to the node ID named in the address and may point at a numeric
-loopback or private IPv4 LAN address. Opt-in LAN discovery is available through
+loopback, private IPv4 LAN or known public IPv4 address. Opt-in LAN discovery is available through
 **Find local nodes** in the sidebar; select a private interface, search, inspect
 the full untrusted ID, and explicitly open its `ynps://` homepage. The existing
 TLS connection must prove that ID before requesting the page. Discovery never
@@ -103,8 +103,17 @@ identity, the page shows `Authentication failed at <address>: ...` with both
 IDs, and nothing is requested from it. Reload verifies the node again. See
 [LAN testing](lan-testing.md) for two Windows computers.
 
-Stop each sample node with Ctrl-C in its terminal. Do not forward its ports or
-bind it publicly. `yami://` addresses are not supported. All peer application
+Known remote nodes use the same address field, tabs, renderer, errors and
+verification path: enter `ynps://<known-node-id>@<public-IPv4>:<port>/home`.
+The remote node must explicitly use `--tls --public`; see
+[VPS/forwarded-node testing](internet-testing.md). There is no DNS, automatic
+public discovery or replacement of a configured pin. Manual bootstrap peers
+can be managed through `yami-node peer`; browser navigation never imports
+advertised peers into that list.
+
+Stop each sample node with Ctrl-C in its terminal. Keep the plaintext sample
+nodes local; remote experiments require the separate public TLS mode.
+`yami://` addresses are not supported. All peer application
 messages, including missing-document replies, use the existing binary YNP
 protocol.
 

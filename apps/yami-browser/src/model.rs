@@ -811,6 +811,7 @@ mod tests {
             format!("ynps://{id}@192.168.1.50:7443/home"),
             format!("ynps://{id}@10.0.0.7:7443/home"),
             format!("ynps://{id}@127.0.0.1:7443/home"),
+            format!("ynps://{id}@8.8.8.8:7443/home"),
         ] {
             assert_eq!(
                 Location::parse(&address).unwrap(),
@@ -823,7 +824,7 @@ mod tests {
                 "ynps://{}@192.168.1.50:7443/home",
                 id.to_string().to_uppercase()
             ),
-            format!("ynps://{id}@8.8.8.8:7443/home"),
+            format!("ynps://{id}@198.51.100.1:7443/home"),
             format!("ynps://{id}@0.0.0.0:7443/home"),
             format!("ynps://{id}@lan-host:7443/home"),
             format!("ynps://{id}@192.168.1.50:0/home"),
@@ -911,6 +912,102 @@ mod tests {
         let source =
             format!("@page 0.1\n  title {title}\n= {title}\n:: Links\n  > {link} | Next\n");
         std::fs::write(dir.join(format!("{key}.ylang")), source).unwrap();
+    }
+
+    /// Public-listener policy exercised locally, without claiming internet reach.
+    #[test]
+    fn public_mode_navigation_preserves_pins_tabs_and_error_recovery() {
+        let dir = site_dir("public-mode");
+        let identity = Arc::new(yami_identity::NodeIdentity::generate().unwrap());
+        let id = *identity.id();
+        let listener =
+            ynp_tls::TlsListener::bind_public("127.0.0.2:0".parse().unwrap(), identity).unwrap();
+        let address = listener.local_addr().unwrap();
+        write_page(
+            &dir,
+            "home",
+            "Public mode home",
+            &format!("ynp://{address}/about"),
+        );
+        write_page(
+            &dir,
+            "about",
+            "Public mode about",
+            &format!("ynp://{address}/home"),
+        );
+        let site = yami_node::Site::open(&dir).unwrap();
+        let server = thread::spawn(move || {
+            for _ in 0..5 {
+                let _ = yami_node::serve_once(&listener, &site);
+            }
+        });
+        let loader = Loader::new(Arc::new(|| {})).unwrap();
+        let mut browser = Browser::new();
+        browser.navigate("local:welcome", &loader).unwrap();
+        wait(&mut browser, &loader);
+        browser.open_tab();
+        let home = ynp_tls::format_url(&id, address, "home");
+        browser.navigate(&home, &loader).unwrap();
+        assert_eq!(ready_title(&mut browser, &loader), "Public mode home");
+        browser
+            .follow(&format!("ynp://{address}/about"), &loader)
+            .unwrap();
+        assert_eq!(ready_title(&mut browser, &loader), "Public mode about");
+        assert_eq!(browser.active().security(), Some(&Security::Verified(id)));
+        browser.back(&loader);
+        assert_eq!(ready_title(&mut browser, &loader), "Public mode home");
+        browser.reload(&loader);
+        assert_eq!(ready_title(&mut browser, &loader), "Public mode home");
+        let wrong = node_id();
+        browser
+            .navigate(&ynp_tls::format_url(&wrong, address, "home"), &loader)
+            .unwrap();
+        wait(&mut browser, &loader);
+        assert!(
+            matches!(&browser.active().state, PageState::Error(error) if error.contains("Authentication failed"))
+        );
+        assert!(browser.active().security().is_none());
+        browser.navigate("local:about", &loader).unwrap();
+        wait(&mut browser, &loader);
+        assert!(matches!(browser.active().state, PageState::Ready(_)));
+        assert_eq!(browser.tabs.len(), 2);
+        assert_eq!(browser.tabs[0].address, "local:welcome");
+        server.join().unwrap();
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    #[ignore = "requires an owned reachable public endpoint in YAMINET_TEST_REMOTE_URL"]
+    fn browser_opens_owned_remote_site_over_pinned_tls() {
+        let address =
+            std::env::var("YAMINET_TEST_REMOTE_URL").expect("set an owned remote ynps:// URL");
+        let (id, endpoint, _) = ynp_tls::parse_url(&address).unwrap();
+        assert!(matches!(endpoint.ip(), std::net::IpAddr::V4(ip) if ynp_tls::is_public_ipv4(ip)));
+        let loader = Loader::new(Arc::new(|| {})).unwrap();
+        let mut browser = Browser::new();
+        browser.navigate("local:welcome", &loader).unwrap();
+        wait(&mut browser, &loader);
+        browser.open_tab();
+        browser.navigate(&address, &loader).unwrap();
+        wait(&mut browser, &loader);
+        assert!(
+            matches!(&browser.active().state, PageState::Ready(_)),
+            "{:?}",
+            browser.active().state
+        );
+        assert_eq!(browser.active().security(), Some(&Security::Verified(id)));
+        let wrong = node_id();
+        browser
+            .navigate(
+                &address.replace(&id.to_string(), &wrong.to_string()),
+                &loader,
+            )
+            .unwrap();
+        wait(&mut browser, &loader);
+        assert!(
+            matches!(&browser.active().state, PageState::Error(error) if error.contains("Authentication failed"))
+        );
+        assert_eq!(browser.tabs[0].address, "local:welcome");
     }
 
     /// The production loader against a real TLS node: typed address, links

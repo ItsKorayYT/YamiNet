@@ -5,9 +5,11 @@ YSL is presentation, YNP carries documents, and Yami Render performs native
 layout and software rasterization. Yami Browser now includes a native desktop
 interface with antialiased typography, tabs and an aqua glass theme.
 
-**Not secure for sensitive use.** Networking is restricted to numeric loopback
-IP addresses, plus private IPv4 LAN addresses for the authenticated transport
-when a node explicitly opts in with `--lan`. Privacy is a design goal, not a
+**Not secure for sensitive use.** TLS supports numeric loopback, private LAN
+and public IPv4 endpoints, with exact Ed25519 identity pinning. Listening is
+loopback-only by default; `--lan` and the separate `--public` mode require an
+explicit opt-in. Public support is experimental and not security-reviewed.
+Privacy is a design goal, not a
 security guarantee. Nodes can have persistent Ed25519 identities that sign
 site metadata. An experimental TLS 1.3 transport encrypts YNP and
 authenticates a node against a node ID the client trusts in advance; the
@@ -189,6 +191,32 @@ metadata is visible to LAN observers and provides no anonymity. See
 [Windows discovery/firewall testing](docs/discovery-testing.md) and the
 [versioned discovery protocol](docs/specs/v0.1/lan-discovery.md).
 
+### Known remote nodes and manual bootstrap peers
+
+For a disposable site on a reachable IPv4 endpoint you own:
+
+```text
+yami-node serve-dir <specific-local-IPv4>:7443 <test-site> --identity <key-directory> --tls --public
+yami-node peer add <known-node-id> <known-public-IPv4>:7443
+yami-node peer list
+yami-node peer connect <known-node-id>
+yami-node peer remove <known-node-id>
+```
+
+Replace the placeholders. Public mode binds one specific IPv4 address and
+accepts internet clients with bounded admission and deadlines; it never
+configures forwarding or firewall rules. The node's pages are readable by
+every reachable client. Browser users enter the operator's known
+`ynps://<node-id>@<public-IPv4>:7443/home`; the existing TLS verifier must prove
+that exact key before any page request. Plaintext stays loopback-only.
+
+Peers are manually configured, persistent and initially unverified. Their
+last-attempt status and last successful handshake timestamp are historical;
+every connection authenticates again. There is no automatic peer exchange or
+mandatory central service. Read [internet/VPS testing](docs/internet-testing.md)
+and [peer storage](docs/specs/v0.1/bootstrap-peers.md). Actual separate-network
+connectivity and a remote VPS have not been tested during development.
+
 ## Workspace
 
 | Package | Responsibility |
@@ -196,7 +224,7 @@ metadata is visible to LAN observers and provides no anonymity. See
 | `ylang` | Bounded document parser, typed AST, byte spans and line/column errors |
 | `ysl` | Bounded original style parser and typed presentation settings |
 | `ynp` | Binary frame codec, strict limits, transport traits, legacy plaintext loopback TCP client/listener |
-| `ynp-tls` | YNP over TLS 1.3 (rustls), authenticated against a pinned node ID, loopback or opt-in private LAN |
+| `ynp-tls` | YNP over pinned TLS 1.3, local/public IPv4 clients and separately opted-in LAN/public listeners |
 | `ynp-discovery` | Opt-in IPv4 LAN multicast queries, bounded untrusted advertisements and rate-limited responses |
 | `yami-render` | Original terminal/bitmap renderer plus shaped native document layout and antialiased text |
 | `yami-browser` | Native desktop tabs/navigation and preserved terminal/PPM document tools |
@@ -260,11 +288,12 @@ describe the desktop font renderer. Oversized layouts and bitmaps fail with
 an error rather than allocating without bounds.
 
 Peer discovery is limited to explicitly selected private IPv4 LAN interfaces.
-There is no distributed lookup, anonymous routing, internet or
-production networking, NAT traversal, protocol negotiation, multiplexing,
-compression or cache. The TLS transport reaches loopback and private IPv4 LAN
-addresses only, and has no revocation or client authentication: anyone on the
-LAN who can reach a node can read its pages. The plaintext transport has no
+There is no distributed lookup, anonymous routing, production-safe networking,
+NAT traversal, protocol negotiation, multiplexing, compression or cache.
+Public IPv4 connectivity is experimental and requires a known endpoint/ID;
+internet deployment has not been security-reviewed or validated across providers.
+TLS has no revocation or client authentication: anyone who can reach a node
+can read its pages. The plaintext transport has no
 authentication, encryption or replay protection and stays on loopback.
 See the versioned specs before extending them.
 

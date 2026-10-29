@@ -59,7 +59,7 @@ demo and tests use ephemeral ports to avoid collisions.
 
 This is a local architecture prototype, not a distributed or secure network.
 Node identities and an authenticated TLS channel exist for loopback and, by
-explicit opt-in, one private IPv4 LAN address, and the browser opens `ynps://`
+explicit opt-in, one private or public IPv4 address, and the browser opens `ynps://`
 addresses through it ([ynp-tls.md](ynp-tls.md)). Address policy is a
 transport concern (`ynp_tls::Scope`), so other transports, such as privacy
 routing, can be added beside it. Routing semantics, robust resource quotas,
@@ -72,3 +72,10 @@ multicast queries on selected private IPv4 interfaces return untrusted public
 IDs and TLS endpoints; nodes respond only in `--discoverable` mode. The browser
 requires selection and an explicit open action, then uses the existing pinned
 TLS transport unchanged. See [lan-discovery.md](lan-discovery.md).
+
+Known public IPv4 endpoints use the same pinned TLS verifier and YNP frames.
+Public listening is a separate `--public` opt-in with bounded admission and
+deadlines; it configures no network infrastructure. The node's `peers` module
+persists only manually supplied IDs/endpoints and historical connection status,
+never a remotely advertised trust graph. See [bootstrap-peers.md](bootstrap-peers.md)
+and [internet testing](../../internet-testing.md).

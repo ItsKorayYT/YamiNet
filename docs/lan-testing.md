@@ -139,9 +139,10 @@ Advanced Security". After testing, remove the rule you added:
 Remove-NetFirewallRule -DisplayName "YamiNet node (TLS, LAN)"
 ```
 
-Do not forward this port on your router. YamiNet refuses public addresses, and
-a LAN node drops connections from non-private source addresses, but the
-transport has not been reviewed for internet exposure.
+Do not forward this LAN-mode port on your router. A LAN listener drops
+connections from non-private source addresses. Deliberate remote experiments
+use the separate public TLS mode in [internet testing](internet-testing.md);
+that integration has not been reviewed for production internet exposure.
 
 ## 5. Computer B: check that A is reachable
 

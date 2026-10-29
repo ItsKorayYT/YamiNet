@@ -5,14 +5,16 @@ protection against a malicious local user. The default `ynp://` transport is
 plaintext, unauthenticated and loopback-only. Nodes can have persistent signing
 identities (below), and an experimental TLS 1.3 transport (below), used by the
 browser for `ynps://` addresses, authenticates a node against a pinned node ID
-on loopback or, by explicit opt-in, a private IPv4 LAN; neither has been
-independently reviewed. Every peer on the machine or the LAN and every received
+on loopback, LAN or known public IPv4 endpoints. Public listening needs a
+separate `--public` opt-in. This integration has not been independently
+reviewed or established as production-safe. Every peer and every received
 document must be considered untrusted. Do not put private documents,
-credentials or personal data in this prototype. Do not expose it through port
-forwarding or a public proxy.
+credentials or personal data in this prototype. Public experiments should use
+disposable content and narrowly restricted firewall rules, as described in
+[internet testing](docs/internet-testing.md).
 
 The concrete restrictions are numeric loopback-only TCP for plaintext YNP,
-numeric loopback or private IPv4 addresses for TLS, strict binary field
+numeric loopback/private/public IPv4 endpoints for pinned TLS, strict binary field
 and frame bounds, UTF-8 validation, a bounded document/style parser, rejection
 of control characters in parsed content, no executable content, no automatic
 network requests and no DNS resolution. These reduce accidental exposure but
@@ -24,8 +26,10 @@ Connections use three-second per-operation socket timeouts, and the node also
 ends any connection after ten seconds in total. `serve-dir` handles at most its
 configured number of workers (1..32) at once; other clients wait in the
 operating system's accept queue, so a few slow local clients can still delay
-others for up to that deadline. Document serving has no quotas, rate limits, hardened multi-client scheduling,
-authorization checks, sandboxing, or robust denial-of-service protections.
+others for up to that deadline. Explicit public listeners additionally cap
+accepted connections and starts per source IP/globally, and cap the TLS
+handshake at five seconds. There is no client authorization, sandboxing or
+robust denial-of-service protection.
 The frame codec bounds allocation before reading payloads but this is not a
 claim of comprehensive resistance to resource exhaustion.
 
@@ -55,10 +59,10 @@ certificates self-signed by the node identity key and valid for 24 hours. A
 client accepts only the node ID it was given before connecting and refuses
 other identities, invalid, altered or expired certificates, copied certificates
 without the key, and tampered traffic. TLS 1.2, resumption, early data and
-plaintext fallback are disabled. Listeners are loopback-only unless started
-with `serve-dir --tls --lan`, which binds exactly one private IPv4 address
+plaintext fallback are disabled. Listeners are loopback-only unless LAN or
+public mode is explicit. `serve-dir --tls --lan` binds exactly one private IPv4 address
 (never a wildcard or public address) and drops non-private peers; clients
-reach loopback and private IPv4 addresses only. Any host on that LAN can
+reach loopback, private and public IPv4 addresses. Any host on that LAN can
 connect and read every page the node serves, so restrict the port with the
 operating system firewall ([docs/lan-testing.md](docs/lan-testing.md)).
 The node key signs TLS messages only through a format-checked API that cannot
@@ -68,7 +72,26 @@ indefinitely; and which node ID to trust is still learned out of band. The
 threat model and limitations are in
 [docs/specs/v0.1/ynp-tls.md](docs/specs/v0.1/ynp-tls.md).
 
-Key rotation and revocation, client authentication, internet exposure, NAT
+`serve-dir --tls --public` is a separate listening mode, mutually exclusive
+with `--lan` and `--discoverable`. It binds one specific local IPv4 address
+(including a private bind behind a manually configured forward), refuses
+wildcards, and accepts public clients under bounded admission limits. It
+never alters firewall, router or provider settings. The browser/CLI use the
+same exact pinned-key verifier for public endpoints; authentication failure
+never triggers plaintext or key substitution. All served pages are public
+to reachable clients. Basic limits do not prevent internet-scale abuse.
+Actual separate-network/VPS and external firewall/capture testing have not
+been performed during development; see [the guide](docs/internet-testing.md).
+
+Manual bootstrap peers contain only operator-entered IDs/endpoints and
+historical status/success times. Add does not authenticate or connect. Every
+connect rechecks TLS, even after a previous success, and a failed connection
+preserves the pinned ID/address. Discovery and documents cannot add or replace
+peers. Local configuration and its timestamps/status are not cryptographic
+proof; protect the directory from modification. See
+[peer storage](docs/specs/v0.1/bootstrap-peers.md).
+
+Key rotation and revocation, client authentication, production internet operation, NAT
 traversal and anonymous routing require separate versioned designs and
 independent review. Encrypting a connection does not establish anonymity.
 

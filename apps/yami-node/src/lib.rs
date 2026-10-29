@@ -1,5 +1,6 @@
 //! Small document nodes: an in-memory store and a directory-backed site.
 //! Optional LAN discovery is provided separately by `ynp-discovery`.
+pub mod peers;
 mod signing;
 mod site;
 

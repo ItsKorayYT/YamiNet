@@ -6,3 +6,7 @@ node.key
 /demo-ids/
 # Identity directory used in docs/lan-testing.md and the LAN examples.
 /node-identity/
+# Local bootstrap endpoints and connection history are personal configuration.
+peers.tsv
+peers.lock
+peers-*.tmp

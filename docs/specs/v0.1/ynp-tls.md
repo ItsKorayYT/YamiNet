@@ -1,7 +1,7 @@
 # YNP over TLS 1.3 0.1 draft
 
-**EXPERIMENTAL. Not independently reviewed. Loopback, or one private IPv4 LAN
-address by explicit opt-in. No anonymity.**
+**EXPERIMENTAL. Not independently reviewed or production-safe. Local and public
+IPv4 clients; LAN/public listening requires separate opt-in. No anonymity.**
 This draft gives YNP an encrypted, integrity-protected connection in which the
 client verifies that the server holds the key of one node ID that the client
 trusted before connecting. It builds on the persistent node identities in
@@ -33,13 +33,26 @@ cargo run -p yami-browser -- --desktop ynps://<node-id>@192.168.1.50:7443/home
 `--lan` makes `serve-dir` listen on one private IPv4 address of the computer
 instead of loopback; see [Network scope](#network-scope). It requires `--tls`
 and therefore `--identity`: YNP is never served in plaintext beyond loopback.
-Without `--lan`, any non-loopback address is refused, and with it, `0.0.0.0`,
+Without `--lan` or `--public`, any non-loopback address is refused, and with `--lan`, `0.0.0.0`,
 loopback, link-local and public addresses are refused before an identity is
 loaded. The node prints its node ID, the `ynps://` URL of every page and an
 `Open in Yami Browser:` line with the full address of its start page (`home`
-if present). Clients need no option: a `ynps://` URL may name a loopback or
-private LAN address. Step-by-step instructions for two Windows computers,
+if present). Clients need no option: a `ynps://` URL may name a loopback,
+private LAN or ordinary public IPv4 address. Step-by-step instructions for two Windows computers,
 including the firewall, are in [LAN testing](../../lan-testing.md).
+
+### Explicit public mode and bootstrap pins
+
+`serve-dir <specific-local-IPv4:port> <site> --identity <dir> --tls --public`
+opts into public clients, including a private bind behind a manually configured
+forward. It is mutually exclusive with `--lan` and `--discoverable`. It never
+sets up forwarding/firewalls or advertises an external endpoint. Loopback binds
+are accepted for isolated tests; wildcards and remote IPv6 are refused.
+Clients still require the exact operator-supplied ID in every `ynps://` URL.
+No verifier, certificate rule, ALPN, TLS version or plaintext policy is weakened.
+Manual pins and historical connection status use the separate
+[bootstrap peer store](bootstrap-peers.md). See [internet testing](../../internet-testing.md)
+for address exclusions, budgets, VPS/forwarding instructions and tests not run.
 
 ### Two-node demonstration
 
@@ -54,7 +67,7 @@ connection is refused:
 
 ```console
 $ cargo run -p yami-node -- tls-demo ./demo-ids/one ./demo-ids/two
-EXPERIMENTAL: TLS 1.3 to a pinned node ID, loopback or private LAN only. Not independently reviewed; no anonymity.
+EXPERIMENTAL: TLS 1.3 to an exact pinned node ID. Public listening requires --public. Not security-reviewed or production-safe; no anonymity.
 Node one  yn1-sp2hcdqey6gfx62bqb3vzymxh4hjsjv2ocfqk4hecwplc77pkh2yatmgrq (created in ./demo-ids/one)
 Node two  yn1-imc2rmri54qbb6f3msck3fm5x7k3my4eik6phfbbi7hiv5npbs4usbyivy (created in ./demo-ids/two)
 Node one received about from ynps://yn1-imc2…@127.0.0.1:30862/about over TLS 1.3 (328 bytes).
@@ -133,7 +146,8 @@ port.
 | Scope | Addresses | Used by |
 | --- | --- | --- |
 | Loopback | `127.0.0.0/8`, `::1` | Every listener by default; `TlsListener::bind` |
-| LAN | Loopback plus private IPv4 `10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16` (RFC 1918) | Every client (`TlsTransport::connect`, `ynps://` parsing); listeners from `TlsListener::bind_lan` |
+| LAN | Loopback plus private IPv4 `10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16` (RFC 1918) | Listeners from `TlsListener::bind_lan` |
+| Internet | Existing local endpoints plus ordinary public unicast IPv4; conservative special-use exclusions | Clients (`TlsTransport::connect`, `ynps://` parsing); explicitly opted-in `TlsListener::bind_public` |
 
 - `TlsListener::bind_lan` binds exactly one private IPv4 address. It refuses
   `0.0.0.0` and every other wildcard, loopback, link-local (`169.254.0.0/16`),
@@ -147,6 +161,15 @@ port.
 - Plaintext YNP is unchanged: `LoopbackTcp`, `LocalListener` and `ynp://`
   parsing accept loopback only, so LAN traffic is always TLS 1.3 to a pinned
   node ID.
+- Public listeners bind one specific IPv4 address, request backlog 128, and
+  bound active connections to 32 globally/two per source IP, starts to 32 per
+  sliding second globally/eight per source IP. Rejected addresses do not grow
+  an unbounded table. The CLI worker pool remains 1..32 (default four).
+  TLS handshake budget is five seconds, total TLS budget ten seconds; socket
+  operation timeouts are capped by the remaining budget and three seconds.
+  Public CLI outcome logging is sampled to 20 lines/second. These basic controls
+  are not a security review or DDoS protection. Full limits and scope are in
+  [internet testing](../../internet-testing.md#limits-and-remaining-risks).
 - Which machines on the LAN may connect is not configurable: any host that can
   reach the address and port can fetch every page. Restrict it with the
   operating system firewall (see [LAN testing](../../lan-testing.md)).
@@ -261,16 +284,19 @@ loaded page, taken from that connection, not to the address:
 - Addresses follow [Network scope](#network-scope): `TlsListener::bind`
   refuses non-loopback addresses, `TlsListener::bind_lan` refuses everything
   but one private IPv4 address, both check before creating a socket, `accept`
-  drops peers outside the listener's scope, and `TlsTransport::connect`
-  refuses destinations outside loopback and private IPv4.
-- Three-second socket timeouts per operation, as for plaintext YNP, and a
-  ten-second total deadline per connection, including the handshake, on both
-  the client and the node.
+  drops peers outside the listener's scope. `bind_public` is a separate opt-in
+  for one specific IPv4 address. `TlsTransport::connect` accepts local and
+  ordinary public IPv4 endpoints while refusing the documented special-use
+  ranges, names and remote IPv6.
+- At most three seconds per socket operation, capped by the remaining
+  five-second handshake deadline or ten-second total TLS connection budget,
+  on both client and node. TCP connect has a separate three-second timeout.
 - YNP frame limits are unchanged (at most 278682 bytes). TLS records are at
   most 16 KiB; rustls bounds its buffers.
 - The node's worker pool (1..32 workers) and accept queue behave as for
   plaintext `serve-dir`. A handshake runs inside the connection's worker, so a
-  failed handshake affects only that connection.
+  failed handshake affects only that connection. Public listeners additionally
+  apply the bounded active/start admission limits documented above.
 
 ## Threat model
 
@@ -311,31 +337,32 @@ libraries are correct:
   client's clock; a client with a wrong clock may accept an expired
   certificate or refuse a valid one.
 - **Traffic analysis.** Connection timing, sizes and the fact that YNP is in
-  use (the ALPN value is sent in clear) are visible to a local or LAN
+  use (the ALPN value is sent in clear) are visible to a network
   observer, as are both IP addresses. This is not anonymity.
 - **Malicious clients.** Clients are not authenticated; any local process, and
-  for a LAN listener any host that can reach its address and port, can fetch
+  for a LAN/public listener any host that can reach its address and port, can fetch
   any page the node serves. Only the operating system firewall narrows who
   can connect.
 - **Malicious content.** A verified node can still serve hostile documents.
   Verification says who sent a document, not that it is safe; the browser's
   bounded, inert parsers remain the defence.
-- **Denial of service.** Handshakes cost CPU; a local process or LAN host can
-  occupy all workers until their deadlines. There are no quotas or rate
-  limits.
-- **Network exposure beyond the LAN.** Public addresses are refused and LAN
-  listeners drop public peers, but nothing stops a router from forwarding a
+- **Denial of service.** Handshakes cost CPU; hostile clients can
+  occupy workers until their deadlines. Public admission limits are basic
+  controls, not comprehensive protection of bandwidth, CPU or OS resources.
+- **Network exposure beyond the LAN.** LAN listeners drop public peers,
+  but nothing stops a router from forwarding a
   port with source NAT, which makes internet clients appear as a private
-  address. Do not forward the port.
+  address. Do not forward a LAN-mode service; deliberate remote tests use the
+  separate public TLS mode and narrow firewall rules.
 - **Past content.** A recorded session cannot be decrypted later without the
   ephemeral key exchange secrets (TLS 1.3 forward secrecy), but nothing here
   protects content the node itself stores.
 
 ## Limitations
 
-- Private IPv4 LAN at most. Internet listeners, IPv6 LAN addresses,
-  names and NAT traversal are deliberately not supported; each needs a
-  separate review of exposure, quotas and abuse handling.
+- Public IPv4 is experimental and not validated across providers during
+  development. IPv6 beyond loopback, names, DHT and NAT traversal are not
+  implemented. No claim of production-safe internet operation is made.
 - Optional LAN discovery is a separate, unauthenticated query-response
   protocol. It supplies an untrusted candidate ID and endpoint; the existing
   TLS verifier still requires proof of that exact key. See

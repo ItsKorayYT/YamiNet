@@ -21,8 +21,13 @@ yami-node tls-demo <identity-directory-1> <identity-directory-2>
 yami-node serve <loopback-IP:port> <key> <document.ylang> <style.ysl>
 yami-node serve-dir <loopback-IP:port> <site-directory> [--workers 1..32] [--identity <identity-directory> [--tls]]
 yami-node serve-dir <private-LAN-IPv4:port> <site-directory> --identity <identity-directory> --tls --lan [--discoverable] [--workers 1..32]
+yami-node serve-dir <specific-IPv4:port> <site-directory> --identity <identity-directory> --tls --public [--workers 1..32]
+yami-node peer add <node-id> <numeric-IP:port> [--dir <peer-directory>]
+yami-node peer list [--dir <peer-directory>]
+yami-node peer remove <node-id> [--dir <peer-directory>]
+yami-node peer connect <node-id> [--dir <peer-directory>]
 yami-node fetch <loopback-IP:port> <key>
-yami-node fetch <ynps://node-id@loopback-or-private-LAN-IP:port/key>
+yami-node fetch <ynps://node-id@numeric-IP:port/key>
 yami-node identity new [--dir <identity-directory>]
 yami-node identity show [--dir <identity-directory>]
 yami-node identity inspect <node-id>
@@ -31,7 +36,8 @@ yami-node identity verify-site <site-directory> <node-id>
 EXPERIMENTAL: ynp:// and commands without --tls are plaintext and unauthenticated.
 ynps://, --tls and tls-demo use TLS 1.3 to a pinned node ID. Neither is reviewed or anonymous.
 --lan listens on one private IPv4 address (10/8, 172.16/12, 192.168/16) and requires --tls.
---discoverable requires --tls --lan and answers local multicast queries only on that interface.
+--public requires --tls and opts into public clients on ONE specific IPv4 address; never automatic exposure.
+--lan and --public are mutually exclusive. --discoverable requires --tls --lan (never --public).
 Discovery defaults to 239.255.89.78:39817/UDP; configure YAMINET_DISCOVERY_GROUP/PORT on both computers.
 Discovery exposes your public ID and address to LAN observers; it provides no anonymity.";
 const IDENTITY_NOTE: &str = "EXPERIMENTAL: node signatures attribute metadata to a key. They do not encrypt, hide or anonymize anything.";
@@ -181,9 +187,12 @@ fn tls_demo(dir_one: &Path, dir_two: &Path) -> Result<()> {
 }
 const DEFAULT_WORKERS: usize = 4;
 fn serve_dir(address: SocketAddr, root: &str, options: ServeOptions) -> Result<()> {
-    if !options.lan && !address.ip().is_loopback() {
+    if !(1..=yami_node::MAX_WORKERS).contains(&options.workers) {
+        return Err("worker count must be 1..32".into());
+    }
+    if !options.lan && !options.public && !address.ip().is_loopback() {
         return Err(format!(
-            "only loopback addresses are allowed without --lan; serving on {address} needs --identity <identity-directory> --tls --lan"
+            "only loopback addresses are allowed without --lan or --public; serving on {address} needs --identity <identity-directory> --tls and either --lan (private only) or --public (explicit remote service)"
         )
         .into());
     }
@@ -192,6 +201,12 @@ fn serve_dir(address: SocketAddr, root: &str, options: ServeOptions) -> Result<(
             "--lan needs one specific private IPv4 address (10.x.x.x, 172.16-31.x.x or 192.168.x.x); {address} is not one, and 0.0.0.0 is never allowed"
         )
         .into());
+    }
+    if options.public {
+        ynp_tls::Scope::Internet.check(address)?;
+        if !address.is_ipv4() {
+            return Err("--public requires one specific IPv4 address".into());
+        }
     }
     let site = open_site(root)?;
     let mut identity = None;
@@ -209,7 +224,9 @@ fn serve_dir(address: SocketAddr, root: &str, options: ServeOptions) -> Result<(
     match identity {
         Some(identity) if options.tls => {
             let id = *identity.id();
-            let listener = if options.lan {
+            let listener = if options.public {
+                TlsListener::bind_public(address, identity)?
+            } else if options.lan {
                 TlsListener::bind_lan(address, identity)?
             } else {
                 TlsListener::bind(address, identity)?
@@ -237,13 +254,16 @@ fn serve_dir(address: SocketAddr, root: &str, options: ServeOptions) -> Result<(
                 None
             };
             eprintln!("Serving site {root} via YNP over TLS 1.3 on {address} as {id}");
+            if options.public {
+                eprintln!("PUBLIC MODE: unauthenticated internet clients may read every page. Experimental, not security-reviewed. Configure any firewall/port forwarding manually. No discovery or automatic exposure.");
+            }
             if options.lan {
                 eprintln!(
                     "LAN: computers on this private network can connect to {address}; nothing listens on other interfaces. Allow inbound TCP port {} for Private networks only.",
                     address.port()
                 );
             }
-            serve_site(&listener, &site, options.workers, &|key| {
+            serve_site(&listener, &site, options.workers, options.public, &|key| {
                 ynp_tls::format_url(&id, address, key)
             })
         }
@@ -251,7 +271,7 @@ fn serve_dir(address: SocketAddr, root: &str, options: ServeOptions) -> Result<(
             let listener = LocalListener::bind(address)?;
             let address = listener.local_addr()?;
             eprintln!("Serving site {root} via YNP on {address} (plaintext)");
-            serve_site(&listener, &site, options.workers, &|key| {
+            serve_site(&listener, &site, options.workers, false, &|key| {
                 format!("ynp://{address}/{key}")
             })
         }
@@ -261,6 +281,7 @@ fn serve_site(
     listener: &(impl Incoming + Sync),
     site: &Site,
     workers: usize,
+    public: bool,
     url: &dyn Fn(&str) -> String,
 ) -> Result<()> {
     let pages = site.pages()?;
@@ -275,10 +296,25 @@ fn serve_site(
     if let Some(start) = pages.iter().find(|key| *key == "home").or(pages.first()) {
         eprintln!("Open in Yami Browser: {}", url(start));
     }
-    serve_concurrently(listener, site, workers, &|outcome| match outcome {
-        Ok(Reply::Document(key)) => eprintln!("Served {key}"),
-        Ok(Reply::NotFound(key)) => eprintln!("NotFound {key}"),
-        Err(error) => eprintln!("Connection rejected: {error}"),
+    let reports = std::sync::Mutex::new((std::time::Instant::now(), 0usize));
+    serve_concurrently(listener, site, workers, &|outcome| {
+        if public {
+            let Ok(mut budget) = reports.lock() else {
+                return;
+            };
+            if budget.0.elapsed() >= std::time::Duration::from_secs(1) {
+                *budget = (std::time::Instant::now(), 0);
+            }
+            if budget.1 >= 20 {
+                return;
+            }
+            budget.1 += 1;
+        }
+        match outcome {
+            Ok(Reply::Document(key)) => eprintln!("Served {key}"),
+            Ok(Reply::NotFound(key)) => eprintln!("NotFound {key}"),
+            Err(error) => eprintln!("Connection rejected: {error}"),
+        }
     })?;
     Ok(())
 }
@@ -291,10 +327,12 @@ struct ServeOptions {
     tls: bool,
     lan: bool,
     discoverable: bool,
+    public: bool,
 }
 fn serve_dir_options(options: &[String]) -> Result<ServeOptions> {
     let (mut workers, mut identity, mut tls, mut lan) = (None, None, false, false);
     let mut discoverable = false;
+    let mut public = false;
     let mut options = options.iter();
     while let Some(flag) = options.next() {
         match flag.as_str() {
@@ -307,10 +345,17 @@ fn serve_dir_options(options: &[String]) -> Result<ServeOptions> {
             "--tls" if !tls => tls = true,
             "--lan" if !lan => lan = true,
             "--discoverable" if !discoverable => discoverable = true,
+            "--public" if !public => public = true,
             _ => return Err(USAGE.into()),
         }
     }
-    if discoverable && (!tls || !lan) {
+    if public && lan {
+        return Err("--public and --lan are mutually exclusive".into());
+    }
+    if public && !tls {
+        return Err("--public needs --tls; plaintext internet YNP is forbidden".into());
+    }
+    if discoverable && (!tls || !lan || public) {
         return Err("--discoverable needs --tls --lan and a selected private LAN interface".into());
     }
     if lan && !tls {
@@ -328,6 +373,7 @@ fn serve_dir_options(options: &[String]) -> Result<ServeOptions> {
         tls,
         lan,
         discoverable,
+        public,
     })
 }
 fn identity_dir(options: &[String]) -> Result<PathBuf> {
@@ -341,6 +387,62 @@ fn identity_dir(options: &[String]) -> Result<PathBuf> {
 fn load_identity(dir: &Path) -> Result<NodeIdentity> {
     NodeIdentity::load(dir)
         .map_err(|error| format!("node identity in {}: {error}", dir.display()).into())
+}
+fn peer_command(args: &[String]) -> Result<()> {
+    use yami_node::peers::{self, PeerStore};
+    let (args, dir) = if args.len() >= 2 && args[args.len() - 2] == "--dir" {
+        (
+            &args[..args.len() - 2],
+            PathBuf::from(&args[args.len() - 1]),
+        )
+    } else {
+        (args, peers::default_dir()?)
+    };
+    // Validate command shape and user-provided values before opening storage.
+    match args {
+        [command] if command == "list" => {}
+        [command, id] if command == "remove" || command == "connect" => {
+            id.parse::<NodeId>()?;
+        }
+        [command, id, address] if command == "add" => {
+            id.parse::<NodeId>()?;
+            address.parse::<SocketAddr>()?;
+        }
+        _ => return Err(USAGE.into()),
+    }
+    let mut store = PeerStore::open(&dir)?;
+    match args {
+        [command] if command == "list" => {
+            println!("Manual bootstrap peers (status = last attempt, not a live connection). Last success is Unix seconds.");
+            for peer in store.entries() {
+                println!(
+                    "{}\t{}\t{}\t{}",
+                    peer.id,
+                    peer.address,
+                    peer.last_success
+                        .map_or_else(|| "never".into(), |s| s.to_string()),
+                    peer.status.label()
+                );
+            }
+        }
+        [command, id, address] if command == "add" => {
+            store.add(id.parse()?, address.parse()?)?;
+            println!("Added unverified manual peer {id} at {address}. No connection was made.");
+        }
+        [command, id] if command == "remove" => {
+            store.remove(id.parse()?)?;
+            println!("Removed peer {id}.");
+        }
+        [command, id] if command == "connect" => {
+            eprintln!("{}", ynp_tls::WARNING);
+            store
+                .connect(id.parse()?)
+                .map_err(|e| format!("Peer authentication/connection failed for {id}: {e}"))?;
+            println!("Authenticated node {id} over pinned TLS 1.3. Connection closed; last success saved.");
+        }
+        _ => unreachable!(),
+    }
+    Ok(())
 }
 /// Prints only public values and file locations, never key material.
 fn describe(dir: &Path, identity: &NodeIdentity) {
@@ -406,6 +508,9 @@ fn run() -> Result<()> {
     if args[0] == "identity" {
         eprintln!("{IDENTITY_NOTE}");
         return identity(&args[1..]);
+    }
+    if args[0] == "peer" {
+        return peer_command(&args[1..]);
     }
     let tls = args[0] == "tls-demo"
         || args

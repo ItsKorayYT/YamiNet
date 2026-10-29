@@ -1,6 +1,6 @@
 //! Experimental authenticated, encrypted YNP: unchanged YNP frames inside
 //! TLS 1.3 (rustls with the ring provider), between loopback addresses or,
-//! when a listener explicitly opts in, on a private IPv4 LAN ([`Scope`]).
+//! when a listener explicitly opts in, on private or public IPv4 ([`Scope`]).
 //!
 //! A node's TLS key is its persistent Ed25519 node identity key. The node
 //! presents a short-lived X.509 certificate for that key, self-signed by it,
@@ -10,6 +10,7 @@
 //! handshake signature verifies with it. There is no certificate authority,
 //! name lookup, trust on first use or fallback to plaintext. Clients are not
 //! authenticated. See `docs/specs/v0.1/ynp-tls.md`.
+mod admission;
 mod credential;
 mod verify;
 
@@ -20,9 +21,9 @@ use rustls::{
 };
 use std::{
     io::{self, Read, Write},
-    net::{IpAddr, SocketAddr, TcpListener, TcpStream},
+    net::{IpAddr, Ipv4Addr, SocketAddr, TcpListener, TcpStream},
     ops::{Deref, DerefMut},
-    sync::Arc,
+    sync::{Arc, Mutex},
     time::{Duration, Instant},
 };
 use yami_identity::{NodeId, NodeIdentity};
@@ -31,7 +32,7 @@ use ynp::{Connection, Incoming, Protection, Transport};
 pub use credential::{Credential, BACKDATE};
 pub use verify::IdentityMismatch;
 
-pub const WARNING: &str = "EXPERIMENTAL: TLS 1.3 to a pinned node ID, loopback or private LAN only. Not independently reviewed; no anonymity.";
+pub const WARNING: &str = "EXPERIMENTAL: TLS 1.3 to an exact pinned node ID. Public listening requires --public. Not security-reviewed or production-safe; no anonymity.";
 /// Negotiated by both sides, so a YNP peer never talks to another TLS service.
 pub const ALPN: &[u8] = b"ynp/1";
 pub const SCHEME: &str = "ynps://";
@@ -40,6 +41,8 @@ pub const CREDENTIAL_LIFETIME: Duration = Duration::from_secs(24 * 60 * 60);
 /// Total time for one connection including the handshake, on both sides, so
 /// a peer trickling bytes cannot hold it open within the socket timeouts.
 pub const DEADLINE: Duration = Duration::from_secs(10);
+pub const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(5);
+pub const TLS_BUFFER_LIMIT: usize = 64 * 1024;
 
 fn invalid(message: impl Into<String>) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, message.into())
@@ -59,12 +62,19 @@ pub enum Scope {
     /// 172.16.0.0/12, 192.168.0.0/16). Never public, link-local, multicast,
     /// broadcast or unspecified addresses, and no IPv6 beyond `::1`.
     Lan,
+    /// Existing local modes plus ordinary public IPv4 unicast. No names,
+    /// wildcard, link-local, shared/CGNAT, documentation or reserved addresses.
+    Internet,
 }
 impl Scope {
     pub fn check(self, address: SocketAddr) -> io::Result<()> {
         match self {
             Self::Loopback => ynp::require_loopback(address),
             Self::Lan if address.ip().is_loopback() || is_private_lan(address.ip()) => Ok(()),
+            Self::Internet if address.ip().is_loopback() || is_private_lan(address.ip())
+                || matches!(address.ip(), IpAddr::V4(ip) if is_public_ipv4(ip)) => Ok(()),
+            Self::Internet => Err(io::Error::new(io::ErrorKind::PermissionDenied,
+                "TLS requires numeric loopback, private LAN, or public unicast IPv4; special-use addresses and remote IPv6 are refused")),
             Self::Lan => Err(io::Error::new(
                 io::ErrorKind::PermissionDenied,
                 "only loopback and private IPv4 LAN addresses (10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16) are allowed",
@@ -75,6 +85,21 @@ impl Scope {
 /// A private IPv4 address (RFC 1918), the only kind a LAN listener binds.
 pub fn is_private_lan(ip: IpAddr) -> bool {
     matches!(ip, IpAddr::V4(ip) if ip.is_private())
+}
+/// Conservative public-unicast policy; not a claim that an address is routable.
+/// Special-use exclusions follow the IANA IPv4 special-purpose registry.
+pub fn is_public_ipv4(ip: Ipv4Addr) -> bool {
+    let [a, b, c, _] = ip.octets();
+    !(ip.is_private()
+        || ip.is_loopback()
+        || ip.is_link_local()
+        || a == 0
+        || a >= 224
+        || (a == 100 && (64..=127).contains(&b))
+        || (a == 192 && b == 0 && (c == 0 || c == 2))
+        || (a == 192 && b == 88 && c == 99)
+        || (a == 198 && (b == 18 || b == 19 || (b == 51 && c == 100)))
+        || (a == 203 && b == 0 && c == 113))
 }
 
 /// TLS 1.3 only, every ring cipher suite and key exchange group of it.
@@ -115,11 +140,15 @@ impl TlsTransport {
 impl Transport for TlsTransport {
     /// Completes the handshake before returning, so no request is written
     /// until the server has proved the trusted identity. Reaches loopback and
-    /// private LAN addresses; the pinned identity is checked on both alike.
+    /// private LAN and public IPv4 addresses; the same pinned identity is checked.
     fn connect(&self, address: SocketAddr) -> io::Result<Box<dyn Connection>> {
-        Scope::Lan.check(address)?;
+        Scope::Internet.check(address)?;
+        if address.port() == 0 {
+            return Err(invalid("TLS destination port must be nonzero"));
+        }
         let name = ServerName::try_from(self.trusted.to_string()).map_err(other)?;
-        let tls = ClientConnection::new(Arc::clone(&self.config), name).map_err(other)?;
+        let mut tls = ClientConnection::new(Arc::clone(&self.config), name).map_err(other)?;
+        tls.set_buffer_limit(Some(TLS_BUFFER_LIMIT));
         let stream = TcpStream::connect_timeout(&address, ynp::TIMEOUT)?;
         ynp::configure_stream(&stream)?;
         let mut connection = TlsConnection::new(tls, stream);
@@ -148,6 +177,7 @@ pub struct TlsListener {
     config: Arc<ServerConfig>,
     id: NodeId,
     scope: Scope,
+    admission: Option<Arc<Mutex<admission::Admission>>>,
 }
 impl TlsListener {
     /// Serve as `identity` on a loopback address, issuing and renewing
@@ -171,6 +201,19 @@ impl TlsListener {
         let resolver = credential::Resolver::renewing(identity)?;
         Self::with_resolver(address, Scope::Lan, resolver, id)
     }
+    /// Explicit public-service opt-in. Binds one IPv4 address, including a
+    /// private address behind a manually configured forward. Never a wildcard.
+    /// Loopback is accepted for isolated testing. No router/firewall changes.
+    pub fn bind_public(address: SocketAddr, identity: Arc<NodeIdentity>) -> io::Result<Self> {
+        if !address.is_ipv4() {
+            return Err(invalid(
+                "public listening requires one specific IPv4 address",
+            ));
+        }
+        let id = *identity.id();
+        let resolver = credential::Resolver::renewing(identity)?;
+        Self::with_resolver(address, Scope::Internet, resolver, id)
+    }
     /// Present exactly this credential on a loopback address until the
     /// listener is dropped.
     pub fn bind_with_credential(address: SocketAddr, credential: &Credential) -> io::Result<Self> {
@@ -193,11 +236,27 @@ impl TlsListener {
         config.alpn_protocols = vec![ALPN.to_vec()];
         config.session_storage = Arc::new(NoServerSessionStorage {});
         config.send_tls13_tickets = 0;
+        let listener = if scope == Scope::Internet {
+            let socket = socket2::Socket::new(
+                socket2::Domain::IPV4,
+                socket2::Type::STREAM,
+                Some(socket2::Protocol::TCP),
+            )?;
+            #[cfg(unix)]
+            socket.set_reuse_address(true)?;
+            socket.bind(&address.into())?;
+            socket.listen(128)?;
+            socket.into()
+        } else {
+            TcpListener::bind(address)?
+        };
         Ok(Self {
-            listener: TcpListener::bind(address)?,
+            listener,
             config: Arc::new(config),
             id,
             scope,
+            admission: (scope == Scope::Internet)
+                .then(|| Arc::new(Mutex::new(admission::Admission::default()))),
         })
     }
     pub fn local_addr(&self) -> io::Result<SocketAddr> {
@@ -217,9 +276,17 @@ impl Incoming for TlsListener {
     fn accept(&self) -> io::Result<Box<dyn Connection>> {
         let (stream, peer) = self.listener.accept()?;
         self.scope.check(peer)?;
+        let lease = self
+            .admission
+            .as_ref()
+            .map(|limits| admission::Lease::acquire(Arc::clone(limits), peer.ip()))
+            .transpose()?;
         ynp::configure_stream(&stream)?;
-        let tls = ServerConnection::new(Arc::clone(&self.config)).map_err(other)?;
-        Ok(Box::new(TlsConnection::new(tls, stream)))
+        let mut tls = ServerConnection::new(Arc::clone(&self.config)).map_err(other)?;
+        tls.set_buffer_limit(Some(TLS_BUFFER_LIMIT));
+        let mut connection = TlsConnection::new(tls, stream);
+        connection._lease = lease;
+        Ok(Box::new(connection))
     }
 }
 
@@ -238,16 +305,32 @@ impl Socket {
         }
         Ok(())
     }
+    fn prepare(&self, reading: bool) -> io::Result<()> {
+        self.check()?;
+        let remaining = self.until.saturating_duration_since(Instant::now());
+        if remaining.is_zero() {
+            return Err(io::Error::new(
+                io::ErrorKind::TimedOut,
+                "TLS deadline exceeded",
+            ));
+        }
+        let timeout = Some(remaining.min(ynp::TIMEOUT));
+        if reading {
+            self.stream.set_read_timeout(timeout)
+        } else {
+            self.stream.set_write_timeout(timeout)
+        }
+    }
 }
 impl Read for Socket {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-        self.check()?;
+        self.prepare(true)?;
         self.stream.read(buf)
     }
 }
 impl Write for Socket {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        self.check()?;
+        self.prepare(false)?;
         self.stream.write(buf)
     }
     fn flush(&mut self) -> io::Result<()> {
@@ -261,6 +344,8 @@ impl Write for Socket {
 struct TlsConnection<C> {
     tls: StreamOwned<C, Socket>,
     ready: bool,
+    until: Instant,
+    _lease: Option<admission::Lease>,
 }
 impl<C, S> TlsConnection<C>
 where
@@ -270,11 +355,13 @@ where
     fn new(tls: C, stream: TcpStream) -> Self {
         let socket = Socket {
             stream,
-            until: Instant::now() + DEADLINE,
+            until: Instant::now() + HANDSHAKE_TIMEOUT,
         };
         Self {
             tls: StreamOwned::new(tls, socket),
             ready: false,
+            until: Instant::now() + DEADLINE,
+            _lease: None,
         }
     }
     fn handshake(&mut self) -> io::Result<()> {
@@ -288,7 +375,9 @@ where
         if conn.alpn_protocol() != Some(ALPN) {
             return Err(invalid("peer did not negotiate ynp/1"));
         }
+        sock.check()?;
         self.ready = true;
+        sock.until = self.until;
         Ok(())
     }
 }
@@ -299,6 +388,7 @@ where
 {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
         self.handshake()?;
+        self.tls.sock.check()?;
         self.tls.read(buf)
     }
 }
@@ -309,10 +399,12 @@ where
 {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
         self.handshake()?;
+        self.tls.sock.check()?;
         self.tls.write(buf)
     }
     fn flush(&mut self) -> io::Result<()> {
         self.handshake()?;
+        self.tls.sock.check()?;
         self.tls.flush()
     }
 }
@@ -327,8 +419,8 @@ where
 }
 
 /// `ynps://<node-id>@<numeric-IP>:<port>/<key>`. The node ID is the identity
-/// the client requires. The address is a numeric loopback or private IPv4 LAN
-/// address ([`Scope::Lan`]) with a nonzero port, never a name; the key
+/// the client requires. The address follows [`Scope::Internet`] with a nonzero
+/// port, never a name; the key
 /// follows the `ynp://` rules.
 pub fn parse_url(url: &str) -> io::Result<(NodeId, SocketAddr, String)> {
     let rest = url
@@ -341,7 +433,7 @@ pub fn parse_url(url: &str) -> io::Result<(NodeId, SocketAddr, String)> {
         .parse()
         .map_err(|error| invalid(format!("trusted node ID: {error}")))?;
     let (address, key) = ynp::parse_endpoint(rest)?;
-    Scope::Lan.check(address)?;
+    Scope::Internet.check(address)?;
     Ok((id, address, key))
 }
 pub fn format_url(id: &NodeId, address: SocketAddr, key: &str) -> String {
@@ -351,6 +443,101 @@ pub fn format_url(id: &NodeId, address: SocketAddr, key: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn internet_scope_is_numeric_unicast_and_does_not_change_local_modes() {
+        for text in [
+            "8.8.8.8:7443",
+            "1.1.1.1:7443",
+            "127.0.0.1:7443",
+            "192.168.1.2:7443",
+            "[::1]:7443",
+        ] {
+            assert!(
+                Scope::Internet.check(text.parse().unwrap()).is_ok(),
+                "{text}"
+            );
+        }
+        for text in [
+            "0.0.0.0:7443",
+            "0.1.2.3:7443",
+            "100.64.1.1:7443",
+            "169.254.1.1:7443",
+            "192.0.2.1:7443",
+            "198.51.100.1:7443",
+            "203.0.113.1:7443",
+            "198.18.1.1:7443",
+            "224.0.0.1:7443",
+            "240.0.0.1:7443",
+            "255.255.255.255:7443",
+            "[2001:4860::1]:7443",
+            "[::ffff:8.8.8.8]:7443",
+        ] {
+            assert!(
+                Scope::Internet.check(text.parse().unwrap()).is_err(),
+                "{text}"
+            );
+        }
+        assert!(Scope::Lan.check("8.8.8.8:7443".parse().unwrap()).is_err());
+        assert!(Scope::Loopback
+            .check("10.0.0.1:7443".parse().unwrap())
+            .is_err());
+        let id = *NodeIdentity::generate().unwrap().id();
+        assert!(parse_url(&format!("ynps://{id}@public-host:7443/home")).is_err());
+        assert!(TlsTransport::new(id)
+            .unwrap()
+            .connect("8.8.8.8:0".parse().unwrap())
+            .is_err());
+        for address in ["0.0.0.0:0", "[::]:0", "[::1]:0", "192.0.2.1:0"] {
+            assert!(TlsListener::bind_public(
+                address.parse().unwrap(),
+                Arc::new(NodeIdentity::generate().unwrap())
+            )
+            .is_err());
+        }
+    }
+
+    #[test]
+    fn public_admission_releases_capacity_when_connections_drop() {
+        let listener = TlsListener::bind_public(
+            "127.0.0.1:0".parse().unwrap(),
+            Arc::new(NodeIdentity::generate().unwrap()),
+        )
+        .unwrap();
+        let address = listener.local_addr().unwrap();
+        let _first = TcpStream::connect(address).unwrap();
+        let first = listener.accept().unwrap();
+        let _second = TcpStream::connect(address).unwrap();
+        let second = listener.accept().unwrap();
+        let _third = TcpStream::connect(address).unwrap();
+        assert_eq!(
+            listener.accept().err().unwrap().kind(),
+            io::ErrorKind::WouldBlock
+        );
+        drop(first);
+        let _fourth = TcpStream::connect(address).unwrap();
+        let fourth = listener.accept().unwrap();
+        drop((second, fourth));
+    }
+
+    #[test]
+    fn socket_reads_cannot_exceed_remaining_deadline() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let _client = TcpStream::connect(listener.local_addr().unwrap()).unwrap();
+        let (stream, _) = listener.accept().unwrap();
+        let started = Instant::now();
+        let mut socket = Socket {
+            stream,
+            until: started + Duration::from_millis(40),
+        };
+        assert!(socket.read(&mut [0; 1]).is_err());
+        assert!(started.elapsed() < Duration::from_millis(500));
+        socket.until = Instant::now() - Duration::from_millis(1);
+        assert_eq!(
+            socket.write(b"data").unwrap_err().kind(),
+            io::ErrorKind::TimedOut
+        );
+    }
 
     #[test]
     fn lan_scope_admits_only_loopback_and_private_ipv4() {
@@ -421,7 +608,7 @@ mod tests {
     }
 
     #[test]
-    fn ynps_urls_reach_private_lan_addresses_only() {
+    fn ynps_urls_reach_local_and_public_ipv4_with_pinned_id() {
         let id = NodeIdentity::generate().unwrap().id().to_string();
         for (url, address) in [
             (
@@ -430,6 +617,7 @@ mod tests {
             ),
             (format!("ynps://{id}@10.1.2.3:1/a-b_c"), "10.1.2.3:1"),
             (format!("ynps://{id}@127.0.0.1:7443/home"), "127.0.0.1:7443"),
+            (format!("ynps://{id}@8.8.8.8:7443/home"), "8.8.8.8:7443"),
         ] {
             let (parsed, endpoint, _) = parse_url(&url).unwrap();
             assert_eq!(parsed.to_string(), id);
@@ -437,7 +625,7 @@ mod tests {
         }
         for bad in [
             format!("ynps://{id}@0.0.0.0:7443/home"),
-            format!("ynps://{id}@8.8.8.8:7443/home"),
+            format!("ynps://{id}@198.51.100.1:7443/home"),
             format!("ynps://{id}@169.254.1.1:7443/home"),
             format!("ynps://{id}@[fd00::1]:7443/home"),
             format!("ynps://{id}@192.168.1.50:0/home"),
