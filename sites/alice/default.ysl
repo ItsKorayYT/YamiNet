@@ -1,0 +1,17 @@
+@style 0.1
+canvas
+  width 76
+  paper #101820
+  padding 2
+text
+  ink #d8e2ec
+  gap 1
+heading
+  ink #61dafb
+  gap 1
+section
+  ink #b4d273
+  gap 0
+link
+  ink #ffa970
+  gap 1

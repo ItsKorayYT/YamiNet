@@ -1,0 +1,11 @@
+@page 0.1
+  title Bob's Garden Log
+  language en
+
+= Garden log
+:: Autumn
+  Planted garlic and covered the beds with leaves.
+:: Spring
+  Tomatoes, beans and far too many courgettes.
+> ynp://127.0.0.1:7302/home | Back to Bob's home
+> ynp://127.0.0.1:7301/about | About Alice

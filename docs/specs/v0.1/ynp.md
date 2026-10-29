@@ -29,7 +29,9 @@ are not processed by the node.
 ## Payloads and bounds
 
 `key` is a u16 byte length followed by 1..128 ASCII bytes from
-`A-Z a-z 0-9 _ -`. It is an opaque in-memory identifier, never a filesystem path.
+`A-Z a-z 0-9 _ -`. It is an opaque identifier, never a filesystem path. A directory-backed
+node MAY map a key to exactly one file named `<key>.ylang` directly inside its
+site root, and MUST NOT serve any file that resolves elsewhere.
 `text(max)` is a u32 byte length followed by valid UTF-8 of at most `max` bytes.
 No NUL terminators or implicit padding exist. Text may be empty at the wire
 layer; the language parser determines whether a document is valid.
@@ -71,7 +73,10 @@ Listeners MAY use port 0 for ephemeral local tests. Wildcard and non-loopback
 bind/connect addresses MUST fail before socket creation.
 
 The built-in transport uses three-second connect/read/write operation timeouts.
-There is no total request deadline. The node handles connections sequentially.
+The client has no total request deadline. The reference node additionally
+limits each connection to ten seconds in total. `serve` handles connections
+sequentially; `serve-dir` uses a fixed pool of 1..32 workers (default 4), each
+handling one connection at a time.
 
 ## Extension boundary
 

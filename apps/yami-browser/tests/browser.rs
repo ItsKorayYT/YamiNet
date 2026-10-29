@@ -1,5 +1,5 @@
 use std::{process::Command, thread};
-use yami_node::{serve_once, Store};
+use yami_node::{serve_concurrently, serve_once, Site, Store};
 use ynp::{DocumentData, LocalListener};
 
 #[test]
@@ -54,4 +54,31 @@ fn rejects_non_ynp_sources_and_reports_parse_location() {
     std::fs::remove_file(source).unwrap();
     assert!(!output.status.success());
     assert!(String::from_utf8_lossy(&output.stderr).contains("3:1: heading"));
+}
+#[test]
+fn browser_opens_pages_from_a_directory_site_node() {
+    let listener = LocalListener::bind("127.0.0.1:0".parse().unwrap()).unwrap();
+    let address = listener.local_addr().unwrap();
+    let site = Site::open(concat!(env!("CARGO_MANIFEST_DIR"), "/../../sites/alice")).unwrap();
+    thread::spawn(move || serve_concurrently(&listener, &site, 2, &|_| {}));
+    for (key, title) in [("home", "Alice's Home"), ("projects", "Alice's Projects")] {
+        let output = Command::new(env!("CARGO_BIN_EXE_yami-browser"))
+            .arg(format!("ynp://{address}/{key}"))
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let text = String::from_utf8(output.stdout).unwrap();
+        assert!(text.contains(title), "{text}");
+        assert!(text.contains("ynp://127.0.0.1:7302/home"));
+    }
+    let output = Command::new(env!("CARGO_BIN_EXE_yami-browser"))
+        .arg(format!("ynp://{address}/missing"))
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("not found"));
 }

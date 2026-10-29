@@ -589,6 +589,91 @@ mod tests {
         }));
     }
 
+    fn links(nodes: &[ylang::Node]) -> Vec<String> {
+        nodes
+            .iter()
+            .flat_map(|node| match &node.kind {
+                ylang::NodeKind::Link { target, .. } => vec![target.clone()],
+                ylang::NodeKind::Section { children, .. } => links(children),
+                _ => Vec::new(),
+            })
+            .collect()
+    }
+    fn ready_title(browser: &mut Browser, loader: &Loader) -> String {
+        wait(browser, loader);
+        match &browser.active().state {
+            PageState::Ready(page) => page.document.metadata.title.clone(),
+            other => panic!("expected a page, got {other:?}"),
+        }
+    }
+    /// Two directory-backed nodes, the production loader and real link targets:
+    /// same-node and cross-node links, history, reload after an edit, NotFound.
+    #[test]
+    fn navigates_multi_page_sites_across_two_nodes() {
+        let base =
+            std::env::temp_dir().join(format!("yaminet-browser-sites-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        let (alice, bob) = (base.join("alice"), base.join("bob"));
+        std::fs::create_dir_all(&alice).unwrap();
+        std::fs::create_dir_all(&bob).unwrap();
+        let bind = || ynp::LocalListener::bind("127.0.0.1:0".parse().unwrap()).unwrap();
+        let (alice_listener, bob_listener) = (bind(), bind());
+        let (a, b) = (
+            alice_listener.local_addr().unwrap(),
+            bob_listener.local_addr().unwrap(),
+        );
+        let write = |dir: &std::path::Path, key: &str, title: &str, link: String| {
+            let source =
+                format!("@page 0.1\n  title {title}\n= {title}\n:: Links\n  > {link} | Next\n");
+            std::fs::write(dir.join(format!("{key}.ylang")), source).unwrap();
+        };
+        write(&alice, "home", "Alice home", format!("ynp://{a}/about"));
+        write(&alice, "about", "Alice about", format!("ynp://{b}/home"));
+        write(&bob, "home", "Bob home", format!("ynp://{a}/home"));
+        std::fs::write(
+            alice.join("default.ysl"),
+            include_str!("../../../sites/alice/default.ysl"),
+        )
+        .unwrap();
+        for (listener, root) in [(alice_listener, alice.clone()), (bob_listener, bob.clone())] {
+            let site = yami_node::Site::open(root).unwrap();
+            thread::spawn(move || yami_node::serve_concurrently(&listener, &site, 2, &|_| {}));
+        }
+
+        let loader = Loader::new(Arc::new(|| {})).unwrap();
+        let mut browser = Browser::new();
+        browser
+            .navigate(&format!("ynp://{a}/home"), &loader)
+            .unwrap();
+        assert_eq!(ready_title(&mut browser, &loader), "Alice home");
+        for expected in ["Alice about", "Bob home", "Alice home"] {
+            let PageState::Ready(page) = &browser.active().state else {
+                unreachable!()
+            };
+            let target = links(&page.document.nodes).remove(0);
+            browser.navigate(&target, &loader).unwrap();
+            assert_eq!(ready_title(&mut browser, &loader), expected);
+        }
+        assert!(browser.back(&loader));
+        assert_eq!(ready_title(&mut browser, &loader), "Bob home");
+        write(&bob, "home", "Bob home edited", format!("ynp://{a}/home"));
+        browser.reload(&loader);
+        assert_eq!(ready_title(&mut browser, &loader), "Bob home edited");
+        // Start page plus four documents; reload adds no entry.
+        assert_eq!(browser.active().history.len(), 5);
+
+        browser
+            .navigate(&format!("ynp://{b}/missing"), &loader)
+            .unwrap();
+        wait(&mut browser, &loader);
+        assert!(
+            matches!(&browser.active().state, PageState::Error(message) if message.contains("not found"))
+        );
+        assert!(browser.back(&loader));
+        assert_eq!(ready_title(&mut browser, &loader), "Bob home edited");
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
     #[test]
     fn reload_of_invalid_address_preserves_the_error_and_does_not_open_history() {
         let loader = loader();

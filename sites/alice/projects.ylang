@@ -1,0 +1,12 @@
+@page 0.1
+  title Alice's Projects
+  language en
+
+= Projects
+:: Document web experiments
+  Multi-page sites on a single loopback node.
+  Cross-node links between independent local sites.
+:: Wishlist
+  Authenticated encryption before any traffic leaves localhost.
+> ynp://127.0.0.1:7301/home | Back to Alice's home
+> ynp://127.0.0.1:7302/home | Bob's home on the other node

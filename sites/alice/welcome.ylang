@@ -1,0 +1,8 @@
+@page 0.1
+  title Welcome to Alice's node
+  language en
+
+= Welcome
+This node now hosts a whole site. The browser's pinned node tile opens this page.
+> ynp://127.0.0.1:7301/home | Enter Alice's site
+> ynp://127.0.0.1:7302/home | Or visit Bob's site

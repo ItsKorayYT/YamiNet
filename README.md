@@ -18,6 +18,7 @@ checkout:
 cargo run -p yami-browser
 cargo run -p yami-browser -- examples/welcome.ylang --style examples/default.ysl --ppm /tmp/yami.ppm
 cargo run -p yami-node -- demo
+cargo run -p yami-node -- serve-dir 127.0.0.1:7301 sites/alice
 ```
 
 In the prepared cloud environment, first activate the retained toolchain in
@@ -73,8 +74,36 @@ cargo run -p yami-node -- fetch 127.0.0.1:7302 about
 
 Stop persistent nodes with Ctrl-C. All application network messages use YNP,
 including missing-document replies. There is no HTTP endpoint or fallback.
-The sample CLI node serves one in-memory document sequentially; malformed
-connections are rejected without terminating the process.
+The single-document `serve` command keeps one in-memory document and handles
+connections sequentially; `serve-dir` (below) serves a whole site concurrently.
+Malformed connections are rejected without terminating the process.
+
+## Multi-page sites
+
+A node can serve a whole site from a directory: each `<key>.ylang` file is the
+page `ynp://<address>/<key>`, and `default.ysl` is the site's shared style.
+Files are read on each request, so edits appear on Reload without restarting
+the node. A fixed worker pool (default 4) serves concurrent requests. Keys never
+become arbitrary paths; traversal, symlink escapes, case aliases and device
+names are refused. Two linked sample sites are included; in two terminals run:
+
+```sh
+cargo run -p yami-node -- serve-dir 127.0.0.1:7301 sites/alice
+```
+
+```sh
+cargo run -p yami-node -- serve-dir 127.0.0.1:7302 sites/bob
+```
+
+Then open `ynp://127.0.0.1:7301/home` in the browser and follow the links
+between both nodes:
+
+```sh
+cargo run -p yami-browser -- --desktop ynp://127.0.0.1:7301/home
+```
+
+See [Creating and publishing a YamiNet site](docs/publishing-sites.md) for the
+directory layout, linking, updating and exactly what a node will serve.
 
 ## Workspace
 
@@ -85,7 +114,7 @@ connections are rejected without terminating the process.
 | `ynp` | Binary frame codec, strict limits, transport traits, loopback TCP client/listener |
 | `yami-render` | Original terminal/bitmap renderer plus shaped native document layout and antialiased text |
 | `yami-browser` | Native desktop tabs/navigation and preserved terminal/PPM document tools |
-| `yami-node` | In-memory document server, fetch client and bidirectional two-node demo |
+| `yami-node` | Directory-backed multi-page sites, in-memory document server, fetch client and two-node demo |
 
 Versioned normative drafts: [YLang](docs/specs/v0.1/ylang.md),
 [YSL](docs/specs/v0.1/ysl.md), [YNP](docs/specs/v0.1/ynp.md),
@@ -109,6 +138,9 @@ those dependencies have been cached, `--offline` also works.
 The integration tests require permission to bind and connect loopback sockets.
 They use ephemeral ports and include real subprocesses, two-node exchange,
 malformed-client recovery, missing documents, and fetch/parse/style/raster output.
+Site tests cover multi-page serving, live updates, NotFound replies, invalid
+keys, traversal and symlink escapes, concurrent clients, and browser
+navigation across two directory-backed nodes.
 Unit tests cover parser locations and limits, nested ASTs, wrapping and pixels,
 golden wire bytes, all truncated prefixes of representative frames, malformed
 headers and payload lengths, Unicode, size boundaries and response correlation.
@@ -120,8 +152,8 @@ navigation, shaped text and vertical scrolling. Its glass effect is drawn
 inside the window; it does not blur other applications behind it. Linux uses
 X11/XWayland. Windows build instructions are documented separately.
 
-There is no image embedding, full accessibility tree, document editing or
-persistent document storage. The debugging terminal/PPM backend still counts
+There is no image embedding, full accessibility tree or document editing.
+Sites are plain directories; there is no cache, index or upload mechanism. The debugging terminal/PPM backend still counts
 Unicode scalars as fixed-width cells. Its original 5x7 bitmap font maps lowercase
 to uppercase and unsupported characters to a box; this limitation does not
 describe the desktop font renderer. Oversized layouts and bitmaps fail with

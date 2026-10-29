@@ -1,0 +1,12 @@
+@page 0.1
+  title Bob's Home
+  language en
+
+= Bob's corner of YamiNet
+Served by a second node on port 7302 from sites/bob.
+:: Pages on this node
+  > ynp://127.0.0.1:7302/garden | Garden log
+  > ynp://127.0.0.1:7302/notes | Notes
+:: Friends
+  > ynp://127.0.0.1:7301/home | Alice's home on port 7301
+  > ynp://127.0.0.1:7301/projects | Alice's projects

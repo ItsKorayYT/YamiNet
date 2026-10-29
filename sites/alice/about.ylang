@@ -1,0 +1,12 @@
+@page 0.1
+  title About Alice
+  language en
+
+= About Alice
+Alice writes documents in YLang and publishes them with yami-node serve-dir.
+:: How this page is served
+  Each page is a .ylang file in sites/alice.
+  All pages share sites/alice/default.ysl.
+  Edit this file and press Reload; the node reads it again on each request.
+> ynp://127.0.0.1:7301/home | Back to Alice's home
+> ynp://127.0.0.1:7302/notes | Read Bob's notes about Alice's site

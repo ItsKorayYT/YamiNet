@@ -877,4 +877,76 @@ mod tests {
             .save_png(dir.join("desktop-document.png"))
             .unwrap();
     }
+
+    /// Point at a rendered link the way a user would, then click it.
+    fn click_link(app: &mut Desktop, target: &str) {
+        frame(app);
+        let area = app.viewport();
+        let mut y = area.y;
+        while y < area.y + area.h {
+            let mut x = area.x;
+            while x < area.x + area.w {
+                app.mouse = (x, y);
+                if app.link().as_deref() == Some(target) {
+                    app.browser.navigate(target, &app.loader).unwrap();
+                    settle(app);
+                    return;
+                }
+                x += 6.0;
+            }
+            y += 4.0;
+        }
+        panic!("link {target} is not visible");
+    }
+    /// Serves the sample sites on their documented ports and walks across both
+    /// nodes through rendered links. Run with `-- --ignored capture_sites`.
+    #[test]
+    #[ignore = "binds 127.0.0.1:7301 and 7302 and writes PNGs to target/screenshots"]
+    fn capture_sites() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        for (port, site) in [(7301, "sites/alice"), (7302, "sites/bob")] {
+            let listener = ynp::LocalListener::bind(([127, 0, 0, 1], port).into()).unwrap();
+            let site = yami_node::Site::open(root.join(site)).unwrap();
+            std::thread::spawn(move || yami_node::serve_concurrently(&listener, &site, 2, &|_| {}));
+        }
+        let dir = root.join("target/screenshots");
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut app = headless(1440.0, 900.0);
+        app.browser
+            .navigate("ynp://127.0.0.1:7301/home", &app.loader)
+            .unwrap();
+        settle(&mut app);
+        frame(&mut app)
+            .save_png(dir.join("site-alice-home.png"))
+            .unwrap();
+        for (target, title, file) in [
+            (
+                "ynp://127.0.0.1:7301/projects",
+                "Alice's Projects",
+                "site-alice-projects.png",
+            ),
+            (
+                "ynp://127.0.0.1:7302/home",
+                "Bob's Home",
+                "site-bob-home.png",
+            ),
+            (
+                "ynp://127.0.0.1:7302/garden",
+                "Bob's Garden Log",
+                "site-bob-garden.png",
+            ),
+            (
+                "ynp://127.0.0.1:7301/about",
+                "About Alice",
+                "site-alice-about.png",
+            ),
+        ] {
+            click_link(&mut app, target);
+            assert_eq!(app.browser.active().title(), title);
+            frame(&mut app).save_png(dir.join(file)).unwrap();
+        }
+        assert!(app.browser.back(&app.loader));
+        settle(&mut app);
+        assert_eq!(app.browser.active().title(), "Bob's Garden Log");
+    }
 }

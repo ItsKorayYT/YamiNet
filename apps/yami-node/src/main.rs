@@ -5,11 +5,11 @@ use std::{
     net::SocketAddr,
     thread,
 };
-use yami_node::{serve_once, Store};
+use yami_node::{serve_concurrently, serve_once, Reply, Site, Store};
 use ynp::{DocumentData, LocalListener, LoopbackTcp};
 
 type Result<T> = std::result::Result<T, Box<dyn Error>>;
-const USAGE: &str = "yami-node demo\nyami-node serve <loopback-IP:port> <key> <document.ylang> <style.ysl>\nyami-node fetch <loopback-IP:port> <key>\nEXPERIMENTAL: plaintext and unauthenticated; not secure for sensitive use.";
+const USAGE: &str = "yami-node demo\nyami-node serve <loopback-IP:port> <key> <document.ylang> <style.ysl>\nyami-node serve-dir <loopback-IP:port> <site-directory> [--workers 1..32]\nyami-node fetch <loopback-IP:port> <key>\nEXPERIMENTAL: plaintext and unauthenticated; not secure for sensitive use.";
 fn read_file(path: &str, limit: usize) -> io::Result<String> {
     let mut text = String::new();
     File::open(path)?
@@ -70,6 +70,27 @@ fn demo() -> Result<()> {
     );
     Ok(())
 }
+const DEFAULT_WORKERS: usize = 4;
+fn serve_dir(address: SocketAddr, root: &str, workers: usize) -> Result<()> {
+    let site = Site::open(root).map_err(|error| format!("cannot open site {root}: {error}"))?;
+    let pages = site.pages()?;
+    let listener = LocalListener::bind(address)?;
+    let address = listener.local_addr()?;
+    // Pages and the stylesheet are read on every request; edits need no restart.
+    eprintln!("Serving site {root} via YNP on {address} with {workers} workers");
+    if pages.is_empty() {
+        eprintln!("No .ylang pages yet; add some and they are served immediately.");
+    }
+    for key in &pages {
+        eprintln!("  ynp://{address}/{key}");
+    }
+    serve_concurrently(&listener, &site, workers, &|outcome| match outcome {
+        Ok(Reply::Document(key)) => eprintln!("Served {key}"),
+        Ok(Reply::NotFound(key)) => eprintln!("NotFound {key}"),
+        Err(error) => eprintln!("Connection rejected: {error}"),
+    })?;
+    Ok(())
+}
 fn run() -> Result<()> {
     let args: Vec<String> = std::env::args().skip(1).collect();
     if args.is_empty() || args == ["--help"] {
@@ -97,6 +118,14 @@ fn run() -> Result<()> {
                     eprintln!("Connection rejected: {error}");
                 }
             }
+        }
+        "serve-dir" if args.len() == 3 || (args.len() == 5 && args[3] == "--workers") => {
+            let address: SocketAddr = args[1].parse()?;
+            let workers = match args.get(4) {
+                Some(count) => count.parse()?,
+                None => DEFAULT_WORKERS,
+            };
+            serve_dir(address, &args[2], workers)
         }
         "fetch" if args.len() == 3 => {
             let doc = ynp::fetch(&LoopbackTcp, args[1].parse()?, &args[2])?;

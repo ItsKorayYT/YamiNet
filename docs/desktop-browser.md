@@ -75,6 +75,12 @@ A desktop window can start directly at a YNP address:
 cargo run --release -p yami-browser -- --desktop ynp://127.0.0.1:7301/welcome
 ```
 
+For two multi-page sites with links between them, run
+`cargo run --release -p yami-node -- serve-dir 127.0.0.1:7301 sites/alice` and
+`cargo run --release -p yami-node -- serve-dir 127.0.0.1:7302 sites/bob`
+instead, then open `ynp://127.0.0.1:7301/home`. See
+[Creating and publishing a YamiNet site](publishing-sites.md).
+
 Stop each sample node with Ctrl-C in its terminal. Do not forward its ports or
 bind it publicly. `yami://` addresses are not supported. All peer application
 messages, including missing-document replies, use the existing binary YNP

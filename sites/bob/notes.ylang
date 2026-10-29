@@ -1,0 +1,11 @@
+@page 0.1
+  title Bob's Notes
+  language en
+
+= Notes
+Alice's site and this one are separate directories on separate nodes.
+Links between them are ordinary absolute ynp:// addresses.
+:: Etiquette
+  Nothing is fetched until a reader opens a link.
+> ynp://127.0.0.1:7302/home | Back to Bob's home
+> ynp://127.0.0.1:7301/home | Alice's home

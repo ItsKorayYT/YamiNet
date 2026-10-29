@@ -1,0 +1,13 @@
+@page 0.1
+  title Alice's Home
+  language en
+
+= Alice on YamiNet
+A small multi-page site served from one directory by one local node.
+:: Pages on this node
+  > ynp://127.0.0.1:7301/about | About Alice
+  > ynp://127.0.0.1:7301/projects | Projects
+:: Neighbours
+  Bob runs a second node on port 7302.
+  > ynp://127.0.0.1:7302/home | Visit Bob's home page
+  > ynp://127.0.0.1:7302/garden | Bob's garden log

@@ -14,12 +14,23 @@ are not a security audit. A modified caller can implement a different transport;
 the loopback policy is enforced by `LoopbackTcp` and `LocalListener`, not by
 the transport trait itself. CLI and desktop address parsing never select another transport.
 
-Connections use three-second per-operation socket timeouts. These are not total
-request deadlines: slow trickle traffic can occupy the sequential node for
-longer. There are no quotas, rate limits, hardened multi-client scheduling,
+Connections use three-second per-operation socket timeouts, and the node also
+ends any connection after ten seconds in total. `serve-dir` handles at most its
+configured number of workers (1..32) at once; other clients wait in the
+operating system's accept queue, so a few slow local clients can still delay
+others for up to that deadline. There are no quotas, rate limits, hardened multi-client scheduling,
 authorization checks, sandboxing, or robust denial-of-service protections.
 The frame codec bounds allocation before reading payloads but this is not a
 claim of comprehensive resistance to resource exhaustion.
+
+Directory sites (`serve-dir`) read only `<root>/<key>.ylang` and
+`<root>/default.ysl`. Keys are restricted by the YNP decoder before any file
+access; the canonical path of each file must be directly inside the canonical
+site root under its exact name, which rejects traversal, symlink escapes, case
+aliases, subdirectories and non-regular files. Windows device names are never
+served. Hard links cannot be detected, and a file replaced between the check
+and the read is a local race: anyone able to write the site directory already
+controls what it serves. Keep site directories private to their owner.
 
 Future identity, authenticated encryption and anonymous routing require separate
 versioned designs, explicit peer-verification semantics, key lifecycle handling

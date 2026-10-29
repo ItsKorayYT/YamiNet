@@ -8,7 +8,7 @@ yami-browser -> ynp -> transport connection (explicit loopback fetch only)
              -> ysl -> typed Stylesheet
              -> yami-render -> Layout -> terminal / P6 bitmap
 
-yami-node -> ynp -> in-memory Store -> YNP response
+yami-node -> ynp -> in-memory Store or directory Site -> YNP response
 ```
 
 The node treats source and style as bounded UTF-8 blobs. A successful fetch
