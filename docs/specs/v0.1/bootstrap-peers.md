@@ -5,6 +5,12 @@ a peer exchange, routing table, DHT or mandatory bootstrap service. Nothing
 is added by discovery, documents, remote advertisements or successful browsing.
 There are no automatic connections, announcements, retries or identity updates.
 
+The separate opt-in [DHT MVP](dht.md) reuses these manual pins as bootstrap
+contacts through `dht bootstrap`; it does not add a duplicate configuration
+store or insert remotely learned records into `peers.tsv`. DHT records and
+sequence history live in their own bounded cache files. DHT's explicit startup
+publication/lookup does not alter manual peer status semantics.
+
 ## Commands and storage
 
 ```text

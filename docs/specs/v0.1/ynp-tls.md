@@ -361,8 +361,10 @@ libraries are correct:
 ## Limitations
 
 - Public IPv4 is experimental and not validated across providers during
-  development. IPv6 beyond loopback, names, DHT and NAT traversal are not
+  development. IPv6 beyond loopback, names and NAT traversal are not
   implemented. No claim of production-safe internet operation is made.
+- The separate opt-in [DHT MVP](dht.md) reuses this exact verifier and listener;
+  it adds signed endpoint lookup without making bootstrap peers authorities.
 - Optional LAN discovery is a separate, unauthenticated query-response
   protocol. It supplies an untrusted candidate ID and endpoint; the existing
   TLS verifier still requires proof of that exact key. See

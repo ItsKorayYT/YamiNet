@@ -57,14 +57,14 @@ The received document and style bytes are compared with the originals. Persisten
 sample processes use ports 7301 and 7302 as shown in the README; the automated
 demo and tests use ephemeral ports to avoid collisions.
 
-This is a local architecture prototype, not a distributed or secure network.
+This is an experimental architecture prototype, not a production-safe network.
 Node identities and an authenticated TLS channel exist for loopback and, by
 explicit opt-in, one private or public IPv4 address, and the browser opens `ynps://`
 addresses through it ([ynp-tls.md](ynp-tls.md)). Address policy is a
 transport concern (`ynp_tls::Scope`), so other transports, such as privacy
-routing, can be added beside it. Routing semantics, robust resource quotas,
-internet-wide discovery and trust distribution would still be needed before any broader
-network use. No existing web engine, markup translation or script runtime is
+routing, can be added beside it. Robust global routing, abuse protection and
+trust distribution would still be needed before broader production network
+use. No existing web engine, markup translation or script runtime is
 part of the architecture.
 
 Local discovery is an optional separate `ynp-discovery` crate. Explicit
@@ -79,3 +79,12 @@ deadlines; it configures no network infrastructure. The node's `peers` module
 persists only manually supplied IDs/endpoints and historical connection status,
 never a remotely advertised trust graph. See [bootstrap-peers.md](bootstrap-peers.md)
 and [internet testing](../../internet-testing.md).
+
+`yami-dht` adds a separate opt-in signed peer lookup layer: bounded XOR buckets,
+iterative queries over existing pinned TLS, and owner-signed expiring endpoint
+records with persistent sequence history. Bootstrap pins reuse manual peers;
+they are ordinary contacts, not authorities. The node dispatches versioned DHT
+magic after TLS and replays YNP magic into its original codec. The browser,
+YLang and YSL are unchanged. `RpcConnector` permits future transport adapters
+without implementing anonymous routing. See [dht.md](dht.md) and the
+[three-node simulation](../../dht-testing.md).

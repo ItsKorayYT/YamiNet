@@ -3,8 +3,12 @@
 **Not security-reviewed or production-safe. No anonymity.** Public mode lets
 any reachable client read every served page. TLS authenticates the node to
 the client; clients are not authenticated. Use only a disposable test site and
-a node you own. There is no DHT, DNS, HTTP, mandatory server, UPnP, hole punching,
+a node you own. Direct connectivity needs no DHT. There is no DNS, HTTP, mandatory server, UPnP, hole punching,
 automatic firewall setup, automatic port forwarding, Tor or I2P.
+
+The optional signed-record lookup MVP is documented separately in
+[DHT testing](dht-testing.md). It reuses this transport and its manual peers;
+enabling direct public TLS does not implicitly enable DHT.
 
 ## Validation scope
 

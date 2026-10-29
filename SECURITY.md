@@ -91,6 +91,32 @@ peers. Local configuration and its timestamps/status are not cryptographic
 proof; protect the directory from modification. See
 [peer storage](docs/specs/v0.1/bootstrap-peers.md).
 
+The optional `yami-dht` lookup protocol reuses those manual bootstrap pins and
+the same encrypted TLS listener. It accepts only bounded, owner-signed records
+with valid endpoints, expiry and monotonic sequence; an older or conflicting
+sequence cannot replace a cache's high-water mark, including after expiry or
+restart. Records alone never prove endpoint presence. `dht fetch` pins the
+actual connection to the requested ID before any YNP document request. Public
+lookup policy refuses private/loopback/link-local/special-use probes; simulation
+requires a separate explicitly loopback-only policy. DHT is off without `--dht`.
+
+Routing tables, persistent signed caches, per-message record counts, RPC frames
+and lookup attempts/time are bounded. RPC requests/responses are the same fixed
+size, with one request per TLS connection and no recursive server forwarding.
+The cache retains signed sequence history after expiry; at 256 IDs it rejects
+new IDs instead of evicting rollback protection. This is a deliberate finite
+MVP tradeoff and a cache-filling denial-of-service risk. Fresh/reset caches do
+not know the newest global sequence, and stolen keys cannot be revoked.
+
+Sybil/eclipsing, malicious bootstrap omission/censorship, routing metadata
+collection, endpoint lies, clock errors, availability and production DHT
+maintenance are unsolved. Participating peers can link queried IDs to source
+IPs and collect ID-to-endpoint records. There is no anonymity. The transport
+hook permits future adapters but implements no Tor/I2P or NAT traversal. The
+three-node test is loopback simulation, not internet validation or a security
+review. See [DHT protocol](docs/specs/v0.1/dht.md) and
+[test procedure](docs/dht-testing.md).
+
 Key rotation and revocation, client authentication, production internet operation, NAT
 traversal and anonymous routing require separate versioned designs and
 independent review. Encrypting a connection does not establish anonymity.

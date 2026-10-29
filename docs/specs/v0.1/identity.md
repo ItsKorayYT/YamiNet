@@ -111,6 +111,7 @@ verifies for another purpose, even over identical bytes:
 | --- | --- |
 | Document metadata | `yaminet.document-metadata.v1` |
 | Site manifest | `yaminet.site-manifest.v1` |
+| Signed DHT peer record | `yaminet.peer-record.v1` |
 
 The tag names the version of the canonical encoding; a changed encoding gets a
 new tag. Every tag starts with `yaminet.`, so no metadata message begins like
@@ -157,6 +158,15 @@ obtained independently. A signature by any other node is reported as an
 identity mismatch, never as success. `verify-site` therefore requires the
 expected node ID as an argument rather than trusting the `signer` line.
 
+### DHT peer records
+
+`PeerRecordMetadata` is another sealed canonical signing type: owner public
+key, expiration, monotonic sequence and 1..4 sorted numeric IPv4 endpoints.
+Its `yaminet.peer-record.v1` domain cannot verify as document/site/TLS data.
+The DHT transmits these public signed claims and enforces expiry, endpoint
+scope and remembered sequence high-water marks. This does not establish
+endpoint presence or replace pinned TLS verification. See [dht.md](dht.md).
+
 ## Security limitations
 
 - **No confidentiality or anonymity.** Signing adds no encryption. Plaintext
@@ -171,7 +181,7 @@ expected node ID as an argument rather than trusting the `signer` line.
   holder of the key for that ID signed the content. Deciding which node ID
   belongs to whom is the reader's job; there is no directory, web of trust or
   certificate authority.
-- **No freshness, rollback or revocation.** An old signed version of a site
+- **No freshness, rollback or revocation for site/document metadata.** An old signed version of a site
   stays valid forever. There is no timestamp, sequence number, expiry, key
   rotation or revocation. A stolen key can sign anything as that node.
 - **Exact bytes.** Signatures cover exact file bytes. Tools that change line

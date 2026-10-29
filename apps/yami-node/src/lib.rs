@@ -59,6 +59,59 @@ impl Documents for Store {
 pub enum Reply {
     Document(String),
     NotFound(String),
+    Dht,
+}
+
+/// Opt-in protocol dispatch AFTER the existing TLS handshake. YNP bytes are
+/// replayed unchanged into the original codec; DHT has its own bounded codec.
+pub fn serve_connection_with_dht(
+    connection: &mut dyn Connection,
+    documents: &impl Documents,
+    dht: &yami_dht::Service,
+) -> io::Result<Reply> {
+    let mut prefix = [0; 4];
+    connection.read_exact(&mut prefix)?;
+    if prefix == yami_dht::MAGIC {
+        dht.handle(connection, prefix)?;
+        return Ok(Reply::Dht);
+    }
+    if prefix != *b"YNP\0" {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "unknown encrypted protocol prefix",
+        ));
+    }
+    let mut replay = Prefixed {
+        prefix: io::Cursor::new(prefix),
+        inner: connection,
+    };
+    serve_connection(&mut replay, documents)
+}
+struct Prefixed<'a> {
+    prefix: io::Cursor<[u8; 4]>,
+    inner: &'a mut dyn Connection,
+}
+impl Read for Prefixed<'_> {
+    fn read(&mut self, bytes: &mut [u8]) -> io::Result<usize> {
+        if self.prefix.position() < 4 {
+            self.prefix.read(bytes)
+        } else {
+            self.inner.read(bytes)
+        }
+    }
+}
+impl Write for Prefixed<'_> {
+    fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+        self.inner.write(bytes)
+    }
+    fn flush(&mut self) -> io::Result<()> {
+        self.inner.flush()
+    }
+}
+impl Connection for Prefixed<'_> {
+    fn protection(&self) -> ynp::Protection {
+        self.inner.protection()
+    }
 }
 
 /// One bounded request per connection. A bad client affects only its connection.
@@ -110,6 +163,19 @@ where
     L: Incoming + Sync,
     D: Documents,
 {
+    serve_with_handler(
+        listener,
+        workers,
+        &|connection| serve_connection(connection, documents),
+        report,
+    )
+}
+pub fn serve_with_handler<L: Incoming + Sync>(
+    listener: &L,
+    workers: usize,
+    handler: &(dyn Fn(&mut dyn Connection) -> io::Result<Reply> + Sync),
+    report: &(dyn Fn(io::Result<Reply>) + Sync),
+) -> io::Result<()> {
     if !(1..=MAX_WORKERS).contains(&workers) {
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
@@ -124,7 +190,7 @@ where
                 .name(format!("yami-node-{index}"))
                 .spawn_scoped(scope, move || loop {
                     match listener.accept() {
-                        Ok(mut connection) => report(serve_connection(&mut *connection, documents)),
+                        Ok(mut connection) => report(handler(&mut *connection)),
                         Err(error) => {
                             report(Err(error));
                             // Avoid spinning if accepting fails persistently,

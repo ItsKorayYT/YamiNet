@@ -10,3 +10,7 @@ node.key
 peers.tsv
 peers.lock
 peers-*.tmp
+# Signed lookup/cache metadata and local anti-rollback state.
+dht-*.cache
+dht-*.lock
+dht-*.tmp

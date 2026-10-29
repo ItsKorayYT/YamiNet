@@ -1,0 +1,209 @@
+# Yami DHT v1: signed peer lookup MVP
+
+**Experimental, not audited or production-safe. No anonymity.** This is a
+small Kademlia-inspired signed-value lookup system, not a full Kademlia
+implementation or compatibility protocol. The existing public IPv4 TLS
+transport and manual bootstrap peer store were verified before implementation.
+Neither is replaced. YNP document frames, YLang, YSL and the browser are unchanged.
+
+## Identity, routing and lookup
+
+The lookup key is the existing full Ed25519 node ID. Routing uses
+`SHA-256(public-key-bytes)` and unsigned lexicographic XOR distance over 256
+bits. Prefix-distance buckets hold at most four contacts each; a routing table
+holds at most 128 contacts overall. Live bucket members are not displaced to
+make space. Contacts are observed only after a successful RPC authenticated
+against the expected TLS key. Failed contacts are removed; routing entries
+expire after 15 minutes when the table is used for lookup. Advertisement alone
+does not add an authenticated route. This adapts the XOR/bucket approach of
+[Maymounkov and Mazières](https://pdos.csail.mit.edu/~petar/papers/maymounkov-kademlia-lncs.pdf);
+it does not claim their completeness or performance guarantees.
+
+Lookup is iterative and sequential (`alpha = 1`), visiting the closest known
+unqueried `(node ID, endpoint)` first. Each endpoint attempt, including failure,
+consumes one of 16 queries. The pruned frontier contains at most 64 candidates;
+its assembly is also bounded by the cache, route and bootstrap limits. A query
+returns up to eight current signed records, including the responder's own
+record when current (with up to seven other closest records). Every returned record is validated
+before any part of that response is accepted; duplicate IDs, malformed data,
+invalid signatures or rollback/equivocation reject the response atomically.
+Freshly learned contacts become candidates for subsequent queries. There is
+no recursive query forwarding, unbounded fanout or unsolicited lookup.
+
+The complete lookup has a 15-second network budget. Each RPC gets at most
+three seconds including TCP connect, the pinned TLS handshake, request and
+response I/O; operations use the smaller remaining budget. OS scheduling and
+bounded local signature/file work can add overhead. Lookups attempt to refresh
+cached locations, including seeking a newer record through other peers after
+an old endpoint fails. If no fresh response succeeds, a still-valid cached
+record may be returned as an explicitly unconfirmed location. It is never a
+liveness proof. The eventual YNP fetch must authenticate the expected ID again.
+
+The signed record cache has 256 slots, including anti-rollback history.
+Expired endpoints are excluded from lookup results, routing candidates and
+RPC replies. Their signed high-water records remain only for sequence checks.
+Known IDs can advance to higher sequences, but **new IDs are rejected at
+capacity; history is not silently evicted**. This deliberately trades availability
+for bounded storage and rollback protection. A Sybil attacker can fill this
+small cache; this MVP does not solve that denial of service. An operator may
+stop the node and deliberately reset its cache, but that loses remembered
+sequence history. Back up persistent state; do not advertise this as a global,
+unlimited or production DHT.
+
+Resetting a server cache also loses its own publication counter. Other peers
+retain their high-water marks and will reject a reset counter; restore the
+latest state or use a deliberately new identity instead of silently reusing
+old sequence numbers.
+
+## Signed peer records
+
+The existing sealed identity signing API adds purpose
+`yaminet.peer-record.v1\0`. Ed25519 signs that tag followed by the canonical
+body below. This domain is distinct from document metadata, site manifests,
+X.509 certificate signing and TLS CertificateVerify. Verification uses the
+existing strict Ed25519 verifier; no new cryptographic algorithm is introduced.
+
+All integers are unsigned big endian. The canonical body is:
+
+| Field | Bytes |
+| --- | --- |
+| Owner's Ed25519 public key (canonical node ID is reconstructed) | 32 |
+| Expiration, Unix seconds | 8 |
+| Monotonic positive record sequence | 8 |
+| Endpoint count, 1..4 | 1 |
+| Each endpoint: numeric IPv4 octets then nonzero TCP port | 4 + 2 |
+
+Endpoints are strictly sorted by IPv4 and port; duplicates are invalid.
+Append the 64-byte Ed25519 signature to form a wire record of 119..137 bytes.
+Its owner is the signature verification key; substituting the owner or any
+other field invalidates the signature. There is no scheme, hostname, private
+key, document content, code or stylesheet field.
+
+Network acceptance requires `expiration > now` and at most 24 hours into the
+future. Sequence zero, invalid keys/signatures, invalid endpoints and expired
+or overly future records are rejected. Once a cache has accepted sequence N,
+it rejects lower sequences and any changed record at N, even after expiry and
+restart. An exact duplicate is idempotent and does not extend validity or
+rewrite the cache. A fresh cache cannot know the globally newest sequence;
+valid older records can still be replayed to it until expiry. There is no
+revocation service, trusted timestamp authority or global latest-record oracle.
+
+On `serve-dir --dht` startup the node atomically saves a self-signed record with
+the next sequence **before publishing it**. The previous signed self record
+retains the counter across restarts and expiry. A missing state file starts a
+new counter: do not delete/restore old state or run independent publishers
+with a cloned identity and expect monotonicity. Sequence exhaustion fails closed.
+Publication is one bounded initial pass to up to eight configured peers, at
+most 15 seconds and 16 RPCs total. A successful STORE is followed by one FIND
+near the joining node's ID to learn signed neighbors; this lets ordinary
+joined peers help subsequent lookups. It does not periodically crawl, refresh or republish.
+After 24 hours, restart with the same identity and state to publish a fresh
+record. Automatic maintenance/replication is deferred.
+
+## Scope and trust
+
+The default public DHT accepts only the existing transport's conservative
+ordinary public-unicast IPv4 policy. It refuses RFC 1918, loopback, link-local,
+CGNAT, documentation, multicast, unspecified and reserved ranges. There is no
+DNS resolution. `--dht-local` / CLI `--local` explicitly selects an isolated
+IPv4-loopback-only simulation policy. Public and loopback state files differ;
+records cannot cross policies. This prevents a public peer from directing
+lookups at localhost/private LAN services. It is not a guarantee against all
+forms of scanning of public services: a malicious signer can claim permitted
+public endpoints, but every connection must pin the claimed ID before RPC/data.
+
+TLS is the existing `ynp-tls` transport: TLS 1.3 only, exact pinned Ed25519 key,
+valid self-signed certificate and handshake signature, `ynp/1` ALPN, no DNS,
+resumption, early data or plaintext fallback. DHT listeners require explicit
+`--dht --tls` plus either existing `--public` opt-in or isolated `--dht-local`.
+There is no automatic firewall, provider or router configuration. Public
+listening retains its fixed workers, handshake/connection deadlines and global/
+per-IP admission limits. The DHT server does not fetch advertised endpoints in
+response to FIND/STORE; bounded iterative clients initiate those connections.
+
+Bootstrap entries reuse the existing persistent manual peer configuration.
+Their IDs are operator-supplied pins, not naming authorities. Adding a bootstrap
+does not contact it, authenticate its advertisement, or replace existing pins.
+Any compatible ordinary peer can be a bootstrap, and multiple are supported.
+No vendor server or specific node is mandatory. Once peers have learned valid
+records, cached contacts can be queried without the original bootstrap.
+
+An owner signature proves that the key signed a location claim, not that its
+owner occupies that endpoint or is a trustworthy person. Even a validly signed
+lie must fail when the actual endpoint presents another key. `dht fetch`
+performs that fresh TLS check before asking for a YNP document. It tries at
+most four signed endpoints, each with a three-second total connection/I/O
+budget, validates the YNP document key and rechecks record expiry before use.
+`lookup` only prints `ynps://` locations (convenience key `/home`); it does not
+open sites. Browser users may explicitly open that URL through existing controls.
+
+`RpcConnector` is a small transport extension point. The default `PinnedTls`
+adapter delegates to `ynp-tls`. Future adapters must preserve exact-key TLS
+authentication, encryption and budgets; policy validation precedes the hook.
+No anonymous transport, alternate endpoint type, NAT traversal, Tor or I2P is
+implemented, and a local modified adapter is outside the trust boundary.
+
+## Versioned RPC over the existing TLS listener
+
+With DHT enabled, the node reads four decrypted bytes after the normal TLS
+handshake. `YNP\0` is replayed unchanged into the original YNP codec. `YDH\0`
+selects the DHT codec. Unknown prefixes fail closed. Without the opt-in, the
+original YNP server handles requests and rejects DHT magic. The browser and
+document stack are not redesigned.
+
+Each request and response is **exactly 2048 bytes**, including all-zero padding:
+
+| Offset | Bytes | Field |
+| --- | --- | --- |
+| 0 | 4 | `YDH\0` |
+| 4 | 1 | Version `1` |
+| 5 | 1 | Message kind |
+| 6 | 16 | Fresh OS-random request nonce, echoed in the response |
+| 22 | 2 | Body length, at most 2024 |
+| 24 | variable | Body, then zero padding to 2048 |
+
+Kinds: 1 FIND (32-byte target public key); 2 STORE (u16 record length and one
+signed record); 3 PEERS (u8 count 0..8, then u16-length-prefixed signed records);
+4 STORED (empty body). The server accepts only FIND/STORE. Clients match the
+response nonce and kind to the current query. Unknown versions/kinds, nonzero
+padding, invalid lengths/counts, trailing fields, invalid keys, duplicate
+record IDs and truncation are errors. Each connection carries one RPC. No
+response is sent until the full request is received and validated. Fixed
+equal-size frames cap application-level amplification at 1:1; TCP/TLS overhead
+and TCP-level abuse remain outside that statement. There is no UDP DHT or
+source-address reflection mechanism.
+
+## Persistence and remaining limitations
+
+`dht-{public|local}-{server|client}.cache` files share the selected peer/state
+directory. Writers hold separate nonblocking OS locks and atomically replace
+a synced temporary file; snapshots are at most 64 KiB and 256 signed records.
+The binary header is `YDC\x01`, one network-policy byte, the local public key
+(32 bytes), u16 record count, then u16-length-prefixed records. Bounds, owner,
+scope, duplicates and all signatures are checked on load. Expired signatures
+restore only high-water history, never active locations. Corruption does not
+silently reset history. Temporary-file collisions fail closed; inspect a stale
+`.tmp` after a crash before removing that exact file. Directory durability
+through power loss/network filesystems is not guaranteed.
+
+Server/client caches have separate locks so CLI lookups can run while serving.
+The CLI imports current server records that do not roll back newer client
+knowledge. A running server caches validated STORE publications; CLI-learned
+records remain in the client cache rather than silently modifying the running
+server. Routing contacts are transient and authenticated again after restart.
+Unix new files/directories request 0600/0700; Windows inherits directory ACLs.
+No private keys are serialized here. File permissions, backups and key/state
+integrity remain the operator's responsibility.
+
+Unsolved risks include **Sybil identities, eclipse attacks, cache filling,
+malicious bootstraps, censorship, omission of newer records, replay to new
+clients, clock errors, endpoint lies and traffic analysis**. XOR distance is
+not an authorization policy. There is no address-ownership challenge, client
+authentication, proof of work, subnet diversity, quorum, automatic republishing,
+revocation or production DHT maintenance. Lookup peers learn requested IDs and
+can link them to source IPs; caches disclose ID-to-endpoint relationships and
+sequence/expiry metadata. TLS does not provide anonymity or prevent routing
+metadata collection. Public deployments need a separate security review.
+
+See [reproducible testing](../../dht-testing.md) for the three-process simulation
+and a clear distinction from unperformed real internet tests.

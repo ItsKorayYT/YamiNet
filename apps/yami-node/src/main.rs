@@ -9,7 +9,7 @@ use std::{
 };
 use yami_identity::{default_dir, NodeId, NodeIdentity, KEY_FILE};
 use yami_node::{
-    serve_concurrently, serve_once, sign_site, site_manifest, verify_site, Reply, Site, Store,
+    serve_once, serve_with_handler, sign_site, site_manifest, verify_site, Reply, Site, Store,
     SIGNATURE_FILE,
 };
 use ynp::{DocumentData, Incoming, LocalListener, LoopbackTcp};
@@ -26,6 +26,11 @@ yami-node peer add <node-id> <numeric-IP:port> [--dir <peer-directory>]
 yami-node peer list [--dir <peer-directory>]
 yami-node peer remove <node-id> [--dir <peer-directory>]
 yami-node peer connect <node-id> [--dir <peer-directory>]
+yami-node dht bootstrap <node-id> <IPv4:port> [--dir <peer-directory>] [--local]
+yami-node dht peers [--dir <peer-directory>] [--local]
+yami-node dht lookup <node-id> [--dir <peer-directory>] [--identity <identity-directory>] [--local]
+yami-node dht fetch <node-id> <key> [--dir <peer-directory>] [--identity <identity-directory>] [--local]
+serve-dir DHT options: --dht [--dht-local] [--dht-dir <peer/state-directory>] [--dht-endpoint <advertised-IPv4:port> ...]
 yami-node fetch <loopback-IP:port> <key>
 yami-node fetch <ynps://node-id@numeric-IP:port/key>
 yami-node identity new [--dir <identity-directory>]
@@ -208,6 +213,21 @@ fn serve_dir(address: SocketAddr, root: &str, options: ServeOptions) -> Result<(
             return Err("--public requires one specific IPv4 address".into());
         }
     }
+    if options.dht {
+        if options.dht_local
+            && (!address.ip().is_loopback() || !address.is_ipv4() || options.public || options.lan)
+        {
+            return Err(
+                "--dht-local requires isolated IPv4 loopback TLS, without --lan/--public".into(),
+            );
+        }
+        if !options.dht_local && !options.public {
+            return Err(
+                "public DHT requires --tls --public (or explicitly --dht-local for simulation)"
+                    .into(),
+            );
+        }
+    }
     let site = open_site(root)?;
     let mut identity = None;
     if let Some(dir) = &options.identity {
@@ -224,6 +244,7 @@ fn serve_dir(address: SocketAddr, root: &str, options: ServeOptions) -> Result<(
     match identity {
         Some(identity) if options.tls => {
             let id = *identity.id();
+            let dht_identity = Arc::clone(&identity);
             let listener = if options.public {
                 TlsListener::bind_public(address, identity)?
             } else if options.lan {
@@ -232,6 +253,44 @@ fn serve_dir(address: SocketAddr, root: &str, options: ServeOptions) -> Result<(
                 TlsListener::bind(address, identity)?
             };
             let address = listener.local_addr()?;
+            let dht = if options.dht {
+                let network = if options.dht_local {
+                    yami_dht::Network::Loopback
+                } else {
+                    yami_dht::Network::Public
+                };
+                let dir = options
+                    .dht_dir
+                    .clone()
+                    .map_or_else(yami_node::peers::default_dir, Ok)?;
+                let service =
+                    yami_dht::Service::open(dht_path(&dir, network, "server"), id, network)?;
+                let endpoints = if options.dht_endpoints.is_empty() {
+                    let SocketAddr::V4(endpoint) = address else {
+                        return Err("DHT endpoints require IPv4".into());
+                    };
+                    vec![endpoint]
+                } else {
+                    options.dht_endpoints.clone()
+                };
+                let record = service.prepare_self(&dht_identity, endpoints, yami_dht::now()?)?;
+                let seeds = dht_seeds(&dir, network)?
+                    .into_iter()
+                    .filter(|c| c.id != id)
+                    .collect::<Vec<_>>();
+                let publisher = service.clone();
+                let published_record = record.clone();
+                thread::Builder::new().name("dht-startup".into()).spawn(move || {
+                    match yami_dht::publish(&publisher, &published_record, &seeds) {
+                        Ok(count) => eprintln!("DHT startup publication complete: {count} authenticated bootstrap(s)"),
+                        Err(error) => eprintln!("DHT startup publication failed: {error}"),
+                    }
+                })?;
+                eprintln!("DHT v1 enabled, {:?}; signed sequence {} expires {}. Endpoints are claims until TLS authenticates the node.", network, record.sequence(), record.expires());
+                Some(service)
+            } else {
+                None
+            };
             // Keep the guard alive alongside the TLS listener. Without the flag
             // no discovery socket is created, even on an opted-in LAN listener.
             let _discovery = if options.discoverable {
@@ -255,7 +314,7 @@ fn serve_dir(address: SocketAddr, root: &str, options: ServeOptions) -> Result<(
             };
             eprintln!("Serving site {root} via YNP over TLS 1.3 on {address} as {id}");
             if options.public {
-                eprintln!("PUBLIC MODE: unauthenticated internet clients may read every page. Experimental, not security-reviewed. Configure any firewall/port forwarding manually. No discovery or automatic exposure.");
+                eprintln!("PUBLIC MODE: unauthenticated internet clients may read every page. Experimental, not security-reviewed. Configure any firewall/port forwarding manually. No automatic exposure; DHT requires its separate opt-in.");
             }
             if options.lan {
                 eprintln!(
@@ -263,15 +322,20 @@ fn serve_dir(address: SocketAddr, root: &str, options: ServeOptions) -> Result<(
                     address.port()
                 );
             }
-            serve_site(&listener, &site, options.workers, options.public, &|key| {
-                ynp_tls::format_url(&id, address, key)
-            })
+            serve_site(
+                &listener,
+                &site,
+                options.workers,
+                options.public,
+                dht.as_ref(),
+                &|key| ynp_tls::format_url(&id, address, key),
+            )
         }
         _ => {
             let listener = LocalListener::bind(address)?;
             let address = listener.local_addr()?;
             eprintln!("Serving site {root} via YNP on {address} (plaintext)");
-            serve_site(&listener, &site, options.workers, false, &|key| {
+            serve_site(&listener, &site, options.workers, false, None, &|key| {
                 format!("ynp://{address}/{key}")
             })
         }
@@ -282,6 +346,7 @@ fn serve_site(
     site: &Site,
     workers: usize,
     public: bool,
+    dht: Option<&yami_dht::Service>,
     url: &dyn Fn(&str) -> String,
 ) -> Result<()> {
     let pages = site.pages()?;
@@ -297,25 +362,37 @@ fn serve_site(
         eprintln!("Open in Yami Browser: {}", url(start));
     }
     let reports = std::sync::Mutex::new((std::time::Instant::now(), 0usize));
-    serve_concurrently(listener, site, workers, &|outcome| {
-        if public {
-            let Ok(mut budget) = reports.lock() else {
-                return;
-            };
-            if budget.0.elapsed() >= std::time::Duration::from_secs(1) {
-                *budget = (std::time::Instant::now(), 0);
+    serve_with_handler(
+        listener,
+        workers,
+        &|connection| {
+            if let Some(dht) = dht {
+                yami_node::serve_connection_with_dht(connection, site, dht)
+            } else {
+                yami_node::serve_connection(connection, site)
             }
-            if budget.1 >= 20 {
-                return;
+        },
+        &|outcome| {
+            if public {
+                let Ok(mut budget) = reports.lock() else {
+                    return;
+                };
+                if budget.0.elapsed() >= std::time::Duration::from_secs(1) {
+                    *budget = (std::time::Instant::now(), 0);
+                }
+                if budget.1 >= 20 {
+                    return;
+                }
+                budget.1 += 1;
             }
-            budget.1 += 1;
-        }
-        match outcome {
-            Ok(Reply::Document(key)) => eprintln!("Served {key}"),
-            Ok(Reply::NotFound(key)) => eprintln!("NotFound {key}"),
-            Err(error) => eprintln!("Connection rejected: {error}"),
-        }
-    })?;
+            match outcome {
+                Ok(Reply::Document(key)) => eprintln!("Served {key}"),
+                Ok(Reply::NotFound(key)) => eprintln!("NotFound {key}"),
+                Err(error) => eprintln!("Connection rejected: {error}"),
+                Ok(Reply::Dht) => eprintln!("Served bounded DHT RPC"),
+            }
+        },
+    )?;
     Ok(())
 }
 fn open_site(root: &str) -> Result<Site> {
@@ -328,11 +405,16 @@ struct ServeOptions {
     lan: bool,
     discoverable: bool,
     public: bool,
+    dht: bool,
+    dht_local: bool,
+    dht_dir: Option<PathBuf>,
+    dht_endpoints: Vec<std::net::SocketAddrV4>,
 }
 fn serve_dir_options(options: &[String]) -> Result<ServeOptions> {
     let (mut workers, mut identity, mut tls, mut lan) = (None, None, false, false);
     let mut discoverable = false;
     let mut public = false;
+    let (mut dht, mut dht_local, mut dht_dir, mut dht_endpoints) = (false, false, None, Vec::new());
     let mut options = options.iter();
     while let Some(flag) = options.next() {
         match flag.as_str() {
@@ -346,11 +428,25 @@ fn serve_dir_options(options: &[String]) -> Result<ServeOptions> {
             "--lan" if !lan => lan = true,
             "--discoverable" if !discoverable => discoverable = true,
             "--public" if !public => public = true,
+            "--dht" if !dht => dht = true,
+            "--dht-local" if !dht_local => dht_local = true,
+            "--dht-dir" if dht_dir.is_none() => {
+                dht_dir = Some(PathBuf::from(options.next().ok_or(USAGE)?))
+            }
+            "--dht-endpoint" if dht_endpoints.len() < 4 => {
+                dht_endpoints.push(options.next().ok_or(USAGE)?.parse()?)
+            }
             _ => return Err(USAGE.into()),
         }
     }
     if public && lan {
         return Err("--public and --lan are mutually exclusive".into());
+    }
+    if dht && !tls {
+        return Err("--dht requires --tls and an identity; plaintext DHT is forbidden".into());
+    }
+    if !dht && (dht_local || dht_dir.is_some() || !dht_endpoints.is_empty()) {
+        return Err("DHT options require explicit --dht".into());
     }
     if public && !tls {
         return Err("--public needs --tls; plaintext internet YNP is forbidden".into());
@@ -374,6 +470,10 @@ fn serve_dir_options(options: &[String]) -> Result<ServeOptions> {
         lan,
         discoverable,
         public,
+        dht,
+        dht_local,
+        dht_dir,
+        dht_endpoints,
     })
 }
 fn identity_dir(options: &[String]) -> Result<PathBuf> {
@@ -444,6 +544,158 @@ fn peer_command(args: &[String]) -> Result<()> {
     }
     Ok(())
 }
+fn dht_path(dir: &Path, network: yami_dht::Network, role: &str) -> PathBuf {
+    let mode = if network == yami_dht::Network::Public {
+        "public"
+    } else {
+        "local"
+    };
+    dir.join(format!("dht-{mode}-{role}.cache"))
+}
+fn dht_seeds(dir: &Path, network: yami_dht::Network) -> Result<Vec<yami_dht::Contact>> {
+    let peers = yami_node::peers::PeerStore::open(dir)?;
+    Ok(peers
+        .entries()
+        .iter()
+        .filter_map(|peer| {
+            let SocketAddr::V4(endpoint) = peer.address else {
+                return None;
+            };
+            yami_dht::Contact::new(peer.id, endpoint, network).ok()
+        })
+        .collect())
+}
+fn dht_command(args: &[String]) -> Result<()> {
+    use yami_dht::{Network, Service};
+    let (mut dir, mut identity, mut local, mut values) = (None, None, false, Vec::new());
+    let mut args = args.iter();
+    while let Some(arg) = args.next() {
+        match arg.as_str() {
+            "--dir" if dir.is_none() => dir = Some(PathBuf::from(args.next().ok_or(USAGE)?)),
+            "--identity" if identity.is_none() => {
+                identity = Some(PathBuf::from(args.next().ok_or(USAGE)?))
+            }
+            "--local" if !local => local = true,
+            flag if flag.starts_with("--") => return Err(USAGE.into()),
+            _ => values.push(arg.as_str()),
+        }
+    }
+    let network = if local {
+        Network::Loopback
+    } else {
+        Network::Public
+    };
+    let dir = dir.map_or_else(yami_node::peers::default_dir, Ok)?;
+    match values.as_slice() {
+        ["bootstrap", id, endpoint] => {
+            let id: NodeId = id.parse()?;
+            let endpoint: std::net::SocketAddrV4 = endpoint.parse()?;
+            network.check(endpoint)?;
+            yami_node::peers::PeerStore::open(&dir)?.add(id, endpoint.into())?;
+            println!("Added manual bootstrap pin {id} at {endpoint}; unverified until TLS. No query was sent.");
+            Ok(())
+        }
+        ["peers"] => {
+            let peers = yami_node::peers::PeerStore::open(&dir)?;
+            for peer in peers.entries() {
+                println!(
+                    "bootstrap {} {} manual-status={}",
+                    peer.id,
+                    peer.address,
+                    peer.status.label()
+                );
+            }
+            for role in ["server", "client"] {
+                match Service::read_snapshot(&dht_path(&dir, network, role), network) {
+                    Ok(state) => {
+                        for record in state.records() {
+                            if state.get(record.id(), yami_dht::now()?).is_some() {
+                                println!("{role} {} sequence={} expires={} signed-location-unconfirmed {:?}", record.id(), record.sequence(), record.expires(), record.endpoints());
+                            } else {
+                                println!("{role} {} expired; sequence {} retained only to reject rollback", record.id(), record.sequence());
+                            }
+                        }
+                    }
+                    Err(e) if e.kind() == io::ErrorKind::NotFound => {}
+                    Err(e) => return Err(e.into()),
+                }
+            }
+            Ok(())
+        }
+        ["lookup", id] | ["fetch", id, _] => {
+            let target: NodeId = id.parse()?;
+            if values[0] == "fetch" {
+                ynp::validate_key(values[2])?;
+            }
+            let identity_dir = identity
+                .or_else(default_dir)
+                .ok_or("no identity directory; pass --identity")?;
+            let (identity, _) = load_or_create(&identity_dir)?;
+            let service =
+                Service::open(dht_path(&dir, network, "client"), *identity.id(), network)?;
+            match Service::read_snapshot(&dht_path(&dir, network, "server"), network) {
+                Ok(state) if state.local == *identity.id() => {
+                    let at = yami_dht::now()?;
+                    let current = service.snapshot()?;
+                    let records = state
+                        .records()
+                        .iter()
+                        .filter(|r| state.get(r.id(), at).is_some())
+                        // The server snapshot may lag a newer record learned
+                        // by this client. Never import a rollback/equivocation.
+                        .filter(|r| {
+                            current
+                                .records()
+                                .iter()
+                                .find(|old| old.id() == r.id())
+                                .is_none_or(|old| r.sequence() > old.sequence() || *r == old)
+                        })
+                        .cloned()
+                        .collect();
+                    service.accept_records(records, yami_dht::now()?)?;
+                }
+                Ok(_) => return Err("DHT server cache belongs to another identity".into()),
+                Err(e) if e.kind() == io::ErrorKind::NotFound => {}
+                Err(e) => return Err(e.into()),
+            }
+            let seeds = dht_seeds(&dir, network)?;
+            let found = yami_dht::lookup(&service, target, &seeds)?;
+            let record = found.record.ok_or_else(|| format!("DHT lookup found no current signed record after {} query attempt(s), {} failure(s)", found.queries, found.failures))?;
+            eprintln!("Signed record for {}: sequence {}, expires {}. Location is not a TLS liveness proof.", record.id(), record.sequence(), record.expires());
+            if values[0] == "lookup" {
+                for endpoint in record.endpoints() {
+                    println!(
+                        "{}",
+                        ynp_tls::format_url(&record.id(), (*endpoint).into(), "home")
+                    );
+                }
+                return Ok(());
+            }
+            let key = values[2];
+            ynp::validate_key(key)?;
+            let mut last = None;
+            for endpoint in record.endpoints() {
+                record.verify(network, yami_dht::now()?)?;
+                network.check(*endpoint)?;
+                match TlsTransport::new(target)?
+                    .connect_with_timeout((*endpoint).into(), std::time::Duration::from_secs(3))
+                    .and_then(|mut connection| ynp::request(&mut *connection, key))
+                {
+                    Ok(doc) => {
+                        eprintln!("Verified node {target} over TLS 1.3 after distributed lookup");
+                        print_source(&doc);
+                        return Ok(());
+                    }
+                    Err(error) => last = Some(error),
+                }
+            }
+            Err(last
+                .unwrap_or_else(|| io::Error::other("no reachable signed endpoint"))
+                .into())
+        }
+        _ => Err(USAGE.into()),
+    }
+}
 /// Prints only public values and file locations, never key material.
 fn describe(dir: &Path, identity: &NodeIdentity) {
     println!("Node ID     {}", identity.id());
@@ -511,6 +763,9 @@ fn run() -> Result<()> {
     }
     if args[0] == "peer" {
         return peer_command(&args[1..]);
+    }
+    if args[0] == "dht" {
+        return dht_command(&args[1..]);
     }
     let tls = args[0] == "tls-demo"
         || args

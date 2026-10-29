@@ -212,10 +212,40 @@ that exact key before any page request. Plaintext stays loopback-only.
 
 Peers are manually configured, persistent and initially unverified. Their
 last-attempt status and last successful handshake timestamp are historical;
-every connection authenticates again. There is no automatic peer exchange or
+every connection authenticates again. Manual peer storage itself adds no automatic peer exchange or
 mandatory central service. Read [internet/VPS testing](docs/internet-testing.md)
 and [peer storage](docs/specs/v0.1/bootstrap-peers.md). Actual separate-network
 connectivity and a remote VPS have not been tested during development.
+
+### Decentralized peer lookup MVP
+
+The separate `yami-dht` crate adds opt-in Kademlia-inspired lookup by full node
+ID over the existing pinned TLS listener. Public DHT servers use
+`serve-dir ... --tls --public --dht`; the isolated simulator uses
+`--tls --dht --dht-local`. Records bind the owner's ID to up to four endpoints,
+expiration and monotonic sequence under its Ed25519 signature. There are no
+mandatory built-in servers, DNS, HTTP, automatic NAT traversal or anonymity.
+
+```text
+yami-node dht bootstrap <known-bootstrap-id> <public-IPv4:port> --dir <state-directory>
+yami-node dht lookup <target-node-id> --dir <state-directory> --identity <identity-directory>
+yami-node dht fetch <target-node-id> home --dir <state-directory> --identity <identity-directory>
+yami-node dht peers --dir <state-directory>
+```
+
+Bootstrap configuration reuses the existing manual peer store. Lookup validates
+signed records and prints unconfirmed `ynps://` locations; fetch resolves the
+ID and then authenticates the actual endpoint before requesting the document.
+The browser remains unchanged and can explicitly open a returned URL. Routing,
+records, frames, timeouts and query counts are bounded. Expired locations are
+ignored while bounded sequence history is retained to reject rollback.
+
+Run `cargo test -p yami-node --test dht -- --nocapture` to reproduce the
+three-process A→B→C publication/lookup/TLS-fetch simulation and wrong-key checks.
+This is loopback validation, **not real internet validation**. Read
+[DHT testing](docs/dht-testing.md) and the
+[versioned protocol/security limits](docs/specs/v0.1/dht.md), including the
+unsolved Sybil/eclipse, cache-filling and routing-metadata risks.
 
 ## Workspace
 
@@ -226,6 +256,7 @@ connectivity and a remote VPS have not been tested during development.
 | `ynp` | Binary frame codec, strict limits, transport traits, legacy plaintext loopback TCP client/listener |
 | `ynp-tls` | YNP over pinned TLS 1.3, local/public IPv4 clients and separately opted-in LAN/public listeners |
 | `ynp-discovery` | Opt-in IPv4 LAN multicast queries, bounded untrusted advertisements and rate-limited responses |
+| `yami-dht` | Bounded XOR routing, signed expiring peer records, iterative pinned-TLS lookup and persistent sequence history |
 | `yami-render` | Original terminal/bitmap renderer plus shaped native document layout and antialiased text |
 | `yami-browser` | Native desktop tabs/navigation and preserved terminal/PPM document tools |
 | `yami-identity` | Persistent Ed25519 node identities, node IDs, domain-separated metadata signatures |
@@ -234,7 +265,7 @@ connectivity and a remote VPS have not been tested during development.
 Versioned normative drafts: [YLang](docs/specs/v0.1/ylang.md),
 [YSL](docs/specs/v0.1/ysl.md), [YNP](docs/specs/v0.1/ynp.md),
 [node identity](docs/specs/v0.1/identity.md),
-[YNP over TLS](docs/specs/v0.1/ynp-tls.md)
+[YNP over TLS](docs/specs/v0.1/ynp-tls.md), [DHT lookup](docs/specs/v0.1/dht.md)
 and [rendering and architecture](docs/specs/v0.1/architecture.md).
 See [SECURITY.md](SECURITY.md) for the experimental trust boundary.
 
@@ -287,8 +318,9 @@ to uppercase and unsupported characters to a box; this limitation does not
 describe the desktop font renderer. Oversized layouts and bitmaps fail with
 an error rather than allocating without bounds.
 
-Peer discovery is limited to explicitly selected private IPv4 LAN interfaces.
-There is no distributed lookup, anonymous routing, production-safe networking,
+Multicast discovery is limited to explicitly selected private IPv4 LAN interfaces.
+Distributed lookup is an opt-in experimental MVP with finite routing/cache
+budgets; it is not a complete or production DHT. There is no anonymous routing, production-safe networking,
 NAT traversal, protocol negotiation, multiplexing, compression or cache.
 Public IPv4 connectivity is experimental and requires a known endpoint/ID;
 internet deployment has not been security-reviewed or validated across providers.

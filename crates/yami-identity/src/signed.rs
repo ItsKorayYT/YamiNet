@@ -7,7 +7,7 @@
 use crate::{hex, unhex, Error, NodeId, NodeIdentity, Result};
 use ed25519_dalek::Signer as _;
 use sha2::{Digest as _, Sha256};
-use std::{fmt, str::FromStr};
+use std::{fmt, net::SocketAddrV4, str::FromStr};
 use ynp::DocumentData;
 
 pub type Digest = [u8; 32];
@@ -20,14 +20,16 @@ pub fn sha256(bytes: &[u8]) -> Digest {
 pub enum Purpose {
     DocumentMetadata,
     SiteManifest,
+    PeerRecord,
 }
 impl Purpose {
-    pub const ALL: [Self; 2] = [Self::DocumentMetadata, Self::SiteManifest];
+    pub const ALL: [Self; 3] = [Self::DocumentMetadata, Self::SiteManifest, Self::PeerRecord];
     /// The domain separation prefix of every message signed for this purpose.
     pub fn tag(self) -> &'static [u8] {
         match self {
             Self::DocumentMetadata => b"yaminet.document-metadata.v1\0",
             Self::SiteManifest => b"yaminet.site-manifest.v1\0",
+            Self::PeerRecord => b"yaminet.peer-record.v1\0",
         }
     }
     pub fn name(self) -> &'static str {
@@ -132,6 +134,75 @@ impl SiteManifest {
     }
 }
 impl sealed::Sealed for SiteManifest {}
+
+/// Canonical public endpoint claim. Network address policy and clock/rollback
+/// checks belong to `yami-dht`; the signing API remains sealed and separated
+/// from document, site and TLS signing domains.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PeerRecordMetadata {
+    id: NodeId,
+    endpoints: Vec<SocketAddrV4>,
+    expires: u64,
+    sequence: u64,
+}
+impl PeerRecordMetadata {
+    pub const MAX_ENDPOINTS: usize = 4;
+    pub fn new(
+        id: NodeId,
+        endpoints: Vec<SocketAddrV4>,
+        expires: u64,
+        sequence: u64,
+    ) -> Result<Self> {
+        if endpoints.is_empty()
+            || endpoints.len() > Self::MAX_ENDPOINTS
+            || expires == 0
+            || sequence == 0
+            || endpoints.iter().any(|e| {
+                e.port() == 0
+                    || e.ip().is_unspecified()
+                    || e.ip().is_multicast()
+                    || e.ip().is_broadcast()
+            })
+            || endpoints.windows(2).any(|e| e[0] >= e[1])
+        {
+            return Err(Error::Malformed("peer record needs 1..4 strictly sorted IPv4 endpoints, positive expiry and sequence"));
+        }
+        Ok(Self {
+            id,
+            endpoints,
+            expires,
+            sequence,
+        })
+    }
+    pub fn id(&self) -> NodeId {
+        self.id
+    }
+    pub fn endpoints(&self) -> &[SocketAddrV4] {
+        &self.endpoints
+    }
+    pub fn expires(&self) -> u64 {
+        self.expires
+    }
+    pub fn sequence(&self) -> u64 {
+        self.sequence
+    }
+}
+impl sealed::Sealed for PeerRecordMetadata {}
+impl Signable for PeerRecordMetadata {
+    const PURPOSE: Purpose = Purpose::PeerRecord;
+    fn canonical_bytes(&self) -> Vec<u8> {
+        let mut bytes = Vec::with_capacity(49 + 6 * self.endpoints.len());
+        bytes.extend_from_slice(&self.id.public_key());
+        bytes.extend_from_slice(&self.expires.to_be_bytes());
+        bytes.extend_from_slice(&self.sequence.to_be_bytes());
+        bytes.push(self.endpoints.len() as u8);
+        for endpoint in &self.endpoints {
+            bytes.extend_from_slice(&endpoint.ip().octets());
+            bytes.extend_from_slice(&endpoint.port().to_be_bytes());
+        }
+        bytes
+    }
+}
 impl Signable for SiteManifest {
     const PURPOSE: Purpose = Purpose::SiteManifest;
     /// `SHA-256(style) || u32 page count || (u16 key length || key || SHA-256(page))*`
@@ -157,6 +228,9 @@ impl fmt::Display for Signature {
     }
 }
 impl Signature {
+    pub fn from_bytes(bytes: [u8; 64]) -> Self {
+        Self(bytes)
+    }
     pub fn to_bytes(&self) -> [u8; 64] {
         self.0
     }
@@ -391,15 +465,16 @@ mod tests {
     fn signature_for_one_purpose_fails_for_another_with_identical_body() {
         let identity = NodeIdentity::generate().unwrap();
         let body = b"identical canonical bytes";
-        let signature = identity.sign_message(Purpose::DocumentMetadata, body);
         let id = identity.id();
-        assert!(id
-            .verify_message(Purpose::DocumentMetadata, body, &signature)
-            .is_ok());
-        assert!(matches!(
-            id.verify_message(Purpose::SiteManifest, body, &signature),
-            Err(Error::BadSignature)
-        ));
+        for purpose in Purpose::ALL {
+            let signature = identity.sign_message(purpose, body);
+            for checked in Purpose::ALL {
+                assert_eq!(
+                    id.verify_message(checked, body, &signature).is_ok(),
+                    checked == purpose
+                );
+            }
+        }
     }
 
     #[test]

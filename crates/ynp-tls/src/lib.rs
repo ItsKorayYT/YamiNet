@@ -136,12 +136,23 @@ impl TlsTransport {
     pub fn trusted(&self) -> &NodeId {
         &self.trusted
     }
-}
-impl Transport for TlsTransport {
-    /// Completes the handshake before returning, so no request is written
-    /// until the server has proved the trusted identity. Reaches loopback and
-    /// private LAN and public IPv4 addresses; the same pinned identity is checked.
-    fn connect(&self, address: SocketAddr) -> io::Result<Box<dyn Connection>> {
+    /// Same verifier/transport, with a caller budget covering TCP connect,
+    /// handshake AND subsequent I/O. Used by bounded iterative lookup RPCs.
+    pub fn connect_with_timeout(
+        &self,
+        address: SocketAddr,
+        timeout: Duration,
+    ) -> io::Result<Box<dyn Connection>> {
+        if timeout.is_zero() || timeout > DEADLINE {
+            return Err(invalid("TLS caller budget must be >0 and <=10 seconds"));
+        }
+        self.connect_inner(address, Some(Instant::now() + timeout))
+    }
+    fn connect_inner(
+        &self,
+        address: SocketAddr,
+        deadline: Option<Instant>,
+    ) -> io::Result<Box<dyn Connection>> {
         Scope::Internet.check(address)?;
         if address.port() == 0 {
             return Err(invalid("TLS destination port must be nonzero"));
@@ -149,17 +160,39 @@ impl Transport for TlsTransport {
         let name = ServerName::try_from(self.trusted.to_string()).map_err(other)?;
         let mut tls = ClientConnection::new(Arc::clone(&self.config), name).map_err(other)?;
         tls.set_buffer_limit(Some(TLS_BUFFER_LIMIT));
-        let stream = TcpStream::connect_timeout(&address, ynp::TIMEOUT)?;
+        let timeout = deadline.map_or(ynp::TIMEOUT, |until| {
+            until
+                .saturating_duration_since(Instant::now())
+                .min(ynp::TIMEOUT)
+        });
+        if timeout.is_zero() {
+            return Err(io::Error::new(
+                io::ErrorKind::TimedOut,
+                "TLS caller deadline exceeded",
+            ));
+        }
+        let stream = TcpStream::connect_timeout(&address, timeout)?;
         ynp::configure_stream(&stream)?;
         let mut connection = TlsConnection::new(tls, stream);
-        connection.handshake().map_err(|error| {
-            // Report a wrong identity as such, rather than as a TLS failure.
-            match mismatch(&error) {
+        if let Some(until) = deadline {
+            connection.until = connection.until.min(until);
+            connection.tls.sock.until = connection.tls.sock.until.min(until);
+        }
+        connection
+            .handshake()
+            .map_err(|error| match mismatch(&error) {
                 Some(mismatch) => io::Error::new(io::ErrorKind::PermissionDenied, mismatch),
                 None => error,
-            }
-        })?;
+            })?;
         Ok(Box::new(connection))
+    }
+}
+impl Transport for TlsTransport {
+    /// Completes the handshake before returning, so no request is written
+    /// until the server has proved the trusted identity. Reaches loopback and
+    /// private LAN and public IPv4 addresses; the same pinned identity is checked.
+    fn connect(&self, address: SocketAddr) -> io::Result<Box<dyn Connection>> {
+        self.connect_inner(address, None)
     }
 }
 fn mismatch(error: &io::Error) -> Option<IdentityMismatch> {
