@@ -1,2 +1,4 @@
 /target/
 *.ppm
+# Node secret keys must never be committed (see docs/specs/v0.1/identity.md).
+node.key

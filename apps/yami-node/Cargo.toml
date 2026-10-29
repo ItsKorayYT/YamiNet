@@ -9,4 +9,5 @@ license.workspace = true
 workspace = true
 
 [dependencies]
+yami-identity = { path = "../../crates/yami-identity" }
 ynp = { path = "../../crates/ynp" }

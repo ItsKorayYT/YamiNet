@@ -1,5 +1,6 @@
 //! Small document nodes: an in-memory store and a directory-backed site.
 //! No discovery, caching or background fetches.
+mod signing;
 mod site;
 
 use std::{
@@ -10,6 +11,7 @@ use std::{
 };
 use ynp::{Connection, DocumentData, Frame, Incoming, Message};
 
+pub use signing::{sign_site, site_manifest, verify_site, SIGNATURE_FILE};
 pub use site::{Site, PAGE_EXTENSION, STYLE_FILE};
 
 /// Total time one connection may take, so a slow client cannot hold a worker

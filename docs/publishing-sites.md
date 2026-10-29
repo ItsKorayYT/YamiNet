@@ -82,6 +82,31 @@ new pages and deletions take effect without a restart: save the file and press
 Reload in the browser. A page that is half-written at the moment of a request
 may fail to parse; Reload again, or save through a temporary file and rename it.
 
+## 5. Sign it (optional)
+
+A node identity lets readers check that a site's files are exactly what you
+published. Create an identity once, then sign the site after every change:
+
+```sh
+cargo run -p yami-node -- identity new
+cargo run -p yami-node -- identity sign-site sites/alice
+```
+
+This writes `sites/alice/site.sig`, which covers every page and `default.ysl`.
+Someone with a copy of the directory checks it against the node ID you gave
+them yourself:
+
+```sh
+cargo run -p yami-node -- identity verify-site sites/alice yn1-...
+```
+
+Any edited, added or removed page makes verification fail until you sign again.
+`serve-dir ... --identity <identity-directory>` prints the node's ID at startup
+and reports whether `site.sig` still matches. Signing does not encrypt the site
+or hide who published it, and the browser does not check signatures yet. See
+[node identity](specs/v0.1/identity.md) for the format and limitations. Never
+copy `node.key` into a site directory or repository.
+
 ## Two sample sites
 
 The repository includes two linked sample sites. Run each node in its own

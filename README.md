@@ -7,7 +7,8 @@ interface with antialiased typography, tabs and an aqua glass theme.
 
 **Not secure for sensitive use.** Networking is plaintext, unauthenticated and
 restricted to numeric loopback IP addresses. Privacy is a design goal, not a
-security guarantee. There is no cryptographic identity, encryption or anonymity.
+security guarantee. Nodes can have persistent Ed25519 identities that sign site
+metadata, but there is no encryption, transport authentication or anonymity.
 
 ## Run
 
@@ -105,6 +106,26 @@ cargo run -p yami-browser -- --desktop ynp://127.0.0.1:7301/home
 See [Creating and publishing a YamiNet site](docs/publishing-sites.md) for the
 directory layout, linking, updating and exactly what a node will serve.
 
+## Node identities
+
+Each node can have a persistent Ed25519 identity. Its node ID, such as
+`yn1-vitzizw2y2vq...`, is derived from the public key and stays the same across
+restarts. A node can sign its site so others can check that the pages are
+exactly what that node published:
+
+```sh
+cargo run -p yami-node -- identity new
+cargo run -p yami-node -- identity sign-site sites/alice
+cargo run -p yami-node -- identity verify-site sites/alice <node-id>
+cargo run -p yami-node -- serve-dir 127.0.0.1:7301 sites/alice --identity <identity-directory>
+```
+
+Signatures only attribute content to a key. They do not encrypt or anonymize
+anything, and fetched documents are not yet verified by the browser. The
+secret key stays in a per-user directory and is never printed or sent. See the
+[identity format and security limitations](docs/specs/v0.1/identity.md),
+including the Windows file-permission limitation.
+
 ## Workspace
 
 | Package | Responsibility |
@@ -114,10 +135,12 @@ directory layout, linking, updating and exactly what a node will serve.
 | `ynp` | Binary frame codec, strict limits, transport traits, loopback TCP client/listener |
 | `yami-render` | Original terminal/bitmap renderer plus shaped native document layout and antialiased text |
 | `yami-browser` | Native desktop tabs/navigation and preserved terminal/PPM document tools |
-| `yami-node` | Directory-backed multi-page sites, in-memory document server, fetch client and two-node demo |
+| `yami-identity` | Persistent Ed25519 node identities, node IDs, domain-separated metadata signatures |
+| `yami-node` | Directory-backed multi-page sites, in-memory document server, fetch client, identity CLI and two-node demo |
 
 Versioned normative drafts: [YLang](docs/specs/v0.1/ylang.md),
 [YSL](docs/specs/v0.1/ysl.md), [YNP](docs/specs/v0.1/ynp.md),
+[node identity](docs/specs/v0.1/identity.md)
 and [rendering and architecture](docs/specs/v0.1/architecture.md).
 See [SECURITY.md](SECURITY.md) for the experimental trust boundary.
 
@@ -141,6 +164,10 @@ malformed-client recovery, missing documents, and fetch/parse/style/raster outpu
 Site tests cover multi-page serving, live updates, NotFound replies, invalid
 keys, traversal and symlink escapes, concurrent clients, and browser
 navigation across two directory-backed nodes.
+Identity tests cover persistence across restarts, refusal to overwrite or
+silently replace keys, corrupted and mismatched key files, node ID checksums,
+valid signatures, modified content, wrong keys, purpose separation, site
+signing through the CLI, and that secret keys never appear in output.
 Unit tests cover parser locations and limits, nested ASTs, wrapping and pixels,
 golden wire bytes, all truncated prefixes of representative frames, malformed
 headers and payload lengths, Unicode, size boundaries and response correlation.
@@ -159,7 +186,7 @@ to uppercase and unsupported characters to a box; this limitation does not
 describe the desktop font renderer. Oversized layouts and bitmaps fail with
 an error rather than allocating without bounds.
 
-No peer discovery, distributed lookup, authenticated identity, encrypted channel,
+No peer discovery, distributed lookup, authenticated connections, encrypted channel,
 anonymous routing, production networking, protocol negotiation, multiplexing,
 compression, cache or replay protection. Transport seams are API boundaries,
 not implemented security features. See the versioned specs before extending them.

@@ -15,7 +15,7 @@ use ynp::DocumentData;
 pub const PAGE_EXTENSION: &str = "ylang";
 pub const STYLE_FILE: &str = "default.ysl";
 /// Startup listings are informational; very large directories are truncated.
-const MAX_LISTED: usize = 256;
+pub(crate) const MAX_LISTED: usize = 256;
 /// Windows device names resolve to devices even with an extension on some versions.
 const RESERVED: [&str; 4] = ["con", "prn", "aux", "nul"];
 
@@ -68,13 +68,16 @@ impl Site {
         let Some(source) = self.read(&format!("{key}.{PAGE_EXTENSION}"), ynp::MAX_DOCUMENT)? else {
             return Ok(None);
         };
-        // A missing stylesheet is allowed; the browser then uses its defaults.
-        let style = self.read(STYLE_FILE, ynp::MAX_STYLE)?.unwrap_or_default();
         Ok(Some(DocumentData {
             key: key.into(),
             source,
-            style,
+            style: self.style()?,
         }))
+    }
+    /// The shared stylesheet. A missing one is allowed and served as empty;
+    /// the browser then uses its defaults.
+    pub fn style(&self) -> io::Result<String> {
+        Ok(self.read(STYLE_FILE, ynp::MAX_STYLE)?.unwrap_or_default())
     }
     fn read(&self, name: &str, limit: usize) -> io::Result<Option<String>> {
         let path = self.root.join(name);
