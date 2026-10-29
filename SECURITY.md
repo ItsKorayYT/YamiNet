@@ -1,8 +1,9 @@
 # Experimental security status
 
-YamiNet 0.1 is **not secure for sensitive use**. It has no identity,
-authentication, authenticated encryption, anonymity or protection against a
-malicious local user. Every localhost peer and every received document must be
+YamiNet 0.1 is **not secure for sensitive use**. It has no connection
+authentication, encryption, anonymity or protection against a malicious local
+user. Nodes can have persistent signing identities (below), but signatures only
+attribute metadata to a key. Every localhost peer and every received document must be
 considered untrusted. Do not put private documents, credentials or personal data
 in this prototype. Do not expose it through port forwarding or a public proxy.
 
@@ -32,9 +33,21 @@ served. Hard links cannot be detected, and a file replaced between the check
 and the read is a local race: anyone able to write the site directory already
 controls what it serves. Keep site directories private to their owner.
 
-Future identity, authenticated encryption and anonymous routing require separate
-versioned designs, explicit peer-verification semantics, key lifecycle handling
-and independent review. Merely replacing TCP does not establish anonymity.
+Node identities are Ed25519 key pairs from `ed25519-dalek`, persisted per
+node. Their format, domain-separated signatures and limitations are specified
+in [docs/specs/v0.1/identity.md](docs/specs/v0.1/identity.md). A valid signature
+shows only that the holder of a node's key signed that exact site or document
+metadata; it gives no confidentiality, anonymity, freshness or revocation, and
+YNP does not carry or check signatures. Which node ID to trust must be learned
+out of band. The secret key file is unencrypted at rest. On Unix it is created
+owner-only (0600) and lax permissions are refused; on Windows it inherits its
+directory's ACL and is not checked. Secret keys are never printed, logged or
+transmitted, and `node.key` is ignored by Git.
+
+Authenticated transport, encryption, key rotation and revocation, and anonymous
+routing require separate versioned designs, explicit peer-verification
+semantics and independent review. Merely replacing TCP does not establish
+anonymity.
 
 The desktop UI is not a new trust boundary or a secure transport. Its glass
 status indicators describe the UI and navigation state, not peer authentication

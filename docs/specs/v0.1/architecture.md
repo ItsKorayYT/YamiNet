@@ -9,6 +9,7 @@ yami-browser -> ynp -> transport connection (explicit loopback fetch only)
              -> yami-render -> Layout -> terminal / P6 bitmap
 
 yami-node -> ynp -> in-memory Store or directory Site -> YNP response
+          -> yami-identity -> persistent node key, signed site manifest (local files only)
 ```
 
 The node treats source and style as bounded UTF-8 blobs. A successful fetch
