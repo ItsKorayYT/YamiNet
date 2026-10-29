@@ -1,0 +1,618 @@
+//! Browser navigation state and bounded off-thread document loading.
+//!
+//! The desktop adapter owns all interaction and drawing. This module never
+//! touches a window and never performs a network request on its calling thread.
+use std::{
+    collections::VecDeque,
+    io,
+    sync::{mpsc, Arc, Condvar, Mutex},
+    thread,
+};
+
+pub const MAX_TABS: usize = 12;
+const MAX_HISTORY: usize = 64;
+const MAX_PENDING: usize = 16;
+const WORKERS: usize = 2;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Location {
+    Home,
+    Welcome,
+    About,
+    Ynp(String),
+}
+impl Location {
+    pub fn parse(input: &str) -> Result<Self, String> {
+        let address = input.trim();
+        match address {
+            "" => Ok(Self::Home),
+            "local:welcome" => Ok(Self::Welcome),
+            "local:about" => Ok(Self::About),
+            _ => {
+                ynp::parse_url(address).map_err(|error| {
+                    format!("Cannot open this address: {error}. Use a localhost ynp:// address or local:welcome.")
+                })?;
+                Ok(Self::Ynp(address.into()))
+            }
+        }
+    }
+    pub fn address(&self) -> String {
+        match self {
+            Self::Home => String::new(),
+            Self::Welcome => "local:welcome".into(),
+            Self::About => "local:about".into(),
+            Self::Ynp(address) => address.clone(),
+        }
+    }
+    fn label(&self) -> &str {
+        match self {
+            Self::Home => "New tab",
+            Self::Welcome => "Welcome to YamiNet",
+            Self::About => "About YamiNet",
+            Self::Ynp(_) => "YNP document",
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct Page {
+    pub document: ylang::Document,
+    pub style: ysl::Stylesheet,
+}
+#[derive(Debug)]
+pub enum PageState {
+    Home,
+    Loading,
+    Ready(Box<Page>),
+    Error(String),
+}
+#[derive(Debug)]
+pub struct Tab {
+    pub id: u64,
+    pub generation: u64,
+    pub history: Vec<Location>,
+    pub cursor: usize,
+    pub state: PageState,
+    /// User-editable address text, independent of the committed history entry.
+    pub address: String,
+    pub scroll: f64,
+    pub target_scroll: f64,
+}
+impl Tab {
+    fn new(id: u64) -> Self {
+        Self {
+            id,
+            generation: 0,
+            history: vec![Location::Home],
+            cursor: 0,
+            state: PageState::Home,
+            address: String::new(),
+            scroll: 0.0,
+            target_scroll: 0.0,
+        }
+    }
+    pub fn location(&self) -> &Location {
+        &self.history[self.cursor]
+    }
+    pub fn title(&self) -> &str {
+        match &self.state {
+            PageState::Ready(page) => &page.document.metadata.title,
+            PageState::Loading => "Loading…",
+            PageState::Error(_) => "Could not open page",
+            PageState::Home => self.location().label(),
+        }
+    }
+    pub fn can_back(&self) -> bool {
+        self.cursor > 0
+    }
+    pub fn can_forward(&self) -> bool {
+        self.cursor + 1 < self.history.len()
+    }
+    fn begin(&mut self, loader: &Loader) {
+        self.generation = self.generation.wrapping_add(1);
+        self.address = self.location().address();
+        self.scroll = 0.0;
+        self.target_scroll = 0.0;
+        loader.cancel(self.id);
+        if self.location() == &Location::Home {
+            self.state = PageState::Home;
+            return;
+        }
+        self.state = PageState::Loading;
+        let job = Job {
+            tab_id: self.id,
+            generation: self.generation,
+            location: self.location().clone(),
+        };
+        if let Err(message) = loader.submit(job) {
+            self.state = PageState::Error(message);
+        }
+    }
+}
+
+pub struct Browser {
+    pub tabs: Vec<Tab>,
+    pub active: usize,
+    next_id: u64,
+}
+impl Default for Browser {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+impl Browser {
+    pub fn new() -> Self {
+        Self {
+            tabs: vec![Tab::new(1)],
+            active: 0,
+            next_id: 2,
+        }
+    }
+    pub fn active(&self) -> &Tab {
+        &self.tabs[self.active]
+    }
+    pub fn active_mut(&mut self) -> &mut Tab {
+        &mut self.tabs[self.active]
+    }
+    pub fn open_tab(&mut self) -> bool {
+        if self.tabs.len() >= MAX_TABS {
+            return false;
+        }
+        let Some(next) = self.next_id.checked_add(1) else {
+            return false;
+        };
+        self.tabs.push(Tab::new(self.next_id));
+        self.next_id = next;
+        self.active = self.tabs.len() - 1;
+        true
+    }
+    /// Keep one blank tab when the last tab closes. Pending results cannot
+    /// target its replacement because tab IDs are never reused.
+    pub fn close_tab(&mut self, index: usize) {
+        if index >= self.tabs.len() {
+            return;
+        }
+        self.tabs.remove(index);
+        if self.tabs.is_empty() {
+            self.active = 0;
+            self.tabs.push(Tab::new(self.next_id));
+            self.next_id = self.next_id.saturating_add(1);
+        } else if index < self.active {
+            self.active -= 1;
+        } else {
+            self.active = self.active.min(self.tabs.len() - 1);
+        }
+    }
+    pub fn select(&mut self, index: usize) {
+        if index < self.tabs.len() {
+            self.active = index;
+        }
+    }
+    pub fn navigate(&mut self, address: &str, loader: &Loader) -> Result<(), String> {
+        let location = match Location::parse(address) {
+            Ok(location) => location,
+            Err(message) => {
+                let tab = self.active_mut();
+                tab.generation = tab.generation.wrapping_add(1);
+                loader.cancel(tab.id);
+                tab.address = address.into();
+                tab.state = PageState::Error(message.clone());
+                tab.scroll = 0.0;
+                tab.target_scroll = 0.0;
+                return Err(message);
+            }
+        };
+        self.navigate_location(location, loader);
+        Ok(())
+    }
+    pub fn navigate_location(&mut self, location: Location, loader: &Loader) {
+        let tab = self.active_mut();
+        if tab.location() != &location {
+            tab.history.truncate(tab.cursor + 1);
+            tab.history.push(location);
+            if tab.history.len() > MAX_HISTORY {
+                tab.history.remove(0);
+            }
+            tab.cursor = tab.history.len() - 1;
+        }
+        tab.begin(loader);
+    }
+    pub fn back(&mut self, loader: &Loader) -> bool {
+        let tab = self.active_mut();
+        if !tab.can_back() {
+            return false;
+        }
+        tab.cursor -= 1;
+        tab.begin(loader);
+        true
+    }
+    pub fn forward(&mut self, loader: &Loader) -> bool {
+        let tab = self.active_mut();
+        if !tab.can_forward() {
+            return false;
+        }
+        tab.cursor += 1;
+        tab.begin(loader);
+        true
+    }
+    pub fn reload(&mut self, loader: &Loader) {
+        // An invalid typed address is shown as an error without entering the
+        // validated history. Reload must retry that address rather than quietly
+        // opening the previous history entry (or the start page).
+        let tab = self.active();
+        if matches!(tab.state, PageState::Error(_)) && tab.address != tab.location().address() {
+            let address = tab.address.clone();
+            let _ = self.navigate(&address, loader);
+            return;
+        }
+        self.active_mut().begin(loader);
+    }
+    /// Apply results by stable tab ID and request generation, never by index or
+    /// currently active tab. Closed tabs and superseded requests are discarded.
+    pub fn poll(&mut self, loader: &Loader) -> bool {
+        let mut changed = false;
+        while let Ok(result) = loader.results.try_recv() {
+            changed |= self.complete(result);
+        }
+        changed
+    }
+    fn complete(&mut self, result: Completion) -> bool {
+        let Some(tab) = self.tabs.iter_mut().find(|tab| tab.id == result.tab_id) else {
+            return false;
+        };
+        if tab.generation != result.generation || !matches!(tab.state, PageState::Loading) {
+            return false;
+        }
+        tab.state = match result.page {
+            Ok(page) => PageState::Ready(Box::new(page)),
+            Err(error) => PageState::Error(error),
+        };
+        true
+    }
+}
+
+#[derive(Clone)]
+struct Job {
+    tab_id: u64,
+    generation: u64,
+    location: Location,
+}
+struct Completion {
+    tab_id: u64,
+    generation: u64,
+    page: Result<Page, String>,
+}
+#[derive(Default)]
+struct Pending {
+    jobs: VecDeque<Job>,
+    closed: bool,
+}
+struct Shared {
+    pending: Mutex<Pending>,
+    changed: Condvar,
+}
+type Fetcher = dyn Fn(&Location) -> Result<Page, String> + Send + Sync;
+
+/// A fixed worker pool with bounded request and completion queues. Dropping it
+/// closes the queues without joining a potentially slow socket on the UI thread.
+/// In-flight obsolete work is bounded to WORKERS; queued work for the same tab
+/// is replaced by its latest request. No loader task ever follows page links.
+pub struct Loader {
+    shared: Arc<Shared>,
+    results: mpsc::Receiver<Completion>,
+}
+impl Loader {
+    pub fn new(wake: Arc<dyn Fn() + Send + Sync>) -> io::Result<Self> {
+        Self::with_fetcher(wake, Arc::new(load_page))
+    }
+    fn with_fetcher(wake: Arc<dyn Fn() + Send + Sync>, fetcher: Arc<Fetcher>) -> io::Result<Self> {
+        let shared = Arc::new(Shared {
+            pending: Mutex::new(Pending::default()),
+            changed: Condvar::new(),
+        });
+        let (sender, results) = mpsc::sync_channel(MAX_PENDING);
+        let loader = Self {
+            shared: Arc::clone(&shared),
+            results,
+        };
+        for index in 0..WORKERS {
+            let shared = Arc::clone(&shared);
+            let sender = sender.clone();
+            let wake = Arc::clone(&wake);
+            let fetcher = Arc::clone(&fetcher);
+            thread::Builder::new()
+                .name(format!("yami-loader-{index}"))
+                .spawn(move || loop {
+                    let job = {
+                        let mut pending = shared.pending.lock().unwrap_or_else(|e| e.into_inner());
+                        while pending.jobs.is_empty() && !pending.closed {
+                            pending = shared
+                                .changed
+                                .wait(pending)
+                                .unwrap_or_else(|e| e.into_inner());
+                        }
+                        if pending.closed {
+                            return;
+                        }
+                        pending.jobs.pop_front().expect("nonempty queue")
+                    };
+                    let result = Completion {
+                        tab_id: job.tab_id,
+                        generation: job.generation,
+                        page: fetcher(&job.location),
+                    };
+                    if sender.send(result).is_err() {
+                        return;
+                    }
+                    wake();
+                })?;
+        }
+        Ok(loader)
+    }
+    fn submit(&self, job: Job) -> Result<(), String> {
+        let mut pending = self
+            .shared
+            .pending
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        if pending.closed {
+            return Err("Document loader is shutting down.".into());
+        }
+        pending.jobs.retain(|old| old.tab_id != job.tab_id);
+        if pending.jobs.len() >= MAX_PENDING {
+            return Err("The document queue is busy. Please try Reload shortly.".into());
+        }
+        pending.jobs.push_back(job);
+        self.shared.changed.notify_one();
+        Ok(())
+    }
+    fn cancel(&self, tab_id: u64) {
+        let mut pending = self
+            .shared
+            .pending
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        pending.jobs.retain(|job| job.tab_id != tab_id);
+    }
+}
+impl Drop for Loader {
+    fn drop(&mut self) {
+        let mut pending = self
+            .shared
+            .pending
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        pending.closed = true;
+        pending.jobs.clear();
+        self.shared.changed.notify_all();
+    }
+}
+fn load_page(location: &Location) -> Result<Page, String> {
+    let (source, style) = match location {
+        Location::Home => return Err("The start page does not require document loading.".into()),
+        Location::Welcome => (
+            include_str!("../../../examples/welcome.ylang").to_string(),
+            include_str!("../../../examples/default.ysl").to_string(),
+        ),
+        Location::About => (
+            include_str!("../../../examples/about.ylang").to_string(),
+            include_str!("../../../examples/default.ysl").to_string(),
+        ),
+        Location::Ynp(address) => {
+            // Validate again at the transport boundary even when constructed
+            // programmatically rather than through Location::parse.
+            let (endpoint, key) = ynp::parse_url(address).map_err(|error| error.to_string())?;
+            let data = ynp::fetch(&ynp::LoopbackTcp, endpoint, &key).map_err(|error| {
+                format!("The local node could not return this document: {error}")
+            })?;
+            (data.source, data.style)
+        }
+    };
+    let document = ylang::parse(&source).map_err(|error| format!("YLang {error}"))?;
+    let style = if style.is_empty() {
+        ysl::Stylesheet::default()
+    } else {
+        ysl::parse(&style).map_err(|error| format!("YSL {error}"))?
+    };
+    Ok(Page { document, style })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::{Duration, Instant};
+
+    fn page(title: &str) -> Page {
+        Page {
+            document: ylang::parse(&format!("@page 0.1\n  title {title}\n= {title}")).unwrap(),
+            style: ysl::Stylesheet::default(),
+        }
+    }
+    fn loader() -> Loader {
+        Loader::with_fetcher(
+            Arc::new(|| {}),
+            Arc::new(|location| Ok(page(location.label()))),
+        )
+        .unwrap()
+    }
+    fn wait(browser: &mut Browser, loader: &Loader) {
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while matches!(browser.active().state, PageState::Loading) {
+            browser.poll(loader);
+            assert!(Instant::now() < deadline, "loader did not complete");
+            thread::yield_now();
+        }
+    }
+    #[test]
+    fn addresses_are_explicit_and_loopback_only() {
+        for invalid in [
+            "yami://home",
+            "https://example.com",
+            "ynp://example.com:7301/a",
+            "ynp://192.0.2.1:7301/a",
+            "ynp://127.0.0.1:0/a",
+            "ynp://127.0.0.1:7301/../secret",
+        ] {
+            assert!(Location::parse(invalid).is_err(), "{invalid}");
+        }
+        for address in ["local:welcome", "local:about", "ynp://[::1]:7301/welcome"] {
+            assert_eq!(Location::parse(address).unwrap().address(), address);
+        }
+        assert_eq!(Location::parse("").unwrap(), Location::Home);
+    }
+    #[test]
+    fn history_branches_and_reload_does_not_add_an_entry() {
+        let loader = loader();
+        let mut browser = Browser::new();
+        browser.navigate_location(Location::Welcome, &loader);
+        browser.navigate_location(Location::About, &loader);
+        assert!(browser.back(&loader));
+        assert_eq!(browser.active().location(), &Location::Welcome);
+        assert!(browser.active().can_forward());
+        browser.navigate_location(Location::Ynp("ynp://127.0.0.1:9/a".into()), &loader);
+        assert!(!browser.active().can_forward());
+        assert_eq!(browser.active().history.len(), 3);
+        browser.reload(&loader);
+        assert_eq!(browser.active().history.len(), 3);
+        assert!(browser.back(&loader));
+        assert!(browser.back(&loader));
+        assert!(!browser.back(&loader));
+        assert!(matches!(browser.active().state, PageState::Home));
+        assert!(browser.forward(&loader));
+        assert_eq!(browser.active().location(), &Location::Welcome);
+    }
+    #[test]
+    fn stale_responses_and_closed_tabs_cannot_replace_current_page() {
+        let loader = loader();
+        let mut browser = Browser::new();
+        browser.navigate_location(Location::Welcome, &loader);
+        let id = browser.active().id;
+        let generation = browser.active().generation;
+        browser.navigate_location(Location::About, &loader);
+        assert!(!browser.complete(Completion {
+            tab_id: id,
+            generation,
+            page: Ok(page("stale"))
+        }));
+        let generation = browser.active().generation;
+        browser.open_tab();
+        assert!(browser.complete(Completion {
+            tab_id: id,
+            generation,
+            page: Ok(page("correct tab"))
+        }));
+        assert_eq!(browser.tabs[0].title(), "correct tab");
+        assert!(matches!(browser.active().state, PageState::Home));
+        browser.close_tab(0);
+        assert!(!browser.complete(Completion {
+            tab_id: id,
+            generation,
+            page: Ok(page("closed"))
+        }));
+        assert!(matches!(browser.active().state, PageState::Home));
+    }
+    #[test]
+    fn tabs_history_and_pending_work_are_bounded() {
+        let loader = loader();
+        let mut browser = Browser::new();
+        for _ in 1..MAX_TABS {
+            assert!(browser.open_tab());
+        }
+        assert!(!browser.open_tab());
+        for number in 0..100 {
+            browser.navigate_location(
+                Location::Ynp(format!("ynp://127.0.0.1:9/key{number}")),
+                &loader,
+            );
+        }
+        assert_eq!(browser.active().history.len(), MAX_HISTORY);
+        assert!(loader.shared.pending.lock().unwrap().jobs.len() <= MAX_PENDING);
+        for _ in 0..MAX_TABS {
+            browser.close_tab(0);
+        }
+        assert_eq!(browser.tabs.len(), 1);
+        assert!(matches!(browser.active().state, PageState::Home));
+        assert!(browser.active().id > MAX_TABS as u64);
+    }
+    #[test]
+    fn background_loading_and_errors_complete_without_blocking_navigation() {
+        let (started, began) = mpsc::channel();
+        let gate = Arc::new((Mutex::new(false), Condvar::new()));
+        let worker_gate = Arc::clone(&gate);
+        let loader = Loader::with_fetcher(
+            Arc::new(|| {}),
+            Arc::new(move |_| {
+                started.send(()).unwrap();
+                let (lock, changed) = &*worker_gate;
+                let mut released = lock.lock().unwrap();
+                while !*released {
+                    released = changed.wait(released).unwrap();
+                }
+                Err("Node unavailable".into())
+            }),
+        )
+        .unwrap();
+        let mut browser = Browser::new();
+        browser.navigate_location(Location::Welcome, &loader);
+        began.recv_timeout(Duration::from_secs(2)).unwrap();
+        assert!(matches!(browser.active().state, PageState::Loading));
+        assert!(browser.open_tab());
+        browser.select(0);
+        let (lock, changed) = &*gate;
+        *lock.lock().unwrap() = true;
+        changed.notify_all();
+        wait(&mut browser, &loader);
+        assert!(
+            matches!(&browser.active().state, PageState::Error(message) if message == "Node unavailable")
+        );
+        browser.navigate_location(Location::Home, &loader);
+        assert!(matches!(browser.active().state, PageState::Home));
+    }
+    #[test]
+    fn builtin_pages_use_real_parsers_and_invalid_navigation_cancels_loading() {
+        let welcome = load_page(&Location::Welcome).unwrap();
+        assert_eq!(welcome.document.metadata.title, "Welcome to YamiNet");
+        assert_eq!(
+            load_page(&Location::About).unwrap().document.metadata.title,
+            "About YamiNet"
+        );
+        let loader = loader();
+        let mut browser = Browser::new();
+        browser.navigate_location(Location::Welcome, &loader);
+        let old_generation = browser.active().generation;
+        assert!(browser.navigate("yami://home", &loader).is_err());
+        assert!(matches!(browser.active().state, PageState::Error(_)));
+        assert!(!browser.complete(Completion {
+            tab_id: browser.active().id,
+            generation: old_generation,
+            page: Ok(page("old"))
+        }));
+    }
+
+    #[test]
+    fn reload_of_invalid_address_preserves_the_error_and_does_not_open_history() {
+        let loader = loader();
+        let mut browser = Browser::new();
+        browser.navigate_location(Location::Welcome, &loader);
+        assert!(browser.navigate("yami://not-implemented", &loader).is_err());
+        let previous_generation = browser.active().generation;
+        let history = browser.active().history.clone();
+
+        browser.reload(&loader);
+
+        assert_eq!(browser.active().address, "yami://not-implemented");
+        assert!(
+            matches!(&browser.active().state, PageState::Error(message) if message.contains("Cannot open this address"))
+        );
+        assert_eq!(browser.active().history, history);
+        assert_eq!(browser.active().location(), &Location::Welcome);
+        assert!(browser.active().generation > previous_generation);
+        assert!(!browser.complete(Completion {
+            tab_id: browser.active().id,
+            generation: previous_generation,
+            page: Ok(page("superseded")),
+        }));
+        assert!(browser.back(&loader));
+        assert!(matches!(browser.active().state, PageState::Home));
+    }
+}

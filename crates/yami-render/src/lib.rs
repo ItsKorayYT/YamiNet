@@ -1,5 +1,8 @@
 //! Native cell layout, terminal output and a software bitmap rasterizer.
 //! No markup translation, browser engine, remote assets, or executable content.
+#[cfg(feature = "native")]
+pub mod native;
+
 use std::{
     fmt,
     io::{self, Write},

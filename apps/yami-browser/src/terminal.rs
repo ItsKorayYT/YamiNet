@@ -1,0 +1,70 @@
+use std::{
+    error::Error,
+    fs::File,
+    io::{self, Read},
+};
+use ynp::LoopbackTcp;
+
+const USAGE: &str = "yami-browser [document.ylang | ynp://loopback-IP:port/key] [--style theme.ysl] [--ppm output.ppm]\nWithout a source, opens the built-in sample. Links are displayed, never automatically fetched.\nEXPERIMENTAL: plaintext and unauthenticated; not secure for sensitive use.";
+fn read_file(path: &str, limit: usize) -> io::Result<String> {
+    let mut text = String::new();
+    File::open(path)?
+        .take((limit + 1) as u64)
+        .read_to_string(&mut text)?;
+    if text.len() > limit {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "file exceeds parser limit",
+        ));
+    }
+    Ok(text)
+}
+pub fn run(arguments: Vec<String>) -> Result<(), Box<dyn Error>> {
+    let mut args = arguments.into_iter();
+    let mut source = None;
+    let mut style_path = None;
+    let mut ppm_path = None;
+    while let Some(arg) = args.next() {
+        match arg.as_str() {
+            "--help" => {
+                println!("{USAGE}");
+                return Ok(());
+            }
+            "--style" if style_path.is_none() => {
+                style_path = Some(args.next().ok_or("--style requires a path")?)
+            }
+            "--ppm" if ppm_path.is_none() => {
+                ppm_path = Some(args.next().ok_or("--ppm requires a path")?)
+            }
+            _ if !arg.starts_with('-') && source.is_none() => source = Some(arg),
+            _ => return Err(USAGE.into()),
+        }
+    }
+    eprintln!("{}", ynp::WARNING);
+    let (text, remote_style) = match source.as_deref() {
+        Some(url) if url.starts_with("ynp://") => {
+            let (address, key) = ynp::parse_url(url)?;
+            let data = ynp::fetch(&LoopbackTcp, address, &key)?;
+            (data.source, Some(data.style))
+        }
+        Some(path) if path.contains("://") => return Err("only YNP URLs are supported".into()),
+        Some(path) => (read_file(path, ylang::MAX_SOURCE)?, None),
+        None => (include_str!("../../../examples/welcome.ylang").into(), None),
+    };
+    let style = match style_path {
+        Some(path) => ysl::parse(&read_file(&path, ysl::MAX_SOURCE)?)?,
+        None => match remote_style {
+            Some(text) if !text.is_empty() => ysl::parse(&text)?,
+            _ => ysl::Stylesheet::default(),
+        },
+    };
+    let document = ylang::parse(&text)?;
+    let layout = yami_render::layout(&document, &style)?;
+    println!("YamiNet — {}\n", document.metadata.title);
+    print!("{}", layout.terminal());
+    if let Some(path) = ppm_path {
+        layout.write_ppm(File::create(&path)?)?;
+        eprintln!("Wrote software-rendered bitmap to {path}");
+    }
+    Ok(())
+}

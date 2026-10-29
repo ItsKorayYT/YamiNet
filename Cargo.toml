@@ -13,3 +13,11 @@ unsafe_code = "forbid"
 
 [workspace.lints.clippy]
 all = "warn"
+
+# Keep the software desktop responsive under `cargo run` while application
+# code retains ordinary debug symbols and assertions.
+[profile.dev.package.tiny-skia]
+opt-level = 2
+
+[profile.dev.package.tiny-skia-path]
+opt-level = 2
