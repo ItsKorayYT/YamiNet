@@ -139,9 +139,11 @@ regression and debugging output, not a screenshot of the desktop interface.
 
 ## Native window captures
 
-These images were captured from the running Linux native window under Xvfb.
-They are documentation only; the application paints its own interface and does
-not use these captures as assets.
+These 1440×900 images are rendered offscreen by the same paint code the window
+uses. Regenerate them with
+`cargo test -p yami-browser capture_screenshots -- --ignored`, which writes to
+`target/screenshots/`. They are documentation only; the application paints its
+own interface and does not use these captures as assets.
 
 ![Native YamiNet start page](images/desktop-home.png)
 

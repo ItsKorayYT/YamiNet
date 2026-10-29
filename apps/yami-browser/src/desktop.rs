@@ -48,14 +48,14 @@ struct Editor {
     value: String,
     caret: usize,
     selected: bool,
-    focus: Option<bool>,
+    focus: Option<()>,
 }
 impl Editor {
-    fn activate(&mut self, value: &str, home: bool) {
+    fn activate(&mut self, value: &str) {
         self.value = value.into();
         self.caret = self.value.len();
         self.selected = true;
-        self.focus = Some(home);
+        self.focus = Some(());
     }
     fn replace(&mut self, text: &str) {
         let text: String = text.chars().filter(|c| !c.is_control()).collect();
@@ -131,6 +131,8 @@ struct Desktop {
     fatal: Option<String>,
     clipboard: Option<arboard::Clipboard>,
     composing: bool,
+    /// Logical size and scale used when rendering without a window (tests).
+    headless: Option<(f32, f32, f32)>,
 }
 impl Desktop {
     fn new(loader: Loader) -> Self {
@@ -154,6 +156,7 @@ impl Desktop {
             fatal: None,
             clipboard: None,
             composing: false,
+            headless: None,
         }
     }
     fn redraw(&self) {
@@ -162,6 +165,9 @@ impl Desktop {
         }
     }
     fn size(&self) -> (f32, f32, f32) {
+        if let Some(size) = self.headless {
+            return size;
+        }
         let window = self.window.as_ref().unwrap();
         let scale = window.scale_factor() as f32;
         let size = window.inner_size();
@@ -169,7 +175,7 @@ impl Desktop {
     }
     fn viewport(&self) -> Rect {
         let (w, h, _) = self.size();
-        Rect::new(12.0, 184.0, w - 24.0, (h - 212.0).max(1.0))
+        chrome::viewport(w, h)
     }
     fn clear_focus(&mut self) {
         self.composing = false;
@@ -188,17 +194,15 @@ impl Desktop {
     }
     fn act(&mut self, action: Action) {
         match action {
-            Action::Address | Action::HomeAddress => {
-                let home = action == Action::HomeAddress;
+            Action::Address => {
                 self.composing = false;
-                self.editor.activate(&self.browser.active().address, home);
+                self.editor.activate(&self.browser.active().address);
                 self.keyboard_focus = None;
             }
-            Action::Go => self.commit(),
             Action::NewTab => {
                 if self.browser.open_tab() {
                     self.clear_focus();
-                    self.editor.activate("", true);
+                    self.editor.activate("");
                 }
             }
             Action::Close(index) => {
@@ -283,7 +287,6 @@ impl Desktop {
             .map(str::to_owned)
     }
     fn render(&mut self) -> Result<(), Box<dyn Error>> {
-        let (w, h, scale) = self.size();
         let window = self.window.as_ref().unwrap();
         let size = window.inner_size();
         if size.width == 0 || size.height == 0 {
@@ -302,11 +305,33 @@ impl Desktop {
                 Pixmap::new(size.width, size.height).ok_or("Cannot allocate native framebuffer")?
             }
         };
+        self.compose(&mut pix);
+        let surface = self.surface.as_mut().unwrap();
+        surface.resize(
+            NonZeroU32::new(size.width).unwrap(),
+            NonZeroU32::new(size.height).unwrap(),
+        )?;
+        let mut buffer = surface.buffer_mut()?;
+        for (out, pixel) in buffer.iter_mut().zip(pix.pixels()) {
+            *out = (u32::from(pixel.red()) << 16)
+                | (u32::from(pixel.green()) << 8)
+                | u32::from(pixel.blue());
+        }
+        buffer.present()?;
+        self.frame = Some(pix);
+        if let Some(window) = &self.window {
+            window.set_title(&format!("{} — Yami Browser", self.browser.active().title()));
+        }
+        Ok(())
+    }
+    /// Paints the whole interface into `pix` and records the hit scene.
+    fn compose(&mut self, pix: &mut Pixmap) {
+        let (w, h, scale) = self.size();
         // Refresh layout before using a scroll limit from an active tab. A
         // cached short page must never reset another tab's saved scroll.
         if let PageState::Ready(page) = &self.browser.active().state {
             let tab = self.browser.active();
-            let doc_width = ((w - 24.0) * scale).round() as u32;
+            let doc_width = (chrome::viewport(w, h).w * scale).round() as u32;
             let valid = self.native.as_ref().is_some_and(|cache| {
                 cache.id == tab.id
                     && cache.generation == tab.generation
@@ -353,173 +378,105 @@ impl Desktop {
             width: w,
             height: h,
             mouse: self.mouse,
-            editing: self.editor.focus == Some(false),
-            home_editing: self.editor.focus == Some(true),
+            editing: self.editor.focus.is_some(),
             value,
             selection: self.editor.selected,
             caret: self.editor.caret,
             focus: focus.as_ref(),
         };
-        let mut c = Canvas::new(&mut pix, &mut self.text, scale);
+        let viewport = self.viewport();
+        let mut c = Canvas::new(pix, &mut self.text, scale);
         let mut scene = chrome::paint(&mut c, &self.browser, &ui);
         match &self.browser.active().state {
             PageState::Home => chrome::home(&mut c, &mut scene, &ui),
             PageState::Loading => {
-                let r = Rect::new(12.0, 108.0, w - 24.0, h - 136.0);
-                c.round(r, 17.0, [234, 251, 255, 255], [213, 245, 255, 255], None);
-                c.orb(w / 2.0, h / 2.0 - 40.0, 30.0);
+                chrome::document_viewport(&mut c, &mut scene, &ui);
                 c.text(
-                    "Opening your document…",
-                    w / 2.0 - 145.0,
-                    h / 2.0 + 8.0,
-                    350.0,
-                    22.0,
-                    INK,
-                    true,
-                );
-                c.text(
-                    "Connecting only to the localhost address you chose.",
-                    w / 2.0 - 200.0,
-                    h / 2.0 + 49.0,
-                    430.0,
-                    14.0,
-                    INK,
-                    false,
-                );
-            }
-            PageState::Error(message) => {
-                let r = Rect::new(12.0, 108.0, w - 24.0, h - 136.0);
-                c.round(r, 17.0, [234, 251, 255, 255], [220, 246, 255, 255], None);
-                c.orb(w / 2.0, h / 2.0 - 90.0, 28.0);
-                c.text(
-                    "A little turbulence.",
-                    w / 2.0 - 140.0,
-                    h / 2.0 - 40.0,
-                    350.0,
-                    28.0,
-                    INK,
-                    true,
-                );
-                let mut y = h / 2.0 + 10.0;
-                let chars: Vec<char> = message.chars().take(700).collect();
-                for part in chars.chunks(70) {
-                    let line: String = part.iter().collect();
-                    c.text(&line, w / 2.0 - 245.0, y, 490.0, 14.0, INK, false);
-                    y += 23.0;
-                }
-                c.text(
-                    "Check the address, start the sample node, then try Reload.",
-                    w / 2.0 - 245.0,
-                    y + 18.0,
-                    530.0,
+                    "Opening document…",
+                    viewport.x + viewport.w / 2.0 - 60.0,
+                    viewport.y + viewport.h / 2.0 - 10.0,
+                    200.0,
                     13.0,
                     INK,
                     false,
                 );
             }
-            PageState::Ready(page) => {
-                let tab = self.browser.active();
-                c.round(
-                    Rect::new(12.0, 108.0, w - 24.0, 77.0),
-                    15.0,
-                    [255, 255, 255, 255],
-                    [234, 251, 255, 255],
-                    None,
-                );
+            PageState::Error(message) => {
+                chrome::document_viewport(&mut c, &mut scene, &ui);
+                let x = viewport.x + 40.0;
                 c.text(
-                    "YLANG DOCUMENT",
-                    32.0,
-                    121.0,
-                    w - 90.0,
-                    10.0,
-                    [59, 133, 171, 255],
-                    true,
-                );
-                c.text(
-                    &page.document.metadata.title,
-                    32.0,
-                    141.0,
-                    w - 230.0,
-                    23.0,
+                    "Could not open page",
+                    x,
+                    viewport.y + 40.0,
+                    viewport.w - 80.0,
+                    16.0,
                     INK,
                     true,
                 );
-                c.round(
-                    Rect::new(w - 177.0, 132.0, 142.0, 29.0),
-                    15.0,
-                    [213, 248, 240, 255],
-                    [213, 248, 240, 255],
-                    None,
-                );
-                c.text(
-                    "INERT · NATIVE",
-                    w - 158.0,
-                    138.0,
-                    130.0,
-                    10.0,
-                    [31, 113, 103, 255],
-                    true,
-                );
-                let area = Rect::new(12.0, 184.0, w - 24.0, (h - 212.0).max(1.0));
-                if let Some(cache) = &self.native {
-                    match &cache.document {
-                        Ok(doc) => {
-                            doc.draw(
-                                c.pix,
-                                area.x * scale,
-                                area.y * scale,
-                                tab.scroll as f32 * scale,
-                                area.h * scale,
-                                c.text,
-                            );
-                            if doc.height > area.h * scale {
-                                let bar = Rect::new(w - 22.0, area.y + 5.0, 7.0, area.h - 10.0);
-                                let thumb_h = (bar.h * area.h * scale / doc.height).max(30.0);
-                                let max = (doc.height / scale - area.h).max(1.0);
-                                let yy = bar.y
-                                    + (bar.h - thumb_h) * (tab.scroll as f32 / max).clamp(0.0, 1.0);
-                                c.round(bar, 4.0, [168, 237, 255, 35], [168, 237, 255, 35], None);
-                                c.round(
-                                    Rect::new(bar.x, yy, bar.w, thumb_h),
-                                    4.0,
-                                    [168, 237, 255, 200],
-                                    [41, 197, 246, 180],
-                                    None,
-                                );
-                                scene.hits.push(chrome::Hit {
-                                    rect: Rect::new(bar.x - 5.0, bar.y, 17.0, bar.h),
-                                    action: Action::Scrollbar,
-                                });
-                            }
-                        }
-                        Err(error) => {
-                            c.round(area, 0.0, [234, 251, 255, 255], [234, 251, 255, 255], None);
-                            c.text(error, 40.0, 220.0, w - 80.0, 18.0, INK, false);
-                        }
-                    }
+                let mut y = viewport.y + 76.0;
+                let chars: Vec<char> = message.chars().take(700).collect();
+                for part in chars.chunks(90) {
+                    let line: String = part.iter().collect();
+                    c.text(&line, x, y, viewport.w - 80.0, 13.0, INK, false);
+                    y += 21.0;
                 }
             }
+            PageState::Ready(_) => {
+                let tab = self.browser.active();
+                // The YLang document paints its own paper edge to edge in the
+                // viewport, so layout width, drawing and link hit-tests agree.
+                match self.native.as_ref().map(|cache| &cache.document) {
+                    Some(Ok(doc)) => {
+                        doc.draw(
+                            c.pix,
+                            viewport.x * scale,
+                            viewport.y * scale,
+                            tab.scroll as f32 * scale,
+                            viewport.h * scale,
+                            c.text,
+                        );
+                        if doc.height > viewport.h * scale {
+                            let bar = Rect::new(
+                                viewport.x + viewport.w - 12.0,
+                                viewport.y + 10.0,
+                                5.0,
+                                viewport.h - 20.0,
+                            );
+                            let thumb_h = (bar.h * viewport.h * scale / doc.height).max(24.0);
+                            let max = (doc.height / scale - viewport.h).max(1.0);
+                            let yy = bar.y
+                                + (bar.h - thumb_h) * (tab.scroll as f32 / max).clamp(0.0, 1.0);
+                            c.round(
+                                Rect::new(bar.x, yy, bar.w, thumb_h),
+                                2.5,
+                                [117, 80, 93, 170],
+                                [117, 80, 93, 170],
+                                None,
+                            );
+                            scene.hits.push(chrome::Hit {
+                                rect: Rect::new(bar.x - 5.0, bar.y, 15.0, bar.h),
+                                action: Action::Scrollbar,
+                            });
+                        }
+                    }
+                    Some(Err(error)) => {
+                        chrome::document_viewport(&mut c, &mut scene, &ui);
+                        c.text(
+                            error,
+                            viewport.x + 40.0,
+                            viewport.y + 40.0,
+                            viewport.w - 80.0,
+                            13.0,
+                            INK,
+                            false,
+                        );
+                    }
+                    None => chrome::document_viewport(&mut c, &mut scene, &ui),
+                }
+                chrome::round_viewport(&mut c, &ui);
+            }
         }
-        // Scenery is decorative; paint status last so it cannot cover text.
-        chrome::footer(&mut c, &self.browser, &ui);
         self.scene = scene;
-        let surface = self.surface.as_mut().unwrap();
-        surface.resize(
-            NonZeroU32::new(size.width).unwrap(),
-            NonZeroU32::new(size.height).unwrap(),
-        )?;
-        let mut buffer = surface.buffer_mut()?;
-        for (out, pixel) in buffer.iter_mut().zip(pix.pixels()) {
-            *out = (u32::from(pixel.red()) << 16)
-                | (u32::from(pixel.green()) << 8)
-                | u32::from(pixel.blue());
-        }
-        buffer.present()?;
-        self.frame = Some(pix);
-        if let Some(window) = &self.window {
-            window.set_title(&format!("{} — Yami Browser", self.browser.active().title()));
-        }
-        Ok(())
     }
     fn keyboard(&mut self, key: &Key, text: Option<&str>, event_loop: &ActiveEventLoop) {
         // Windows exposes AltGr as Ctrl+Alt. Preserve printable input from
@@ -701,8 +658,8 @@ impl ApplicationHandler<()> for Desktop {
                 event_loop.create_window(
                     Window::default_attributes()
                         .with_title("Yami Browser")
-                        .with_inner_size(LogicalSize::new(1180.0, 800.0))
-                        .with_min_inner_size(LogicalSize::new(720.0, 540.0)),
+                        .with_inner_size(LogicalSize::new(1440.0, 900.0))
+                        .with_min_inner_size(LogicalSize::new(900.0, 600.0)),
                 )?,
             );
             window.set_ime_allowed(true);
@@ -765,7 +722,7 @@ impl ApplicationHandler<()> for Desktop {
                     self.scroll_to_mouse();
                 }
                 let cursor = match self.scene.hit(self.mouse.0, self.mouse.1) {
-                    Some(Action::Address | Action::HomeAddress) => CursorIcon::Text,
+                    Some(Action::Address) => CursorIcon::Text,
                     Some(_) => CursorIcon::Pointer,
                     None if self.link().is_some() => CursorIcon::Pointer,
                     _ => CursorIcon::Default,
@@ -837,7 +794,7 @@ mod tests {
     #[test]
     fn editor_handles_unicode_selection_and_bounds() {
         let mut e = Editor::default();
-        e.activate("café", false);
+        e.activate("café");
         e.replace("ynp://");
         assert_eq!(e.value, "ynp://");
         e.replace("é");
@@ -850,5 +807,74 @@ mod tests {
         assert_eq!(e.value, "badnp://");
         e.replace(&"x".repeat(4097));
         assert_eq!(e.value, "badnp://");
+    }
+
+    fn headless(w: f32, h: f32) -> Desktop {
+        let mut app = Desktop::new(Loader::new(Arc::new(|| {})).unwrap());
+        app.headless = Some((w, h, 1.0));
+        app
+    }
+    fn settle(app: &mut Desktop) {
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while matches!(app.browser.active().state, PageState::Loading) {
+            app.browser.poll(&app.loader);
+            assert!(Instant::now() < deadline, "loader did not complete");
+            std::thread::yield_now();
+        }
+    }
+    fn frame(app: &mut Desktop) -> Pixmap {
+        let (w, h, _) = app.size();
+        let mut pix = Pixmap::new(w as u32, h as u32).unwrap();
+        app.compose(&mut pix);
+        pix
+    }
+
+    #[test]
+    fn viewport_dominates_at_1440_and_sidebar_actions_navigate() {
+        let mut app = headless(1440.0, 900.0);
+        let view = app.viewport();
+        assert!(view.w / 1440.0 >= 0.8, "viewport is {}px wide", view.w);
+        frame(&mut app);
+        let pin = app
+            .scene
+            .hits
+            .iter()
+            .find(|hit| hit.action == Action::Navigate("local:welcome"))
+            .expect("welcome pin")
+            .rect;
+        app.mouse = (pin.x + 2.0, pin.y + 2.0);
+        app.act(app.scene.hit(app.mouse.0, app.mouse.1).unwrap());
+        settle(&mut app);
+        assert!(matches!(app.browser.active().state, PageState::Ready(_)));
+        frame(&mut app);
+        assert!(
+            app.current_layout().is_some(),
+            "document laid out at viewport width"
+        );
+        app.act(Action::Home);
+        assert!(matches!(app.browser.active().state, PageState::Home));
+    }
+
+    /// Writes 1440×900 captures of the start page and a YLang document to
+    /// `target/screenshots`. Run with `cargo test -p yami-browser -- --ignored`.
+    #[test]
+    #[ignore]
+    fn capture_screenshots() {
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target/screenshots");
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut app = headless(1440.0, 900.0);
+        frame(&mut app)
+            .save_png(dir.join("desktop-home.png"))
+            .unwrap();
+        app.browser.navigate("local:welcome", &app.loader).unwrap();
+        settle(&mut app);
+        app.browser.open_tab();
+        app.browser.navigate("local:about", &app.loader).unwrap();
+        settle(&mut app);
+        app.browser.select(0);
+        frame(&mut app);
+        frame(&mut app)
+            .save_png(dir.join("desktop-document.png"))
+            .unwrap();
     }
 }
