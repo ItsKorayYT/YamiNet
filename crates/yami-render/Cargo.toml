@@ -8,6 +8,12 @@ license.workspace = true
 [lints]
 workspace = true
 
+[features]
+default = []
+native = ["dep:cosmic-text", "dep:tiny-skia"]
+
 [dependencies]
 ylang = { path = "../ylang" }
 ysl = { path = "../ysl" }
+cosmic-text = { version = "0.14", optional = true }
+tiny-skia = { version = "0.11", optional = true }

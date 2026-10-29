@@ -2,7 +2,8 @@
 
 An experimental Rust MVP for an independent document web. YLang is content,
 YSL is presentation, YNP carries documents, and Yami Render performs native
-layout and software rasterization. There are no third-party dependencies.
+layout and software rasterization. Yami Browser now includes a native desktop
+interface with antialiased typography, tabs and an aqua glass theme.
 
 **Not secure for sensitive use.** Networking is plaintext, unauthenticated and
 restricted to numeric loopback IP addresses. Privacy is a design goal, not a
@@ -29,12 +30,21 @@ export PATH="$CARGO_HOME/bin:$PATH"
 cd /workspace/YamiNet
 ```
 
-The browser is a terminal document viewer with a native bitmap export, not yet
-a desktop GUI. `--ppm` writes a P6 bitmap using the built-in software glyph
-renderer. No HTML, CSS, JavaScript, Chromium, WebView or web rendering engine is
-used. The viewer does not execute content or automatically fetch links, fonts,
-images, stylesheets or other assets. A fetched YNP document includes its style
-as inert text in the same frame; a local `--style` explicitly overrides it.
+The default command opens the native desktop browser. Its new-tab page has
+local document shortcuts and sample-node bookmarks; the address bar accepts
+existing localhost YNP URLs. Tabs, Back, Forward, Reload, document links and
+scrolling operate on actual YLang documents. Network work runs in bounded
+background workers, with stale-response protection.
+
+See [Desktop browser and Windows launch instructions](docs/desktop-browser.md)
+for installation, controls, native rendering details and platform limitations.
+The terminal and PPM paths remain available: use `--terminal` for the built-in
+sample, or retain the original positional file/URL commands. `--desktop` opens
+a supplied YNP URL in the window. `--ppm` writes the original P6 bitmap output.
+No HTML, CSS, JavaScript, Chromium, WebView or web rendering engine is used.
+The viewer does not execute content or automatically fetch links, fonts, images
+or other assets. A fetched YNP document includes its style as inert text in
+the same frame; the terminal viewer supports a local `--style` override.
 
 `demo` starts two loopback nodes on OS-assigned ports. Each node serves one
 sample document and fetches the other over YNP. It compares the received
@@ -56,7 +66,7 @@ Then request either document, and explicitly open a displayed link by giving
 its YNP URL to the viewer:
 
 ```sh
-cargo run -p yami-browser -- ynp://127.0.0.1:7301/welcome
+cargo run -p yami-browser -- --desktop ynp://127.0.0.1:7301/welcome
 cargo run -p yami-browser -- ynp://127.0.0.1:7302/about --ppm /tmp/yami-about.ppm
 cargo run -p yami-node -- fetch 127.0.0.1:7302 about
 ```
@@ -73,8 +83,8 @@ connections are rejected without terminating the process.
 | `ylang` | Bounded document parser, typed AST, byte spans and line/column errors |
 | `ysl` | Bounded original style parser and typed presentation settings |
 | `ynp` | Binary frame codec, strict limits, transport traits, loopback TCP client/listener |
-| `yami-render` | Word wrapping, indentation, colors, spacing, link hit-testing, terminal and bitmap output |
-| `yami-browser` | Local or explicitly fetched document viewer |
+| `yami-render` | Original terminal/bitmap renderer plus shaped native document layout and antialiased text |
+| `yami-browser` | Native desktop tabs/navigation and preserved terminal/PPM document tools |
 | `yami-node` | In-memory document server, fetch client and bidirectional two-node demo |
 
 Versioned normative drafts: [YLang](docs/specs/v0.1/ylang.md),
@@ -91,7 +101,11 @@ cargo test --workspace --locked
 cargo build --workspace --locked
 ```
 
-No registry access is needed after installing Rust; `--offline` also works.
+See the [current desktop validation status](docs/desktop-browser.md#current-cloud-validation-status)
+for tested Linux window interactions and remaining platform checks.
+
+The first desktop build downloads native Rust library dependencies. After
+those dependencies have been cached, `--offline` also works.
 The integration tests require permission to bind and connect loopback sockets.
 They use ephemeral ports and include real subprocesses, two-node exchange,
 malformed-client recovery, missing documents, and fetch/parse/style/raster output.
@@ -101,12 +115,17 @@ headers and payload lengths, Unicode, size boundaries and response correlation.
 
 ## MVP limitations
 
-No desktop window, interactive navigation, image embedding, rich typography,
-Unicode shaping, accessibility tree, editing or persistent document storage.
-Layout counts Unicode scalars as fixed-width cells, not graphemes; the bitmap
-font is 5x7 ASCII with lowercase rendered as uppercase and a box for unsupported
-characters. Terminal text retains Unicode. Headings share one text style.
-Oversized layouts and bitmaps fail with an error instead of scrolling or paging.
+The desktop interface is a software-rendered native window with tabs,
+navigation, shaped text and vertical scrolling. Its glass effect is drawn
+inside the window; it does not blur other applications behind it. Linux uses
+X11/XWayland. Windows build instructions are documented separately.
+
+There is no image embedding, full accessibility tree, document editing or
+persistent document storage. The debugging terminal/PPM backend still counts
+Unicode scalars as fixed-width cells. Its original 5x7 bitmap font maps lowercase
+to uppercase and unsupported characters to a box; this limitation does not
+describe the desktop font renderer. Oversized layouts and bitmaps fail with
+an error rather than allocating without bounds.
 
 No peer discovery, distributed lookup, authenticated identity, encrypted channel,
 anonymous routing, production networking, protocol negotiation, multiplexing,
