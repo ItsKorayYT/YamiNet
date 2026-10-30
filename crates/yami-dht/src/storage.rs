@@ -1,14 +1,14 @@
 use crate::{
-    invalid, now,
+    invalid,
     wire::{self, Message},
-    Contact, Network, PeerRecord, State, MAX_CACHE, MAX_RECORD_TTL,
+    Clock, Contact, Network, PeerRecord, State, SystemClock, MAX_CACHE, MAX_RECORD_TTL,
 };
 use std::{
     fs::{self, File, OpenOptions},
     io::{self, Read, Write},
     net::SocketAddrV4,
     path::{Path, PathBuf},
-    sync::{Arc, Mutex},
+    sync::{Arc, Mutex, MutexGuard},
 };
 use yami_identity::{NodeId, NodeIdentity};
 use ynp::{Connection, Protection};
@@ -17,10 +17,12 @@ struct Disk {
     state: State,
     path: PathBuf,
     _lock: File,
+    faulted: bool,
 }
 #[derive(Clone)]
 pub struct Service {
     disk: Arc<Mutex<Disk>>,
+    clock: Arc<dyn Clock>,
 }
 impl Service {
     /// Open a lookup-only cache without a client signing key. `local` is only
@@ -38,6 +40,14 @@ impl Service {
         Self::open(path, local, network)
     }
     pub fn open(path: impl AsRef<Path>, local: NodeId, network: Network) -> io::Result<Self> {
+        Self::open_with_clock(path, local, network, Arc::new(SystemClock))
+    }
+    pub fn open_with_clock(
+        path: impl AsRef<Path>,
+        local: NodeId,
+        network: Network,
+        clock: Arc<dyn Clock>,
+    ) -> io::Result<Self> {
         let path = path.as_ref();
         let parent = path
             .parent()
@@ -54,6 +64,13 @@ impl Service {
         let lock = options.open(path.with_extension("lock"))?;
         lock.try_lock()
             .map_err(|e| invalid(format!("DHT state is locked: {e}")))?;
+        // The exclusive writer lock proves no live writer owns this staging
+        // file. A crash before rename must not block all later renewals.
+        match fs::remove_file(path.with_extension("tmp")) {
+            Ok(()) => {}
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error),
+        }
         let state = match read_snapshot(path, network) {
             Ok(state) if state.local == local => state,
             Ok(_) => return Err(invalid("DHT cache belongs to another local identity")),
@@ -61,20 +78,37 @@ impl Service {
             Err(e) => return Err(e),
         };
         Ok(Self {
+            clock,
             disk: Arc::new(Mutex::new(Disk {
                 state,
                 path: path.into(),
                 _lock: lock,
+                faulted: false,
             })),
         })
     }
-    pub fn snapshot(&self) -> io::Result<State> {
-        Ok(self
+    fn guard(&self) -> io::Result<MutexGuard<'_, Disk>> {
+        let disk = self
             .disk
             .lock()
-            .map_err(|_| invalid("DHT state poisoned"))?
-            .state
-            .clone())
+            .map_err(|_| invalid("DHT state poisoned"))?;
+        if disk.faulted {
+            return Err(invalid(
+                "DHT persistence failed; restart after repairing local storage",
+            ));
+        }
+        Ok(disk)
+    }
+    pub fn now(&self) -> io::Result<u64> {
+        self.clock.now()
+    }
+    /// Bounded signed candidates plus recently authenticated routes. Unverified
+    /// manual pins are supplied separately and must still pass pinned TLS.
+    pub fn contacts(&self, at: u64) -> io::Result<Vec<Contact>> {
+        self.candidates(at)
+    }
+    pub fn snapshot(&self) -> io::Result<State> {
+        Ok(self.guard()?.state.clone())
     }
     /// Read an atomically replaced file without taking a writer's lifetime lock.
     pub fn read_snapshot(path: &Path, network: Network) -> io::Result<State> {
@@ -90,18 +124,14 @@ impl Service {
         self.accept_many(records, now)
     }
     pub(crate) fn accept_many(&self, records: Vec<PeerRecord>, now: u64) -> io::Result<bool> {
-        let mut disk = self
-            .disk
-            .lock()
-            .map_err(|_| invalid("DHT state poisoned"))?;
+        let mut disk = self.guard()?;
         let mut next = disk.state.clone();
         let mut changed = false;
         for record in records {
             changed |= next.accept(record, now)?;
         }
         if changed {
-            save(&disk.path, &next)?;
-            disk.state = next;
+            disk.commit(next)?;
         }
         Ok(changed)
     }
@@ -113,10 +143,7 @@ impl Service {
         endpoints: Vec<SocketAddrV4>,
         now: u64,
     ) -> io::Result<PeerRecord> {
-        let mut disk = self
-            .disk
-            .lock()
-            .map_err(|_| invalid("DHT state poisoned"))?;
+        let mut disk = self.guard()?;
         if disk.state.local != *identity.id() {
             return Err(invalid("DHT signer is not this node"));
         }
@@ -140,34 +167,20 @@ impl Service {
         )?;
         let mut next = disk.state.clone();
         next.accept(record.clone(), now)?;
-        save(&disk.path, &next)?;
-        disk.state = next;
+        disk.commit(next)?;
         Ok(record)
     }
     pub(crate) fn observed(&self, contact: Contact, now: u64) -> io::Result<()> {
-        let mut disk = self
-            .disk
-            .lock()
-            .map_err(|_| invalid("DHT state poisoned"))?;
+        let mut disk = self.guard()?;
         let _ = disk.state.routing.observed(contact, now);
         Ok(())
     }
     pub(crate) fn failed(&self, contact: Contact) -> io::Result<()> {
-        self.disk
-            .lock()
-            .map_err(|_| invalid("DHT state poisoned"))?
-            .state
-            .routing
-            .failed(contact);
+        self.guard()?.state.routing.failed(contact);
         Ok(())
     }
     pub(crate) fn candidates(&self, now: u64) -> io::Result<Vec<Contact>> {
-        Ok(self
-            .disk
-            .lock()
-            .map_err(|_| invalid("DHT state poisoned"))?
-            .state
-            .candidates(now))
+        Ok(self.guard()?.state.candidates(now))
     }
     /// One RPC per existing authenticated TLS connection. Unauthenticated clients
     /// may relay signed records, but cannot forge their owners' signatures.
@@ -178,7 +191,7 @@ impl Service {
             ));
         }
         let (nonce, request) = wire::read_prefixed(connection, prefix)?;
-        let now = now()?;
+        let now = self.now()?;
         let response = match request {
             Message::Find(target) => Message::Peers(self.snapshot()?.closest(target, now)),
             Message::Store(record) => {
@@ -190,7 +203,20 @@ impl Service {
         wire::write(connection, nonce, &response)
     }
 }
-fn save(path: &Path, state: &State) -> io::Result<()> {
+impl Disk {
+    fn commit(&mut self, next: State) -> io::Result<()> {
+        let mut installed = false;
+        if let Err(error) = save(&self.path, &next, &mut installed) {
+            // An error after rename may mean disk is ahead of memory. Fail
+            // closed: never serve or reserve a conflicting sequence in-process.
+            self.faulted = installed;
+            return Err(error);
+        }
+        self.state = next;
+        Ok(())
+    }
+}
+fn save(path: &Path, state: &State, installed: &mut bool) -> io::Result<()> {
     let mut bytes = Vec::with_capacity(MAX_SNAPSHOT);
     bytes.extend_from_slice(b"YDC\x01");
     bytes.push(state.network.byte());
@@ -212,7 +238,19 @@ fn save(path: &Path, state: &State) -> io::Result<()> {
     let mut file = options.open(&temp)?;
     let result = file.write_all(&bytes).and_then(|()| file.sync_all());
     drop(file);
-    let result = result.and_then(|()| fs::rename(&temp, path));
+    let result = result
+        .and_then(|()| fs::rename(&temp, path))
+        .and_then(|()| {
+            *installed = true;
+            // Persist the directory entry before any signed record is advertised.
+            #[cfg(unix)]
+            File::open(
+                path.parent()
+                    .ok_or_else(|| invalid("missing snapshot parent"))?,
+            )?
+            .sync_all()?;
+            Ok(())
+        });
     if result.is_err() {
         let _ = fs::remove_file(temp);
     }

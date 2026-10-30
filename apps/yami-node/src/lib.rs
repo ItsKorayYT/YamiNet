@@ -1,6 +1,8 @@
 //! Small document nodes: an in-memory store and a directory-backed site.
 //! Optional LAN discovery is provided separately by `ynp-discovery`.
+pub mod maintenance;
 pub mod peers;
+pub mod shutdown;
 mod signing;
 mod site;
 
@@ -176,26 +178,51 @@ pub fn serve_with_handler<L: Incoming + Sync>(
     handler: &(dyn Fn(&mut dyn Connection) -> io::Result<Reply> + Sync),
     report: &(dyn Fn(io::Result<Reply>) + Sync),
 ) -> io::Result<()> {
+    serve_with_handler_until(
+        listener,
+        workers,
+        handler,
+        report,
+        &shutdown::Shutdown::default(),
+    )
+}
+/// For clean shutdown, the caller must enable nonblocking accept on its listener.
+/// In-flight TLS/YNP requests finish within the existing connection deadline.
+pub fn serve_with_handler_until<L: Incoming + Sync>(
+    listener: &L,
+    workers: usize,
+    handler: &(dyn Fn(&mut dyn Connection) -> io::Result<Reply> + Sync),
+    report: &(dyn Fn(io::Result<Reply>) + Sync),
+    shutdown: &shutdown::Shutdown,
+) -> io::Result<()> {
     if !(1..=MAX_WORKERS).contains(&workers) {
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
             "worker count must be 1..32",
         ));
     }
-    // Workers never exit, so this returns only when no worker could start.
+    // Scoped workers drain before return, including after a stop request.
     thread::scope(|scope| {
         let mut started = 0;
         for index in 0..workers {
             let worker = thread::Builder::new()
                 .name(format!("yami-node-{index}"))
-                .spawn_scoped(scope, move || loop {
-                    match listener.accept() {
-                        Ok(mut connection) => report(handler(&mut *connection)),
-                        Err(error) => {
-                            report(Err(error));
-                            // Avoid spinning if accepting fails persistently,
-                            // for example when file descriptors run out.
-                            thread::sleep(Duration::from_millis(50));
+                .spawn_scoped(scope, move || {
+                    while !shutdown.is_stopped() {
+                        match listener.accept() {
+                            Ok(mut connection) => {
+                                if !shutdown.is_stopped() {
+                                    report(handler(&mut *connection));
+                                }
+                            }
+                            Err(error) => {
+                                if error.kind() != io::ErrorKind::WouldBlock {
+                                    report(Err(error));
+                                }
+                                // Avoid spinning if accepting fails persistently,
+                                // for example when file descriptors run out.
+                                shutdown.wait(Duration::from_millis(50));
+                            }
                         }
                     }
                 });

@@ -176,7 +176,9 @@ replaced and stale completions cannot change the current page. There is no
 unbounded retry, background crawl or periodic maintenance.
 
 This remains an experimental, small DHT, without guaranteed availability.
-Owners must publish fresh records; they expire within 24 hours. Correct local
+Owners must publish fresh records; they expire within 24 hours. Serving nodes
+can enable [automatic maintenance](dht-maintenance.md) for bounded renewal and
+peer recovery; the browser itself remains an on-demand lookup client. Correct local
 time matters. Cold clients cannot know the globally newest sequence. Malicious
 peers can omit records, fill caches, observe lookups or attempt Sybil/eclipse
 attacks. Peers see source IPs and requested IDs; neither lookup nor TLS provides

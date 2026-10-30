@@ -9,6 +9,7 @@ new transport or a centralized directory. Read the
 
 ```powershell
 cargo test -p yami-dht
+cargo test -p yami-node --test maintenance --locked -- --nocapture
 cargo test -p yami-browser --test native_dht --locked -- --nocapture
 cargo test -p yami-node --test dht -- --nocapture
 cargo fmt --all -- --check
@@ -150,10 +151,12 @@ node without DHT opt-in simply fails an RPC; it does not become a naming server.
 Default configuration uses the existing per-user peer directory or
 `YAMINET_PEER_DIR`; `--dir` selects CLI configuration and `--dht-dir` selects
 serving configuration/state. CLI lookup uses the existing default identity or
-`--identity`. Keep one state/identity pair per logical node. Bootstrap settings
-are sampled at startup, and publication is a single bounded initial pass;
-changing the file does not launch background crawling. Retry explicitly or
-restart if a bootstrap was unavailable. There are no mandatory built-in peers.
+`--identity`. Keep one state/identity pair per logical node. Without
+`--dht-maintain`, bootstrap settings are sampled at startup and publication remains a single bounded initial pass. For automatic renewal,
+health checks, bootstrap recovery, diagnostics and graceful shutdown, append
+`--dht-maintain`; see [maintenance operations and controlled-clock tests](dht-maintenance.md).
+That worker re-reads compatible pins and optional operator endpoint updates;
+it does not perform unbounded crawling. There are no mandatory built-in peers.
 
 Server and CLI client snapshots have separate locks. Incoming STORE updates
 the running server; CLI lookup updates the client cache and can read newer
@@ -190,4 +193,5 @@ Record actual endpoint reachability, node IDs, sequence/expiry, wrong-key
 failures, refresh/expiry behavior, and captures from independent networks.
 Do not substitute these loopback results for that validation. Sybil/eclipse,
 metadata collection, omission/censorship, cache filling and production DHT
-maintenance remain unsolved. No anonymity or production-security claim is made.
+availability guarantees remain unsolved; bounded opt-in maintenance does not
+resolve adversarial topology. No anonymity or production-security claim is made.

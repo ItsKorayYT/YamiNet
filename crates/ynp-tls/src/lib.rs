@@ -295,6 +295,10 @@ impl TlsListener {
     pub fn local_addr(&self) -> io::Result<SocketAddr> {
         self.listener.local_addr()
     }
+    /// Nonblocking accept only; accepted streams retain bounded blocking TLS I/O.
+    pub fn set_nonblocking(&self, nonblocking: bool) -> io::Result<()> {
+        self.listener.set_nonblocking(nonblocking)
+    }
     pub fn node_id(&self) -> &NodeId {
         &self.id
     }
@@ -308,6 +312,9 @@ impl Incoming for TlsListener {
     /// that connection.
     fn accept(&self) -> io::Result<Box<dyn Connection>> {
         let (stream, peer) = self.listener.accept()?;
+        // Some platforms inherit a listener's nonblocking mode on accept.
+        // TLS uses bounded blocking I/O even when accept is polled for shutdown.
+        stream.set_nonblocking(false)?;
         self.scope.check(peer)?;
         let lease = self
             .admission

@@ -10,7 +10,7 @@ mod tests;
 mod wire;
 
 pub use client::{
-    lookup, lookup_newer, lookup_with_connector, publish, publish_with_connector, Lookup,
+    exchange, lookup, lookup_newer, lookup_with_connector, publish, publish_with_connector, Lookup,
     PinnedTls, RpcConnector,
 };
 pub use record::{PeerRecord, MAX_RECORD_BYTES, MAX_RECORD_TTL};
@@ -39,6 +39,17 @@ pub fn now() -> io::Result<u64> {
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_secs())
         .map_err(io::Error::other)
+}
+
+/// DHT record time only. TLS validity and socket deadlines always use real time.
+pub trait Clock: Send + Sync {
+    fn now(&self) -> io::Result<u64>;
+}
+pub struct SystemClock;
+impl Clock for SystemClock {
+    fn now(&self) -> io::Result<u64> {
+        now()
+    }
 }
 
 /// Public DHTs cannot cause private/LAN/loopback probes. The isolated simulator

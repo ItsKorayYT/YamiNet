@@ -44,6 +44,12 @@ impl RoutingTable {
     pub fn contacts(&self) -> Vec<Contact> {
         self.contacts.iter().map(|(c, _)| *c).collect()
     }
+    pub fn recently_verified(&self, now: u64) -> usize {
+        self.contacts
+            .iter()
+            .filter(|(_, seen)| *seen <= now && now - *seen < ROUTE_TTL)
+            .count()
+    }
     pub fn expire(&mut self, now: u64) {
         self.contacts
             .retain(|(_, seen)| *seen <= now && now - *seen < ROUTE_TTL);

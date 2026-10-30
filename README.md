@@ -254,6 +254,23 @@ This is loopback validation, **not real internet validation**. Read
 [versioned protocol/security limits](docs/specs/v0.1/dht.md), including the
 unsolved Sybil/eclipse, cache-filling and routing-metadata risks.
 
+### Automatic DHT maintenance
+
+DHT-serving nodes may opt into `--dht-maintain` alongside `--dht --tls`.
+One background worker renews signed records before expiry, persists increasing
+sequences across restarts, checks a bounded rotation of peers, and retries
+outages with jittered exponential backoff. Learned ordinary peers can carry
+renewals when a bootstrap goes offline. Existing limits and exact-ID TLS remain.
+
+Use `--dht-renew-secs` / `--dht-health-secs` to configure timing,
+`--dht-endpoints-file` for explicit advertised endpoint updates, and
+`yami-node dht status --dir <peer-directory>` for diagnostics (`--local` for
+simulation). Ctrl-C and Unix termination signals stop maintained nodes cleanly.
+Without the extra opt-in, the existing initial publication behavior remains.
+See [operations, bounds and controlled-clock tests](docs/dht-maintenance.md).
+This is experimental loopback-tested maintenance, not a guarantee of internet
+availability, production security or anonymity.
+
 ## Workspace
 
 | Package | Responsibility |

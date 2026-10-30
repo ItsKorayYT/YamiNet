@@ -9,8 +9,8 @@ use std::{
 };
 use yami_identity::{default_dir, NodeId, NodeIdentity, KEY_FILE};
 use yami_node::{
-    serve_once, serve_with_handler, sign_site, site_manifest, verify_site, Reply, Site, Store,
-    SIGNATURE_FILE,
+    serve_once, serve_with_handler_until, sign_site, site_manifest, verify_site, Reply, Site,
+    Store, SIGNATURE_FILE,
 };
 use ynp::{DocumentData, Incoming, LocalListener, LoopbackTcp};
 use ynp_tls::{TlsListener, TlsTransport};
@@ -28,9 +28,11 @@ yami-node peer remove <node-id> [--dir <peer-directory>]
 yami-node peer connect <node-id> [--dir <peer-directory>]
 yami-node dht bootstrap <node-id> <IPv4:port> [--dir <peer-directory>] [--local]
 yami-node dht peers [--dir <peer-directory>] [--local]
+yami-node dht status [--dir <peer-directory>] [--local]
 yami-node dht lookup <node-id> [--dir <peer-directory>] [--identity <identity-directory>] [--local]
 yami-node dht fetch <node-id> <key> [--dir <peer-directory>] [--identity <identity-directory>] [--local]
 serve-dir DHT options: --dht [--dht-local] [--dht-dir <peer/state-directory>] [--dht-endpoint <advertised-IPv4:port> ...]
+Maintenance opt-in: --dht-maintain [--dht-renew-secs 30..43200] [--dht-health-secs 5..3600] [--dht-endpoints-file <file>]
 yami-node fetch <loopback-IP:port> <key>
 yami-node fetch <ynps://node-id@numeric-IP:port/key>
 yami-node identity new [--dir <identity-directory>]
@@ -253,6 +255,13 @@ fn serve_dir(address: SocketAddr, root: &str, options: ServeOptions) -> Result<(
                 TlsListener::bind(address, identity)?
             };
             let address = listener.local_addr()?;
+            let shutdown = yami_node::shutdown::Shutdown::default();
+            if options.dht_maintain {
+                let signal = shutdown.clone();
+                ctrlc::set_handler(move || signal.stop())?;
+                listener.set_nonblocking(true)?;
+            }
+            let mut maintenance_worker = None;
             let dht = if options.dht {
                 let network = if options.dht_local {
                     yami_dht::Network::Loopback
@@ -265,7 +274,10 @@ fn serve_dir(address: SocketAddr, root: &str, options: ServeOptions) -> Result<(
                     .map_or_else(yami_node::peers::default_dir, Ok)?;
                 let service =
                     yami_dht::Service::open(dht_path(&dir, network, "server"), id, network)?;
-                let endpoints = if options.dht_endpoints.is_empty() {
+                let endpoints = if let Some(path) = &options.dht_endpoints_file {
+                    yami_node::maintenance::read_endpoints(path, network)
+                        .map_err(|_| "invalid or unavailable DHT endpoint file")?
+                } else if options.dht_endpoints.is_empty() {
                     let SocketAddr::V4(endpoint) = address else {
                         return Err("DHT endpoints require IPv4".into());
                     };
@@ -273,19 +285,37 @@ fn serve_dir(address: SocketAddr, root: &str, options: ServeOptions) -> Result<(
                 } else {
                     options.dht_endpoints.clone()
                 };
-                let record = service.prepare_self(&dht_identity, endpoints, yami_dht::now()?)?;
-                let seeds = dht_seeds(&dir, network)?
-                    .into_iter()
-                    .filter(|c| c.id != id)
-                    .collect::<Vec<_>>();
-                let publisher = service.clone();
-                let published_record = record.clone();
-                thread::Builder::new().name("dht-startup".into()).spawn(move || {
-                    match yami_dht::publish(&publisher, &published_record, &seeds) {
-                        Ok(count) => eprintln!("DHT startup publication complete: {count} authenticated bootstrap(s)"),
-                        Err(error) => eprintln!("DHT startup publication failed: {error}"),
-                    }
-                })?;
+                let record = if options.dht_maintain {
+                    let engine = yami_node::maintenance::Maintainer::new(
+                        service.clone(),
+                        dht_identity,
+                        endpoints,
+                        options.maintenance_config,
+                    )?;
+                    let record = engine.record().clone();
+                    maintenance_worker = Some(yami_node::maintenance::Worker::start(
+                        engine,
+                        dir,
+                        options.dht_endpoints_file.clone(),
+                        shutdown.clone(),
+                    )?);
+                    record
+                } else {
+                    let record = service.prepare_self(&dht_identity, endpoints, service.now()?)?;
+                    let seeds = dht_seeds(&dir, network)?
+                        .into_iter()
+                        .filter(|c| c.id != id)
+                        .collect::<Vec<_>>();
+                    let publisher = service.clone();
+                    let published_record = record.clone();
+                    thread::Builder::new().name("dht-startup".into()).spawn(move || {
+                        match yami_dht::publish(&publisher, &published_record, &seeds) {
+                            Ok(count) => eprintln!("DHT startup publication complete: {count} authenticated bootstrap(s)"),
+                            Err(_) => eprintln!("DHT startup publication failed: peer or state unavailable"),
+                        }
+                    })?;
+                    record
+                };
                 eprintln!("DHT v1 enabled, {:?}; signed sequence {} expires {}. Endpoints are claims until TLS authenticates the node.", network, record.sequence(), record.expires());
                 Some(service)
             } else {
@@ -322,22 +352,34 @@ fn serve_dir(address: SocketAddr, root: &str, options: ServeOptions) -> Result<(
                     address.port()
                 );
             }
-            serve_site(
+            let result = serve_site(
                 &listener,
                 &site,
                 options.workers,
                 options.public,
                 dht.as_ref(),
                 &|key| ynp_tls::format_url(&id, address, key),
-            )
+                &shutdown,
+            );
+            shutdown.stop();
+            if let Some(worker) = &mut maintenance_worker {
+                worker.stop();
+            }
+            result
         }
         _ => {
             let listener = LocalListener::bind(address)?;
             let address = listener.local_addr()?;
             eprintln!("Serving site {root} via YNP on {address} (plaintext)");
-            serve_site(&listener, &site, options.workers, false, None, &|key| {
-                format!("ynp://{address}/{key}")
-            })
+            serve_site(
+                &listener,
+                &site,
+                options.workers,
+                false,
+                None,
+                &|key| format!("ynp://{address}/{key}"),
+                &yami_node::shutdown::Shutdown::default(),
+            )
         }
     }
 }
@@ -348,6 +390,7 @@ fn serve_site(
     public: bool,
     dht: Option<&yami_dht::Service>,
     url: &dyn Fn(&str) -> String,
+    shutdown: &yami_node::shutdown::Shutdown,
 ) -> Result<()> {
     let pages = site.pages()?;
     // Pages and the stylesheet are read on every request; edits need no restart.
@@ -362,7 +405,7 @@ fn serve_site(
         eprintln!("Open in Yami Browser: {}", url(start));
     }
     let reports = std::sync::Mutex::new((std::time::Instant::now(), 0usize));
-    serve_with_handler(
+    serve_with_handler_until(
         listener,
         workers,
         &|connection| {
@@ -392,6 +435,7 @@ fn serve_site(
                 Ok(Reply::Dht) => eprintln!("Served bounded DHT RPC"),
             }
         },
+        shutdown,
     )?;
     Ok(())
 }
@@ -409,12 +453,17 @@ struct ServeOptions {
     dht_local: bool,
     dht_dir: Option<PathBuf>,
     dht_endpoints: Vec<std::net::SocketAddrV4>,
+    dht_endpoints_file: Option<PathBuf>,
+    dht_maintain: bool,
+    maintenance_config: yami_node::maintenance::Config,
 }
 fn serve_dir_options(options: &[String]) -> Result<ServeOptions> {
     let (mut workers, mut identity, mut tls, mut lan) = (None, None, false, false);
     let mut discoverable = false;
     let mut public = false;
     let (mut dht, mut dht_local, mut dht_dir, mut dht_endpoints) = (false, false, None, Vec::new());
+    let (mut dht_maintain, mut renew_secs, mut health_secs, mut dht_endpoints_file) =
+        (false, None, None, None);
     let mut options = options.iter();
     while let Some(flag) = options.next() {
         match flag.as_str() {
@@ -429,6 +478,16 @@ fn serve_dir_options(options: &[String]) -> Result<ServeOptions> {
             "--discoverable" if !discoverable => discoverable = true,
             "--public" if !public => public = true,
             "--dht" if !dht => dht = true,
+            "--dht-maintain" if !dht_maintain => dht_maintain = true,
+            "--dht-renew-secs" if renew_secs.is_none() => {
+                renew_secs = Some(options.next().ok_or(USAGE)?.parse()?)
+            }
+            "--dht-health-secs" if health_secs.is_none() => {
+                health_secs = Some(options.next().ok_or(USAGE)?.parse()?)
+            }
+            "--dht-endpoints-file" if dht_endpoints_file.is_none() => {
+                dht_endpoints_file = Some(PathBuf::from(options.next().ok_or(USAGE)?))
+            }
             "--dht-local" if !dht_local => dht_local = true,
             "--dht-dir" if dht_dir.is_none() => {
                 dht_dir = Some(PathBuf::from(options.next().ok_or(USAGE)?))
@@ -439,6 +498,23 @@ fn serve_dir_options(options: &[String]) -> Result<ServeOptions> {
             _ => return Err(USAGE.into()),
         }
     }
+    if !dht_maintain
+        && (renew_secs.is_some() || health_secs.is_some() || dht_endpoints_file.is_some())
+    {
+        return Err("maintenance options require --dht-maintain".into());
+    }
+    if dht_maintain && !dht {
+        return Err("--dht-maintain requires --dht --tls".into());
+    }
+    if dht_endpoints_file.is_some() && !dht_endpoints.is_empty() {
+        return Err("choose --dht-endpoint or --dht-endpoints-file".into());
+    }
+    let defaults = yami_node::maintenance::Config::default();
+    let maintenance_config = yami_node::maintenance::Config {
+        renew_secs: renew_secs.unwrap_or(defaults.renew_secs),
+        health_secs: health_secs.unwrap_or(defaults.health_secs),
+    }
+    .validate()?;
     if public && lan {
         return Err("--public and --lan are mutually exclusive".into());
     }
@@ -474,6 +550,9 @@ fn serve_dir_options(options: &[String]) -> Result<ServeOptions> {
         dht_local,
         dht_dir,
         dht_endpoints,
+        dht_endpoints_file,
+        dht_maintain,
+        maintenance_config,
     })
 }
 fn identity_dir(options: &[String]) -> Result<PathBuf> {
@@ -553,17 +632,7 @@ fn dht_path(dir: &Path, network: yami_dht::Network, role: &str) -> PathBuf {
     dir.join(format!("dht-{mode}-{role}.cache"))
 }
 fn dht_seeds(dir: &Path, network: yami_dht::Network) -> Result<Vec<yami_dht::Contact>> {
-    let peers = yami_node::peers::PeerStore::open(dir)?;
-    Ok(peers
-        .entries()
-        .iter()
-        .filter_map(|peer| {
-            let SocketAddr::V4(endpoint) = peer.address else {
-                return None;
-            };
-            yami_dht::Contact::new(peer.id, endpoint, network).ok()
-        })
-        .collect())
+    Ok(yami_node::maintenance::read_seeds(dir, network)?)
 }
 fn dht_command(args: &[String]) -> Result<()> {
     use yami_dht::{Network, Service};
@@ -593,6 +662,66 @@ fn dht_command(args: &[String]) -> Result<()> {
             network.check(endpoint)?;
             yami_node::peers::PeerStore::open(&dir)?.add(id, endpoint.into())?;
             println!("Added manual bootstrap pin {id} at {endpoint}; unverified until TLS. No query was sent.");
+            Ok(())
+        }
+        ["status"] => {
+            let state = Service::read_snapshot(&dht_path(&dir, network, "server"), network)
+                .map_err(|_| {
+                    "DHT server state is unavailable; start a DHT node with this directory/network"
+                })?;
+            let at = yami_dht::now()?;
+            let expires = state
+                .records()
+                .iter()
+                .find(|r| r.id() == state.local)
+                .map_or(0, |r| r.expires());
+            let status = yami_node::maintenance::read_status(
+                &yami_node::maintenance::status_path(&dir, network),
+                network,
+            )
+            .ok()
+            .filter(|s| s.id == state.local);
+            println!(
+                "Known peers: {}",
+                state
+                    .records()
+                    .iter()
+                    .filter(|r| r.id() != state.local && state.get(r.id(), at).is_some())
+                    .count()
+            );
+            if let Some(status) = status {
+                let age = at.saturating_sub(status.observed);
+                println!(
+                    "Recently verified peers: {} (sample age {}s)",
+                    if age < 900 {
+                        status.recently_verified
+                    } else {
+                        0
+                    },
+                    age
+                );
+                println!(
+                    "Last successful publication: {}",
+                    status
+                        .last_publication
+                        .map_or_else(|| "none recorded".into(), |time| time.to_string())
+                );
+                println!(
+                    "Maintenance worker: {} (last reported state)",
+                    if status.running { "running" } else { "stopped" }
+                );
+                println!(
+                    "Last maintenance error: {}",
+                    status.last_error.map_or("none", |error| error.message())
+                );
+            } else {
+                println!("Recently verified peers: unknown (no maintenance sample)");
+                println!("Last successful publication: unknown");
+                println!(
+                    "Last maintenance error: unknown (maintenance disabled or status unavailable)"
+                );
+            }
+            println!("Local record expires in: {}s", expires.saturating_sub(at));
             Ok(())
         }
         ["peers"] => {

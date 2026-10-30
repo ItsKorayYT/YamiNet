@@ -114,13 +114,21 @@ MVP tradeoff and a cache-filling denial-of-service risk. Fresh/reset caches do
 not know the newest global sequence, and stolen keys cannot be revoked.
 
 Sybil/eclipsing, malicious bootstrap omission/censorship, routing metadata
-collection, endpoint lies, clock errors, availability and production DHT
-maintenance are unsolved. Participating peers can link queried IDs to source
-IPs and collect ID-to-endpoint records. There is no anonymity. The transport
+collection, endpoint lies, clock errors and production DHT availability
+guarantees are unsolved. Participating peers can link queried IDs to source IPs and collect ID-to-endpoint records. There is no anonymity. The transport
 hook permits future adapters but implements no Tor/I2P or NAT traversal. The
 three-node test is loopback simulation, not internet validation or a security
 review. See [DHT protocol](docs/specs/v0.1/dht.md) and
 [test procedure](docs/dht-testing.md).
+
+Opt-in `--dht-maintain` reuses the same validators and exact-key TLS for
+bounded automatic renewal and peer checks. Every new publication reserves a
+higher persisted sequence first. Peer cooldowns and global retry limits bound
+recurring attempts, but malicious signed public endpoints can still induce
+bounded public connection attempts. Maintenance increases recurring metadata
+visibility and does not guarantee replication, reachability or availability.
+There is no new trust in bootstrap peers. See [maintenance operations](docs/dht-maintenance.md)
+for timing, storage failure behavior, explicit endpoint updates and shutdown.
 
 Key rotation and revocation, client authentication, production internet operation, NAT
 traversal and anonymous routing require separate versioned designs and

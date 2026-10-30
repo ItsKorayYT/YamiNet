@@ -16,7 +16,7 @@ bits. Prefix-distance buckets hold at most four contacts each; a routing table
 holds at most 128 contacts overall. Live bucket members are not displaced to
 make space. Contacts are observed only after a successful RPC authenticated
 against the expected TLS key. Failed contacts are removed; routing entries
-expire after 15 minutes when the table is used for lookup. Advertisement alone
+expire after 15 minutes when the table is used for lookup or maintenance. Advertisement alone
 does not add an authenticated route. This adapts the XOR/bucket approach of
 [Maymounkov and Mazières](https://pdos.csail.mit.edu/~petar/papers/maymounkov-kademlia-lncs.pdf);
 it does not claim their completeness or performance guarantees.
@@ -98,9 +98,48 @@ with a cloned identity and expect monotonicity. Sequence exhaustion fails closed
 Publication is one bounded initial pass to up to eight configured peers, at
 most 15 seconds and 16 RPCs total. A successful STORE is followed by one FIND
 near the joining node's ID to learn signed neighbors; this lets ordinary
-joined peers help subsequent lookups. It does not periodically crawl, refresh or republish.
-After 24 hours, restart with the same identity and state to publish a fresh
-record. Automatic maintenance/replication is deferred.
+joined peers help subsequent lookups. This remains the behavior without the
+separate `--dht-maintain` opt-in.
+
+## Optional automatic maintenance
+
+`serve-dir ... --dht --dht-maintain` starts one node background worker. It uses
+unchanged STORE/FIND RPCs and the existing signed-record and TLS validators.
+Default renewal is six hours and health checks five minutes, both jittered by
+±10%. Configurable renewal is 30..43200 seconds and health checks 5..3600
+seconds. Each new publication attempt, including retries, reserves and persists
+a strictly higher sequence before STORE. Self records keep the 24-hour lifetime.
+Server state and identity survive restart; resetting either is not maintenance.
+
+A pass rotates through at most four signed/previously authenticated/configured
+contacts, sends at most eight RPCs, and shares a 15-second network budget.
+Each RPC's three-second budget covers connect, TLS handshake and I/O. There is
+one outbound connection at a time and at least five seconds between passes.
+STORE is followed by FIND to learn neighbors; health-only passes issue FIND.
+Failed routes are removed; stale routes expire. Newly advertised locations
+always require exact-ID TLS before use. No unsigned exchange is introduced.
+
+Complete failures and individual unreachable peers use exponential backoff
+starting at `min(health interval, 30 seconds)` with up to 20% positive jitter,
+capped at 900 seconds. At most 64 individual cooldowns are retained. Global
+rate limits still apply when churn replaces cooldown entries. Signed/high-water
+cache and route limits remain 256 and 128. Ordinary learned peers can carry
+renewals without the original bootstrap. Configured compatible bootstrap pins
+are re-read for recovery; no built-in central peer or quorum is required.
+
+An optional bounded operator endpoint file can replace advertised endpoints
+while running, causing a new signed sequence. It does not change the listener
+bind or perform IP discovery/NAT traversal. Invalid updates preserve the last
+valid set. Clock rollback causes a fresh sequence/time-bound record rather than
+sequence reuse. A test-injected DHT clock is supported by the Rust service;
+production uses the system clock, independently of real TLS/socket deadlines.
+
+Stop signals interrupt the worker's wait; cancellation is checked between RPCs,
+so one in-flight request can consume its existing budget. The serving pool drains
+under its existing deadlines. Bounded local diagnostics report peers, recent
+verification, last acknowledged publication, expiration and fixed error codes;
+they are advisory snapshots, not presence or ownership proofs. See
+[operations, shutdown and controlled-clock tests](../../dht-maintenance.md).
 
 ## Scope and trust
 
@@ -188,9 +227,13 @@ The binary header is `YDC\x01`, one network-policy byte, the local public key
 (32 bytes), u16 record count, then u16-length-prefixed records. Bounds, owner,
 scope, duplicates and all signatures are checked on load. Expired signatures
 restore only high-water history, never active locations. Corruption does not
-silently reset history. Temporary-file collisions fail closed; inspect a stale
-`.tmp` after a crash before removing that exact file. Directory durability
-through power loss/network filesystems is not guaranteed.
+silently reset history. Startup removes an interrupted `.tmp` only after the
+exclusive writer lock is held. Files are synced before rename; Unix also syncs
+the containing directory before publication. A pre-rename write failure leaves
+the prior committed state intact. An error after rename fails the service closed
+until reopening, so disk/memory ambiguity cannot reuse a sequence. Durability
+through power loss still depends on the platform/storage; Windows directory
+sync and network-filesystem guarantees are not provided.
 
 Server/client caches have separate locks so CLI lookups can run while serving.
 The CLI imports current server records that do not roll back newer client
@@ -205,8 +248,9 @@ Unsolved risks include **Sybil identities, eclipse attacks, cache filling,
 malicious bootstraps, censorship, omission of newer records, replay to new
 clients, clock errors, endpoint lies and traffic analysis**. XOR distance is
 not an authorization policy. There is no address-ownership challenge, client
-authentication, proof of work, subnet diversity, quorum, automatic republishing,
-revocation or production DHT maintenance. Lookup peers learn requested IDs and
+authentication, proof of work, subnet diversity, quorum, revocation or
+production DHT availability guarantees. Bounded opt-in maintenance is implemented;
+it does not solve adversarial topology or global replication. Lookup peers learn requested IDs and
 can link them to source IPs; caches disclose ID-to-endpoint relationships and
 sequence/expiry metadata. TLS does not provide anonymity or prevent routing
 metadata collection. Public deployments need a separate security review.

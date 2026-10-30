@@ -1,5 +1,5 @@
 use crate::{
-    distance, invalid, now,
+    distance, invalid,
     wire::{self, Message},
     Contact, PeerRecord, Service, LOOKUP_TIMEOUT, MAX_CANDIDATES, MAX_QUERIES, RPC_TIMEOUT,
 };
@@ -51,6 +51,42 @@ fn query_with_connector(
         }
         _ => Err(invalid("DHT response type does not match query")),
     }
+}
+
+/// One maintenance RPC using the existing wire codec and TLS verifier. STORE
+/// and FIND remain separate calls so a worker can stop between connections.
+/// A returned STORE acknowledgement is not proof of endpoint ownership.
+pub fn exchange(
+    service: &Service,
+    contact: Contact,
+    publication: Option<&PeerRecord>,
+    target: NodeId,
+    budget: Duration,
+    connector: &dyn RpcConnector,
+) -> io::Result<()> {
+    let network = service.snapshot()?.network;
+    contact.validate(network)?;
+    if budget.is_zero() || budget > RPC_TIMEOUT {
+        return Err(invalid(
+            "maintenance RPC budget must be within the DHT RPC limit",
+        ));
+    }
+    let request = if let Some(record) = publication {
+        record.verify(network, service.now()?)?;
+        Message::Store(record.clone())
+    } else {
+        Message::Find(target)
+    };
+    let attempt = query_with_connector(connector, contact, request, budget).and_then(|reply| {
+        if let Message::Peers(records) = reply {
+            service.accept_many(records, service.now()?)?;
+        }
+        service.observed(contact, service.now()?)
+    });
+    if attempt.is_err() {
+        service.failed(contact)?;
+    }
+    attempt
 }
 #[derive(Debug)]
 pub struct Lookup {
@@ -109,7 +145,7 @@ fn lookup_after(
         timeouts: 0,
     };
     let deadline = Instant::now() + LOOKUP_TIMEOUT;
-    let mut candidates = service.candidates(now()?)?;
+    let mut candidates = service.candidates(service.now()?)?;
     candidates.extend_from_slice(seeds);
     let mut visited = HashSet::new();
     loop {
@@ -134,11 +170,11 @@ fn lookup_after(
                 return Err(invalid("expected DHT records"));
             };
             returned_target = records.iter().any(|r| r.id() == target);
-            if let Err(error) = service.accept_many(records, now()?) {
+            if let Err(error) = service.accept_many(records, service.now()?) {
                 result.invalid_records += 1;
                 return Err(error);
             }
-            service.observed(contact, now()?)
+            service.observed(contact, service.now()?)
         });
         if let Err(error) = &attempt {
             result.failures += 1;
@@ -153,18 +189,18 @@ fn lookup_after(
         let state = service.snapshot()?;
         if attempt.is_ok() && returned_target {
             result.record = state
-                .get(target, now()?)
+                .get(target, service.now()?)
                 .filter(|r| after_sequence.is_none_or(|sequence| r.sequence() > sequence));
         }
         if result.record.is_some() {
             break;
         }
-        candidates.extend(service.candidates(now()?)?);
+        candidates.extend(service.candidates(service.now()?)?);
     }
     if result.record.is_none() {
         result.record = service
             .snapshot()?
-            .get(target, now()?)
+            .get(target, service.now()?)
             .filter(|r| after_sequence.is_none_or(|sequence| r.sequence() > sequence));
         if Instant::now() >= deadline && result.timeouts == 0 {
             result.timeouts += 1;
@@ -184,7 +220,7 @@ pub fn publish_with_connector(
     connector: &dyn RpcConnector,
 ) -> io::Result<usize> {
     let network = service.snapshot()?.network;
-    record.verify(network, now()?)?;
+    record.verify(network, service.now()?)?;
     let deadline = Instant::now() + LOOKUP_TIMEOUT;
     let mut successes = 0;
     for seed in seeds.iter().take(crate::MAX_REPLY_RECORDS) {
@@ -200,7 +236,7 @@ pub fn publish_with_connector(
         )
         .is_ok()
         {
-            service.observed(*seed, now()?)?;
+            service.observed(*seed, service.now()?)?;
             successes += 1;
             if Instant::now() < deadline {
                 if let Ok(Message::Peers(records)) = query_with_connector(
@@ -211,7 +247,7 @@ pub fn publish_with_connector(
                 ) {
                     // Failure to learn neighbors does not undo an acknowledged
                     // publication. All learned records still pass full checks.
-                    let _ = service.accept_many(records, now()?);
+                    let _ = service.accept_many(records, service.now()?);
                 }
             }
         } else {
