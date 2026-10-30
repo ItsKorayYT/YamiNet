@@ -45,6 +45,7 @@ pub enum Action {
     Find,
     FindNext(bool),
     CloseFind,
+    Follow(String),
     Library,
     SaveBookmark,
     OpenBookmark(usize),
@@ -1025,7 +1026,13 @@ fn panel_button(
     } else {
         HOVER_BG
     };
-    c.round(rect, 5.0, fill, fill, None);
+    c.round(
+        rect,
+        5.0,
+        fill,
+        fill,
+        (enabled && ui.focus == Some(&action)).then_some(VERIFIED),
+    );
     c.text(
         label,
         rect.x + 7.0,
@@ -1392,41 +1399,6 @@ pub fn library_panel(
     );
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    #[test]
-    fn sidebar_layout_hit_areas_are_within_bounds() {
-        for (width, height, scale) in [(1440, 900, 1.0), (1920, 1080, 1.0), (2880, 1800, 2.0)] {
-            let mut pix = Pixmap::new(width, height).unwrap();
-            let mut text = TextEngine::new();
-            let browser = Browser::new();
-            let ui = ChromeState {
-                width: width as f32 / scale,
-                height: height as f32 / scale,
-                mouse: (-1.0, -1.0),
-                editing: false,
-                value: "",
-                selection: false,
-                selection_range: None,
-                caret: 0,
-                focus: None,
-            };
-            let mut c = Canvas::new(&mut pix, &mut text, scale);
-            let mut scene = paint(&mut c, &browser, &ui);
-            home(&mut c, &mut scene, &ui);
-            for hit in &scene.hits {
-                assert!(
-                    hit.rect.x >= 0.0
-                        && hit.rect.y >= 0.0
-                        && hit.rect.x + hit.rect.w <= ui.width
-                        && hit.rect.y + hit.rect.h <= ui.height
-                );
-            }
-        }
-    }
-}
-
 pub fn find_bar(
     c: &mut Canvas<'_>,
     scene: &mut Scene,
@@ -1496,4 +1468,39 @@ pub fn find_bar(
         MUTED,
         false,
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn sidebar_layout_hit_areas_are_within_bounds() {
+        for (width, height, scale) in [(1440, 900, 1.0), (1920, 1080, 1.0), (2880, 1800, 2.0)] {
+            let mut pix = Pixmap::new(width, height).unwrap();
+            let mut text = TextEngine::new();
+            let browser = Browser::new();
+            let ui = ChromeState {
+                width: width as f32 / scale,
+                height: height as f32 / scale,
+                mouse: (-1.0, -1.0),
+                editing: false,
+                value: "",
+                selection: false,
+                selection_range: None,
+                caret: 0,
+                focus: None,
+            };
+            let mut c = Canvas::new(&mut pix, &mut text, scale);
+            let mut scene = paint(&mut c, &browser, &ui);
+            home(&mut c, &mut scene, &ui);
+            for hit in &scene.hits {
+                assert!(
+                    hit.rect.x >= 0.0
+                        && hit.rect.y >= 0.0
+                        && hit.rect.x + hit.rect.w <= ui.width
+                        && hit.rect.y + hit.rect.h <= ui.height
+                );
+            }
+        }
+    }
 }

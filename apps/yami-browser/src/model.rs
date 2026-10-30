@@ -622,6 +622,7 @@ impl Loader {
             relay_enabled: Arc::new(AtomicBool::new(false)),
             bootstrap: Arc::new(native::add_bootstrap_from_environment),
         };
+        let image_cache = Arc::new(crate::image_cache::DecodeCache::default());
         for index in 0..WORKERS {
             let shared = Arc::clone(&shared);
             let sender = sender.clone();
@@ -629,6 +630,7 @@ impl Loader {
             let wake = Arc::clone(&wake);
             let fetcher = Arc::clone(&fetcher);
             let local_only = loader.local_only.clone();
+            let image_cache = image_cache.clone();
             thread::Builder::new()
                 .name(format!("yami-loader-{index}"))
                 .spawn(move || loop {
@@ -670,7 +672,7 @@ impl Loader {
                     }
                     wake();
                     if let Some(page) = resources_page {
-                        crate::resources::load(&page, &job.cancel, job.deadline, |key, state| {
+                        crate::resources::load(&page, &image_cache, &job.cancel, job.deadline, |key, state| {
                             if job.cancel.load(Ordering::SeqCst) {
                                 return false;
                             }

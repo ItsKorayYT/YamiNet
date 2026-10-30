@@ -12,6 +12,10 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         println!("Valid browser configuration; network {:?}; relay fallback {}; {} bootstrap(s); state {}",config.network,config.relay_fallback,config.bootstrap.len(),config.state.display());
         return Ok(());
     }
+    if args == ["--version"] {
+        println!("Yami Browser {}", env!("CARGO_PKG_VERSION"));
+        return Ok(());
+    }
     let mut resolver = None;
     if let Some(index) = args.iter().position(|arg| arg == "--config") {
         args.remove(index);
@@ -53,8 +57,31 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             _ => index += 1,
         }
     }
+    if args.first().is_some_and(|s| s == "--probe") {
+        let (url, asset) =
+            match args.as_slice() {
+                [_, url] => (url.as_str(), None),
+                [_, url, flag, key] if flag == "--asset" => (url.as_str(), Some(key.as_str())),
+                _ => return Err(
+                    "Usage: yami-browser [--config FILE] --probe YAMI-OR-YNPS-URL [--asset KEY]"
+                        .into(),
+                ),
+            };
+        let resolver = match resolver {
+            Some(resolver) => resolver,
+            None => std::sync::Arc::new(yami_browser::native::Resolver::from_environment()?),
+        };
+        match yami_browser::validation::probe(url, asset, &resolver) {
+            Ok(report) => println!("{report}"),
+            Err(error) => {
+                println!("YAMINET-VALIDATION 1\nresult FAIL\nreason {}\nindependent_networks NOT VERIFIED", error.escape_debug());
+                return Err(error.into());
+            }
+        }
+        return Ok(());
+    }
     if args.first().is_some_and(|s| s == "--help") {
-        println!("Yami Browser\n  yami-browser                         Native desktop window\n  yami-browser --desktop [YNP URL]     Desktop with initial page\n  yami-browser --terminal [file]       Terminal viewer\n  yami-browser [file | YNP URL] [--style file] [--ppm image.ppm]\nConfiguration: --config FILE | check-config FILE | --network-status\nSettings: --enable-relays | --disable-relays; --bootstrap node-ID@IPv4:port\nSidebar: relay toggle and Add bootstrap peer (paste full ID@IPv4:port, Enter).\nYNP URLs: yami://node-id/key (DHT lookup, pinned TLS 1.3)\n          ynps://node-id@IP:port/key (TLS 1.3, loopback, LAN or public IPv4)\n          ynp://loopback-IP:port/key (plaintext, this computer only)\n{}\n{}", ynp::WARNING, ynp_tls::WARNING);
+        println!("Yami Browser\n  --version | --probe URL [--asset KEY]  Explicit authenticated diagnostics\n  yami-browser                         Native desktop window\n  yami-browser --desktop [YNP URL]     Desktop with initial page\n  yami-browser --terminal [file]       Terminal viewer\n  yami-browser [file | YNP URL] [--style file] [--ppm image.ppm]\nConfiguration: --config FILE | check-config FILE | --network-status\nSettings: --enable-relays | --disable-relays; --bootstrap node-ID@IPv4:port\nSidebar: relay toggle and Add bootstrap peer (paste full ID@IPv4:port, Enter).\nYNP URLs: yami://node-id/key (DHT lookup, pinned TLS 1.3)\n          ynps://node-id@IP:port/key (TLS 1.3, loopback, LAN or public IPv4)\n          ynp://loopback-IP:port/key (plaintext, this computer only)\n{}\n{}", ynp::WARNING, ynp_tls::WARNING);
         Ok(())
     } else if args.is_empty() || args[0] == "--desktop" {
         if !args.is_empty() {

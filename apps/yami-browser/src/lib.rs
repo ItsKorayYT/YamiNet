@@ -9,3 +9,7 @@ pub mod resources;
 pub mod library;
 
 pub mod find;
+
+pub mod validation;
+
+pub mod image_cache;

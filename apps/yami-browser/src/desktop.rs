@@ -34,7 +34,7 @@ pub fn run(
     let wake: Arc<dyn Fn() + Send + Sync> = Arc::new(move || {
         let _ = proxy.send_event(());
     });
-    let explicit_network = resolver.is_some() || relay_enabled.is_some();
+    let explicit_network = resolver.is_some() || relay_enabled.is_some() || std::env::var_os("YAMINET_BROWSER_DHT_NETWORK").is_some() || std::env::var_os("YAMINET_BROWSER_RELAYS").is_some();
     let loader = if let Some(resolver) = resolver {
         Loader::with_resolver(Arc::clone(&wake), resolver)?
     } else {
@@ -59,6 +59,7 @@ pub fn run(
     }
     if explicit_network {
         app.settings.local_only = false;
+        app.settings.relays = app.loader.relay_enabled();
     }
     if let Some(enabled) = relay_enabled {
         app.settings.relays = enabled;
@@ -308,6 +309,10 @@ impl Desktop {
     }
     fn act(&mut self, action: Action) {
         match action {
+            Action::Follow(target) => {
+                let _ = self.browser.follow(&target, &self.loader);
+                self.clear_focus();
+            }
             Action::Find => {
                 self.clear_focus();
                 self.find_open = true;
@@ -793,6 +798,24 @@ impl Desktop {
                             },
                             self.pressed_link.is_some(),
                         );
+                        for (target, rect) in doc.links() {
+                            let top =
+                                (viewport.y + rect.y / scale - tab.scroll as f32).max(viewport.y);
+                            let bottom = (viewport.y + (rect.y + rect.height) / scale
+                                - tab.scroll as f32)
+                                .min(viewport.y + viewport.h);
+                            if bottom > top {
+                                scene.hits.push(chrome::Hit {
+                                    rect: Rect::new(
+                                        viewport.x + rect.x / scale,
+                                        top,
+                                        rect.width / scale,
+                                        bottom - top,
+                                    ),
+                                    action: Action::Follow(target.into()),
+                                });
+                            }
+                        }
                         if doc.height > viewport.h * scale {
                             let bar = Rect::new(
                                 viewport.x + viewport.w - 12.0,
@@ -872,6 +895,23 @@ impl Desktop {
                 }
             }
             chrome::find_bar(&mut c, &mut scene, &ui, &self.find, self.find_edit);
+        }
+        if let Some(hit) = ui
+            .focus
+            .and_then(|action| scene.hits.iter().find(|hit| &hit.action == action))
+        {
+            let r = hit.rect;
+            c.line(
+                &[
+                    (r.x, r.y),
+                    (r.x + r.w, r.y),
+                    (r.x + r.w, r.y + r.h),
+                    (r.x, r.y + r.h),
+                    (r.x, r.y),
+                ],
+                [255, 255, 255, 255],
+                2.0,
+            );
         }
         self.scene = scene;
     }
@@ -1287,7 +1327,13 @@ mod tests {
         app.editor.replace("café");
         frame(&mut app);
         assert_eq!(app.find.matches.len(), 2);
-        assert!(app.browser.active().target_scroll > 500.0, "target={} limit={} rect={:?}", app.browser.active().target_scroll, app.scroll_limit(), app.find.selected());
+        assert!(
+            app.browser.active().target_scroll > 500.0,
+            "target={} limit={} rect={:?}",
+            app.browser.active().target_scroll,
+            app.scroll_limit(),
+            app.find.selected()
+        );
         app.modifiers = ModifiersState::empty();
         app.keyboard(&Key::Named(NamedKey::Enter), None, None);
         assert_eq!(app.find.current, 1);

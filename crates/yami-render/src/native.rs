@@ -551,6 +551,12 @@ impl NativeDocument {
             })
             .and_then(|block| block.target.as_deref())
     }
+    pub fn links(&self) -> impl Iterator<Item = (&str, TextRect)> {
+        self.blocks
+            .iter()
+            .filter_map(|block| block.target.as_deref().map(|target| (target, &block.links)))
+            .flat_map(|(target, rects)| rects.iter().map(move |rect| (target, *rect)))
+    }
 }
 
 fn validate_ast_string(text: &str) -> Result<(), RenderError> {

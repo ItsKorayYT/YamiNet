@@ -17,7 +17,7 @@ pub struct Origin {
     pub public_relay: bool,
 }
 impl Origin {
-    fn connect(&self, budget: Duration) -> std::io::Result<Box<dyn ynp::Connection>> {
+    pub(crate) fn connect(&self, budget: Duration) -> std::io::Result<Box<dyn ynp::Connection>> {
         if let Some(relay) = self.relay {
             yami_relay::Route {
                 relay,
@@ -66,6 +66,7 @@ impl ynp::Connection for Metered<'_> {
 }
 pub(crate) fn load(
     page: &Page,
+    cache: &crate::image_cache::DecodeCache,
     cancel: &AtomicBool,
     deadline: Instant,
     mut emit: impl FnMut(String, ImageState) -> bool,
@@ -148,10 +149,16 @@ pub(crate) fn load(
             if cancel.load(Ordering::SeqCst) {
                 return Err("Image load cancelled".into());
             }
-            let image = assets::decode_png(&data.bytes, MAX_PAGE_DECODED - decoded)
+            let image = cache
+                .decode(
+                    origin.destination,
+                    key,
+                    &data.bytes,
+                    MAX_PAGE_DECODED - decoded,
+                )
                 .map_err(|_| "Invalid, unsupported or oversized PNG")?;
             decoded += image.pixels.len();
-            Ok(Arc::new(image))
+            Ok(image)
         })();
         if cancel.load(Ordering::SeqCst) {
             return;
