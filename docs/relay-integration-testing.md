@@ -12,6 +12,7 @@ cargo test -p yami-relay-cli --test processes --locked
 cargo test -p yami-relay --locked
 cargo test -p yami-dht --locked
 cargo test -p yami-node --test maintenance --locked
+cargo test -p yami-node --test relay_host_cli --locked
 ```
 
 `four_process_outbound_host_dht_browser_render_navigation_and_reconnect`
@@ -42,6 +43,7 @@ process guards kill/reap children on failure.
 | Relay outer handshake timeout | `relay_outer_handshake_obeys_the_whole_attempt_deadline` |
 | Forged/expired routed records; endpoint policy; every-byte tampering/truncation; rollback from v2 to v1 | DHT `relay_v2_binds_owner_relay_endpoint_and_preserves_v1` |
 | Maximal v2 records in unchanged frame/snapshot bounds | DHT `maximal_relay_records_fit_existing_frame_and_snapshot_budgets` |
+| Actual host-relay CLI startup, fetch, SIGTERM and persisted restart sequences | Node `host_relay_cli_publishes_fetches_stops_and_restarts_with_new_sequence` (Unix) |
 | Persistent sequences, relay-only withdrawal/renewal/restart | Maintenance `relay_only_publication_withdrawal_renewal_and_restart_keep_high_water` and four-process test |
 | Temporary relay outage, reconnect/DHT update, disconnected host | Four-process test and existing three-process relay test |
 | Registration replay, hijacking, bad expiry, channel substitution | Relay `fresh_challenges_reject_replay_hijacking_expiration_and_channel_substitution` |
@@ -62,3 +64,10 @@ cargo build --workspace --locked
 Ignored physical-network, multicast-interface and screenshot tests remain opt-in.
 A passing default suite does not establish their success, Windows runtime
 compatibility, resistance to distributed DoS, or production security.
+
+
+Validation on 2026-10-30, Linux with pinned Rust 1.90.0: all four acceptance
+commands passed. Workspace tests reported **174 passed, 0 failed, 8 existing
+opt-in tests ignored**. The actual host-relay CLI smoke test also fetched a
+page, stopped cleanly on SIGTERM and restarted with a newer persisted sequence.
+Physical cross-network/VPS and Windows runtime trials were not run.

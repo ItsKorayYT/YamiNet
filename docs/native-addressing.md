@@ -205,7 +205,8 @@ the default public policy refuses relay/direct probes to private addresses.
 
 The existing two loader workers resolve and validate DHT records, attempt up to
 four direct endpoints first, then up to two signed relay routes if enabled.
-Each attempt has a three-second budget. Lookup, cached attempts and refreshed
+Each direct endpoint has a three-second budget; each relay route permits up to
+two attempts sharing a three-second budget, with a 400 ms renewal-gap delay. Lookup, cached attempts and refreshed
 record attempts share a thirty-second total deadline. There is no plaintext
 fallback. The canonical yami:// identity, navigation, tabs, history and reload
 are unchanged. Numeric links naming a relay are not treated as host links.

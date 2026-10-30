@@ -245,3 +245,15 @@ size, shortcut hitboxes, Home control and minimum logical resize were verified.
 This does not replace testing on physical high-DPI hardware. Windows runtime
 behavior has not been tested; the Windows commands above remain launch
 instructions rather than Windows validation evidence.
+
+
+### Relay fallback settings
+
+The existing sidebar includes **Relay fallback: Off/On** and **Add bootstrap
+peer**. Relay fallback defaults off; its toggle affects subsequent attempts.
+To add an ordinary peer, choose Add bootstrap peer, paste its complete
+`yn1-...@IPv4:port` and press Enter. This saves an unverified pin without opening
+content. `--bootstrap ID@IPv4:port` and `--enable-relays` provide startup settings.
+A verified relayed page shows **Verified node · TLS 1.3 · Relayed** and both full
+IDs separately. The destination is still pinned to the original yami:// address.
+See [Windows outbound-only hosting and public testing](public-relay.md).

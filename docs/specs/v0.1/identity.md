@@ -229,3 +229,13 @@ same Ed25519 key and verifier, with a purpose distinct from document/site,
 DHT records and TLS messages. Freshness and one-session acceptance belong to
 the relay protocol. No private key is transmitted. See [reverse relay v1](relay.md)
 for the exact exporter label, proof lifecycle and replay checks.
+
+
+## Relay-aware peer-record signature domain
+
+`yaminet.peer-record.v2\0` is distinct from v1 peer records, relay registration,
+documents, manifests and TLS messages. Its sealed canonical metadata binds the
+owner/destination key to at most four sorted direct endpoints and two sorted
+relay key/IPv4-endpoint pairs, expiry and sequence. Empty v2 records withdraw
+locations while preserving the owner sequence. V1 signatures retain their
+original bytes and domain. See [dht.md](dht.md) for encoding and validation.

@@ -1,4 +1,4 @@
-# Yami DHT v1: signed peer lookup MVP
+# Yami DHT v1: signed peer lookup and v1/v2 records
 
 **Experimental, not audited or production-safe. No anonymity.** This is a
 small Kademlia-inspired signed-value lookup system, not a full Kademlia

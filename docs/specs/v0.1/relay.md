@@ -1,11 +1,12 @@
-# Reverse relay transport v1 (loopback MVP)
+# Reverse relay transport v1 (explicit local/public modes)
 
 **Experimental; no anonymity or production-security claim.** `yami-relay` pairs
 an outbound registered host connection with a client requesting that host's
 existing full Ed25519 identity. The relay has no API to dial an arbitrary IP,
 hostname or port. It forwards bytes over connections the participants opened.
-The CLI accepts only numeric loopback relay endpoints. Public deployment, DHT
-routes, browser selection, discovery and NAT hole punching are out of scope.
+Loopback remains the default. Public listeners require explicit local/advertised
+IPv4 endpoints and identity. DHT record v2 and native browser integration use
+this unchanged relay wire protocol; NAT hole punching remains out of scope.
 
 ## Two distinct TLS sessions
 
@@ -160,9 +161,9 @@ detected by the relay's read polling and closes the paired client promptly.
 
 This MVP deliberately supports one client at a time per host. There is a short
 re-registration gap after a request. Clients can see busy/unknown errors and
-must retry explicitly; no availability or capacity guarantee is made. The host
-reconnects automatically to its explicitly configured relay. It neither finds
-another provider nor changes trust pins after failure.
+may retry within bounded browser budgets; no availability or capacity guarantee
+is made. The host reconnects automatically to up to two explicitly configured
+relays. It never discovers providers or changes trust pins after failure.
 
 The relay terminates the **outer** TLS sessions and sees IDs, source addresses,
 timing, byte counts and the inner TLS handshake/ciphertext. It does not receive
@@ -174,12 +175,14 @@ hide metadata or provide anonymity. Authenticated content can still be malicious
 
 Unauthenticated clients and malicious registered hosts can occupy bounded slots
 or force cryptographic/connection work; this is not public-internet abuse
-protection. There is no client authentication, fairness guarantee, revocation,
-multi-relay failover or production security review. Protect identities and local
-configuration. Public relay deployment, DHT relay records/maintenance, browser
-relay selection, NAT hole punching, Tor and I2P are separate future work.
+protection. There is no client authentication, fairness guarantee, revocation or independent
+production security review. Protect identities and local configuration.
+Destination-signed DHT routes and maintenance are specified in [dht.md](dht.md);
+browser selection always retains exact destination pinning. NAT hole punching,
+Tor and I2P are not implemented.
 
-See [local operation and three-process tests](../../relay-testing.md).
+See [local operation](../../relay-testing.md), [four-process verification](../../relay-integration-testing.md)
+and [public deployment](../../public-relay.md).
 
 ## Explicit public mode
 

@@ -2,7 +2,10 @@
 
 This milestone adds the `yami-relay` library and the `yami-relay-cli` package,
 which builds an executable named **`yami-relay`**. It is a working byte tunnel
-with independent end-to-end node authentication, not a DHT or browser feature.
+with independent end-to-end node authentication. This page preserves the
+isolated transport demonstration. For the integrated host/DHT/browser path use
+[the four-process tests](relay-integration-testing.md) and
+[public VPS/Windows instructions](public-relay.md).
 Read [the protocol, bounds and limitations](specs/v0.1/relay.md) first.
 
 ## Three terminals (Linux/macOS)
@@ -18,7 +21,7 @@ target/debug/yami-node identity new --dir target/relay-demo/host-identity
 Run identity creation once. To repeat, retain those directories and read the
 public `node.id` values. Never share or commit `node.key`. Example identities
 under ignored `target/` are disposable; keep persistent production identities
-outside source checkouts, though public relay deployment is not supported here.
+outside source checkouts. Public operation requires its separate explicit mode.
 
 In terminal 1, start R:
 
@@ -105,9 +108,9 @@ CLI option lets registration and serving silently use different identities.
 Relay tests use real pinned TLS sockets to exercise proof replay on a second
 channel, hijacking with another key, signature mutation, controlled expiry
 checks, conflicting registration rejection, slot release on disconnect, expired
-registration rejection, host/tunnel/per-IP capacity, a live 2 MiB opaque-forwarding quota test, malformed
-messages and
-refusal of public endpoints. Signature freshness is tested with supplied time;
+registration rejection, host/tunnel/per-IP capacity, live opaque-forwarding
+bandwidth/byte quota enforcement, malformed messages and refusal of implicit
+public exposure. Signature freshness is tested with supplied time;
 production control and tunnel deadlines use real monotonic time. Existing
 direct TLS, DHT, maintenance and native-browser tests remain in the workspace.
 
@@ -115,11 +118,11 @@ These tests simulate the **connection direction** needed for NAT: the host
 only dials out, and the client does not dial the host. They do not use a real
 NAT, port forwarding, public VPS, separate networks or public relay deployment.
 Success on one machine is not internet reachability validation, anonymity,
-abuse resistance or a security review. DHT relay advertisements, `yami://`
-relay lookup, browser indicators/selection, discovery and multi-relay operation
-remain outside this milestone.
+abuse resistance or a security review. The newer [integration milestone](relay-integration-testing.md) also tests
+DHT relay advertisements, native yami:// browsing/rendering and outage recovery;
+public physical-network validation remains separate.
 
-Validation on 2026-10-30 with Rust 1.90.0 on Linux passed formatting, all-target
+Historical validation of the isolated relay baseline on 2026-10-30 with Rust 1.90.0 on Linux passed formatting, all-target
 Clippy with warnings denied, the locked workspace build and workspace tests:
 **165 passed, 8 existing opt-in tests ignored**. This includes the three-process
 relay test, hostile registration/identity cases, byte quota, and existing direct

@@ -84,7 +84,40 @@ and [internet testing](../../internet-testing.md).
 iterative queries over existing pinned TLS, and owner-signed expiring endpoint
 records with persistent sequence history. Bootstrap pins reuse manual peers;
 they are ordinary contacts, not authorities. The node dispatches versioned DHT
-magic after TLS and replays YNP magic into its original codec. The browser,
-YLang and YSL are unchanged. `RpcConnector` permits future transport adapters
+magic after TLS and replays YNP magic into its original codec. The YLang and YSL grammars and original YNP frames are unchanged. The browser
+uses its native resolver and existing off-thread loader. `RpcConnector` permits future transport adapters
 without implementing anonymous routing. See [dht.md](dht.md) and the
 [three-node simulation](../../dht-testing.md).
+
+
+## Direct and relay-aware identity resolution
+
+```mermaid
+sequenceDiagram
+    participant C as Native browser
+    participant B as Ordinary DHT peer
+    participant R as Explicit relay
+    participant A as Host behind NAT
+    A->>R: Outbound pinned TLS + signed channel-bound registration
+    A->>B: Destination-signed v2 direct/relay locations (pinned TLS RPC)
+    C->>B: FIND exact full node ID
+    B-->>C: Signed expiring record
+    Note over C: Validate owner, signature, policy, expiry, sequence
+    C->>A: Eligible direct endpoints first
+    Note over C,A: If direct fails and relay use is enabled
+    C->>R: Pinned relay TLS + CONNECT destination ID
+    R->>A: Pair existing outbound registration
+    C->>A: Independent destination-pinned TLS 1.3 through tunnel
+    C->>A: Original YNP document request
+    A-->>C: YLang + YSL inside end-to-end TLS
+    Note over C: Existing parser and native renderer; canonical yami:// address
+```
+
+Relay routes are signed by the destination, never inferred from the relay's
+availability. Public DHT policy prevents private-address probing. A host can
+publish only relay locations with no incoming listener. One existing DHT
+maintenance worker consumes at most two live relay slots; no separate DHT
+scheduler, mandatory central directory or router configuration is introduced.
+Transport workers and browser loader attempts remain bounded and cancellable.
+See [relay.md](relay.md), [dht.md](dht.md) and
+[deployment/testing](../../public-relay.md).

@@ -28,16 +28,6 @@ cargo run -p yami-node -- demo
 cargo run -p yami-node -- serve-dir 127.0.0.1:7301 sites/alice
 ```
 
-In the prepared cloud environment, first activate the retained toolchain in
-each shell (ordinary local Rust installations do not need this):
-
-```sh
-export CARGO_HOME=/workspace/.yami-tools/cargo
-export RUSTUP_HOME=/workspace/.yami-tools/rustup
-export PATH="$CARGO_HOME/bin:$PATH"
-cd /workspace/YamiNet
-```
-
 The default command opens the native desktop browser. Its new-tab page has
 local document shortcuts and sample-node bookmarks; the address bar accepts
 `yami://` identity addresses, `ynps://` addresses and localhost `ynp://` URLs.
@@ -271,22 +261,41 @@ See [operations, bounds and controlled-clock tests](docs/dht-maintenance.md).
 This is experimental loopback-tested maintenance, not a guarantee of internet
 availability, production security or anonymity.
 
-### Reverse relay transport (local MVP)
+### Relay-aware native browsing
 
-The `yami-relay` crate and `yami-relay` executable (`yami-relay-cli` package)
-provide an outbound host registration and opaque tunnel. Hosts prove a fresh,
-channel-bound challenge using their existing Ed25519 identity. Clients pin the
-relay, then independently authenticate the destination over end-to-end TLS 1.3
-inside the tunnel before fetching YNP. The host opens no incoming listener.
+A host behind NAT can publish `yami://<full-node-ID>/home` without an inbound
+listener or home-router port forwarding. It registers outbound with one or two
+explicitly trusted relays and publishes destination-signed routes into the
+existing DHT. The browser tries direct endpoints first, then eligible relays
+when relay fallback is enabled. It pins the relay's key, then independently
+pins the exact destination key over end-to-end TLS 1.3 inside the tunnel.
+The relay cannot decrypt YNP document traffic.
 
-Use `yami-relay serve`, `yami-relay host` and `yami-relay fetch` with explicit
-loopback endpoints and existing identity directories. See the
-[three-process demonstration](docs/relay-testing.md) and
-[versioned protocol/security bounds](docs/specs/v0.1/relay.md).
-This milestone adds no DHT relay routes, browser relay selection, public relay
-deployment, automatic discovery or NAT hole punching. It makes no anonymity or
-production-security claim. Native browser addressing continues to use direct
-DHT endpoints until the separate relay-integration milestone.
+Build once, then use the executables (`.exe` on Windows):
+
+```sh
+yami-relay serve LOCAL_IPV4:17550 --identity RELAY_KEYS --public --advertise PUBLIC_IPV4:17550
+yami-node dht bootstrap DHT_PEER_ID PUBLIC_IPV4:17444 --dir HOST_PEERS
+yami-node host-relay SITE --identity HOST_KEYS --relay RELAY_ID@PUBLIC_IPV4:17550 --dht-dir HOST_PEERS
+yami-browser --bootstrap DHT_PEER_ID@PUBLIC_IPV4:17444 --enable-relays --desktop yami://HOST_ID/home
+```
+
+Replace the uppercase values; create persistent identities first. Public relay
+listening is never the default. Bootstrap peers are ordinary independently
+operated nodes, not a mandatory central directory. **Relay fallback** and
+**Add bootstrap peer** are also in the existing browser sidebar. Verified
+relayed pages show the destination and relay IDs separately. Tabs, history,
+links, reload, scrolling, native rendering and direct `ynps://` remain available.
+
+Follow the complete [VPS, Windows hosting and cross-network testing guide](docs/public-relay.md)
+for DHT peer startup, firewall rules, identity verification and diagnostics.
+The [four-process integration test](docs/relay-integration-testing.md) demonstrates
+outbound registration, signed DHT discovery, browser authentication/rendering,
+navigation and outage recovery on loopback. **Physical cross-network and Windows
+runtime validation remain unverified.** This is experimental, not independently
+security-reviewed, production-secure or anonymous. Application quotas do not
+prevent Internet-scale DoS. The [relay protocol](docs/specs/v0.1/relay.md) specifies
+bounds. Original isolated [relay commands/tests](docs/relay-testing.md) still work.
 
 ## Workspace
 
@@ -301,6 +310,7 @@ DHT endpoints until the separate relay-integration milestone.
 | `yami-render` | Original terminal/bitmap renderer plus shaped native document layout and antialiased text |
 | `yami-browser` | Native desktop tabs/navigation and preserved terminal/PPM document tools |
 | `yami-identity` | Persistent Ed25519 node identities, node IDs, domain-separated metadata signatures |
+| `yami-relay` / `yami-relay-cli` | Explicit local/public reverse relays with signed host registration, opaque bounded tunnels and independently pinned end-to-end TLS |
 | `yami-node` | Directory-backed multi-page sites, in-memory document server, fetch client, identity CLI and two-node demos |
 
 Versioned normative drafts: [YLang](docs/specs/v0.1/ylang.md),
@@ -362,8 +372,9 @@ an error rather than allocating without bounds.
 Multicast discovery is limited to explicitly selected private IPv4 LAN interfaces.
 Distributed lookup is an opt-in experimental MVP with finite routing/cache
 budgets; it is not a complete or production DHT. There is no anonymous routing, production-safe networking,
-NAT traversal, protocol negotiation, multiplexing, compression or cache.
-Public IPv4 connectivity is experimental and requires a known endpoint/ID;
+UDP hole punching, ICE/STUN, protocol negotiation, multiplexing, compression
+or document cache. Reverse relays provide the explicitly configured NAT path.
+Public IPv4 connectivity is experimental and requires identity/bootstrap pins;
 internet deployment has not been security-reviewed or validated across providers.
 TLS has no revocation or client authentication: anyone who can reach a node
 can read its pages. The plaintext transport has no
@@ -374,6 +385,7 @@ See the versioned specs before extending them.
 
 The [original project vision and roadmap](docs/vision.md) is preserved from the
 initial GitHub README. The workspace, document/style parser, native renderer
-and loopback YNP demo implement its first three milestones. The security and
-routing milestones remain future work. This MVP uses `.ylang` sample files;
+and loopback YNP demo implement its first three milestones. Pinned TLS, signed
+DHT lookup and explicit reverse relays now extend the networking prototype;
+production security and robust global availability remain future work. This MVP uses `.ylang` sample files;
 the original vision used the provisional extension `.yl`.

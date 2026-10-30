@@ -173,28 +173,65 @@ script runtime, remote font fetch, account or cloud service is introduced.
 Bundled homepage bookmarks are explicit localhost targets, and unavailable nodes
 produce an error rather than falling back to HTTP or a public service.
 
-## Reverse relay MVP
+## Public relay transport and signed routes
 
-The separate loopback-only reverse relay authenticates the relay using its
-pinned Ed25519 TLS identity and the host using a fresh signed challenge bound
-to both IDs, expiry and a TLS exporter. Proofs cannot be replayed on a different
-session, and a conflicting registration cannot replace a live one. A relay
-registration is not a substitute for destination authentication: the client
-must establish a second pinned TLS 1.3 session to the host through the tunnel
-before sending YNP. The relay terminates only the outer sessions and forwards
-inner TLS records without the host private key or plaintext YNP contents.
+Public relay operation requires an explicit listening address, existing
+persistent identity, `--public` and a separately chosen public advertised
+endpoint. Loopback remains the default. Wildcard and special-use endpoints are
+refused. Nothing configures routers, provider NAT, firewalls or a central server.
 
-A malicious relay can still deny service, drop traffic, correlate identities
-and endpoints, and observe timing/volume. End-to-end TLS rejects substituted
-node identities; it does not confer anonymity, content safety or availability.
-Connections, registrations, tasks, per-IP admissions, per-host tunnels,
-forwarding bytes, buffers and lifetimes are bounded. A registered host or
-unauthenticated client can still occupy bounded capacity. This is not public
-relay abuse protection or an independent security review.
+The relay authenticates through its pinned Ed25519 TLS identity. Hosts prove a
+fresh signed challenge bound to both IDs, expiry and a TLS exporter. Proofs
+cannot be replayed on another session, and conflicting registrations cannot
+replace a live one. A registration is not destination authentication: the
+browser establishes an independent pinned TLS 1.3 session to the exact node ID
+inside the tunnel before requesting YNP. There is no plaintext downgrade or
+relay-issued substitute identity. The relay cannot decrypt document traffic.
 
-Direct TLS behavior and DHT wire records are preserved. The relay has no
-arbitrary endpoint-dialing request, public-listen mode, DHT advertisements,
-browser integration, discovery, multi-relay failover, NAT hole punching, Tor or
-I2P. Only the local connection direction is simulated; no public NAT/provider
-or internet validation is claimed. Read the [relay specification](docs/specs/v0.1/relay.md)
-and [test/operation guide](docs/relay-testing.md) for authentication and limits.
+V2 DHT signatures bind the destination key, relay key and endpoint, plus expiry
+and sequence. Direct-only v1 records still validate; older software safely
+rejects v2. Both endpoint policies, TTL, atomic validation, persisted rollback
+high-water marks and existing routing/cache bounds apply. Relay-only records
+need no public direct endpoint. An advertised route is not proof of registration,
+reachability or a verified connection. Disconnects remove routes from new
+publications; cached earlier records can remain live for their signed TTL.
+A host restart reserves a newer persisted sequence before publishing. Restoring
+old identity/cache backups, losing sequence history or hostile local storage
+can prevent publication or permit stale views; do not routinely delete state.
+
+The existing DHT maintainer receives live registration state and renews/routes
+with bounded jittered backoff and publication frequency. There are at most two
+explicit host relay slots. Each serves one client at a time and re-registers
+after its lease or request. Browser workers try direct routes first, then at
+most two relay routes with up to two attempts each within a three-second route
+budget and a thirty-second overall resolution/fetch budget. Verified UI status
+comes only from a completed authenticated fetch; destination and relay IDs are
+shown separately. Bootstrap configuration and discovery never open content.
+
+A relay can deny service, correlate identities/endpoints, and observe timing,
+volume and the inner handshake. TLS identity attribution does not make content
+safe, authorize clients or provide anonymity. All reachable pages are public.
+There is no key revocation, fair sharing, distributed DoS defense or Sybil
+resistance. Neither relay availability nor DHT publication guarantees global
+replication or discovery. There is no UDP hole punching, ICE/STUN, automatic
+router configuration, Tor or I2P.
+
+Connections, per-IP starts, registrations, tasks, simultaneous tunnels,
+forwarding bytes/buffers, bandwidth, idle periods and lifetimes are bounded.
+The public TLS listener admits at most 32 active sessions, two per IP, 32
+starts/second globally and eight starts/second per IP before handshake work.
+The relay further limits 32 tracked connections, eight registrations and four
+tunnels. Each tunnel has an 8 KiB forwarding buffer, 2 MiB byte quota, 256 KiB
+per-second-window bandwidth cutoff, five-second idle cutoff and fifteen-second
+lifetime. Over-quota traffic closes; these limits can affect large legal YNP
+pages and multiple users behind one NAT. Registered hosts and unauthenticated
+clients can still occupy bounded capacity, consume cryptographic CPU and
+exhaust OS/network resources. Application limits do not prevent volumetric,
+backlog or distributed attacks. Use OS/provider firewall and DoS protections.
+
+Public mode is **experimental and requires independent security review before
+any production-security claim**. Automated tests exercise loopback processes,
+including a public-mode listener locally; no real public VPS/home-router or
+Windows runtime test has been completed. Read [protocol limits](docs/specs/v0.1/relay.md),
+[test coverage](docs/relay-integration-testing.md) and the
+[actionable deployment procedure](docs/public-relay.md).
