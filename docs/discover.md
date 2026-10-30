@@ -146,6 +146,82 @@ Authoring rules:
 The full format and escaping rules are in the
 [format specification](specs/v0.4/website-directory.md#9-authoring-and-canonical-rendering).
 
+## Persistent sources and cached catalogs
+
+Register local directory files once, then search the merged catalog without
+repeating `--directory`:
+
+```sh
+yami-discover source add community sites/directories/community.ylang
+yami-discover source add garden sites/directories/garden.ylang
+yami-discover source list
+
+# Explicitly load every registered source and write validated snapshots.
+yami-discover catalog rebuild
+
+# Search the last built catalog. Source files are not read here.
+yami-discover catalog search café
+yami-discover catalog list
+
+# Refresh one source only, then remove it and its cached state.
+yami-discover source refresh community
+yami-discover source remove garden
+```
+
+The default state directory is `.yami-discover`; use `--state DIR` on any
+persistent command to choose another directory. Relative source paths are made
+absolute at registration so a catalog remains usable from another working
+directory. The state directory contains:
+
+```text
+sources.conf                       versioned source registry
+snapshots/<sha256>.ylang           validated version-1 directory snapshot
+snapshots/<sha256>.status          versioned provenance/cache status
+```
+
+`source add` validates a local directory with the existing parser before
+writing the registry. Registration does **not** build the catalog and does not
+write a snapshot. `catalog rebuild` is the explicit full refresh;
+`source refresh NAME` is the explicit single-source refresh. `catalog search`,
+`catalog list` and `source list` read only the registry and snapshots. They
+never load a source file and never refresh automatically.
+
+### Fresh, cached and inactive states
+
+Each source has one bounded status:
+
+| State | Meaning |
+| --- | --- |
+| `fresh` | The source was loaded successfully at the last explicit refresh for that source. Search results loaded from its snapshot display `[fresh]`; this is build-time provenance, not current network availability. |
+| `cached` | The source was unavailable at the last explicit refresh, so its last validated snapshot was used. The bounded reason is shown with the results. |
+| `unavailable` | Neither the source nor a usable snapshot was available at the last refresh. No entries are contributed. |
+| `inactive remote` | A future `yami://` subscription. It is deliberately never fetched and never marked fresh. |
+| `not built` | The source is registered but no catalog snapshot has been built yet. |
+
+`catalog rebuild` refreshes all sources in registration order. `source refresh`
+refreshes exactly one source and then reloads the combined view from snapshots;
+other source files are not read. Both paths use the existing `Catalog`, so
+source order is deterministic and the first source wins when two sources list
+the same canonical address.
+
+Remote subscriptions can be recorded now without any network implementation:
+
+```sh
+yami-discover source add future --remote yami://yn1-.../home
+yami-discover catalog rebuild
+yami-discover source list
+```
+
+The remote source remains `inactive remote`; no socket, DNS, HTTP or YNP
+request is made. A future transport may add fetching, but this build never
+marks such a source as fetched, fresh or cached.
+
+Snapshot and status files are bounded and validated. A corrupt snapshot makes
+its source unavailable with a bounded reason; a corrupt status falls back to
+using a valid snapshot with a `cached` reason; a corrupt `sources.conf` is a
+hard error because source identity cannot be guessed. None of these files
+confer trust on a listed website.
+
 ## Importing and merging
 
 Import is explicit and local:
@@ -270,6 +346,37 @@ Public API surface:
 | `Catalog::len()`, `Catalog::is_empty()` | Unique entry count |
 | `ImportReport`, `SourceInfo` | Entries read, added and deduplicated per source |
 | `SearchHit` | Borrowed entry and local relevance score |
+| `SourceRegistry` | Versioned, persistent local source settings |
+| `DiscoveryStore::open(state_dir)` | Open the registry and snapshot state |
+| `DiscoveryStore::register_local` / `register_remote` / `remove_source` | Manage registered sources |
+| `DiscoveryStore::rebuild` / `refresh_source` | Explicit full or single-source refresh |
+| `DiscoveryStore::load_last` | Load the merged catalog from snapshots only |
+| `CatalogView` | Merged `Catalog` plus per-source `SourceStatus` |
+| `CatalogView::search` / `status_for` | Existing Unicode search plus provenance |
+| `SourceState` | `Fresh`, `Cached`, `Unavailable`, `InactiveRemote`, `NotBuilt` |
+
+For browser integration, open a `DiscoveryStore` at a per-user state directory
+and use `load_last` + `CatalogView::search` for normal searches. Call `rebuild`
+or `refresh_source` only in response to an explicit user refresh action, since
+those are the only operations that read source files. The browser must still
+mark every result untrusted and authenticate the canonical destination over
+TLS 1.3 when it is opened.
+
+```rust
+use yami_discover::{DiscoveryStore, Error};
+
+fn cached_search(state_dir: &str, query: &str) -> Result<(), Error> {
+    let store = DiscoveryStore::open(state_dir)?;
+    let view = store.load_last()?;          // no source-file reads
+    for hit in view.search(query)? {
+        let entry = hit.entry;
+        let provenance = view.status_for(entry.source());
+        // Display entry and provenance as untrusted metadata.
+        let _ = provenance;
+    }
+    Ok(())
+}
+```
 
 All entry text is operator-supplied and must be treated as untrusted display
 content. The browser should not fetch assets, run markup or follow links from a
@@ -289,6 +396,12 @@ activation of the canonical address.
 | Entry description | 320 characters |
 | Entry category | 48 characters |
 | Source label | 80 characters |
+| Registered sources | 32 |
+| Registry file | 128 KiB |
+| Local source path | 1024 UTF-8 bytes |
+| Snapshot per source | 256 KiB (version-1 directory limit) |
+| Status file | 4 KiB |
+| Status reason | 240 characters |
 | Query | 128 characters, 8 terms |
 | Results | 100 |
 
@@ -309,7 +422,9 @@ The crate tests cover sample parsing, unexpected YLang versions, missing or
 duplicate fields, invalid schemes and checksums, oversized fields and
 documents, entry/source/catalog caps, duplicate handling, Unicode and partial
 search, query limits, the result cap, authoring round-trips, reserved-text
-escaping, in-place edits/removals and atomic writes.
+escaping, in-place edits/removals, atomic writes, registry restarts, stable
+source ordering, cached fallback, corrupt state, source removal, individual
+refresh and inactive remote subscriptions.
 
 ## Scope
 
@@ -320,6 +435,8 @@ In scope for this milestone:
 - sample directories and synthetic identities;
 - local validation, merging and search;
 - local directory authoring, escaped rendering and atomic writes;
+- a persistent source registry with bounded cached snapshots and explicit
+  refresh, including inactive future remote subscriptions;
 - documentation and unit tests.
 
 Out of scope, deliberately:

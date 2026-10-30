@@ -249,7 +249,39 @@ Rules:
   the in-memory directory. A mismatch aborts the write rather than silently
   losing information.
 
-## 10. Compatibility and versioning
+## 10. Persistent catalog state
+
+A local discovery state directory holds a versioned source registry and bounded
+per-source snapshots. This is application state, not part of the YLang document
+format, and it never contains keys or trust assertions.
+
+- `sources.conf` begins with `yami-discover-sources 1`. Each source line stores
+  its kind (`local` or `remote`), a hex-encoded unique source name and a
+  hex-encoded target (an absolute local path or a canonical `yami://` address).
+  Line order is the deterministic source order. Names are unique and bounded;
+  the file is bounded and replaced atomically.
+- `snapshots/<sha256(source-name)>.ylang` is a canonical version-1 directory
+  document. It is produced by the same renderer and validated by the same
+  parser as any imported directory, so snapshots are bounded by all section 5
+  limits. A snapshot is used only when the source is unavailable at an explicit
+  refresh.
+- `snapshots/<sha256(source-name)>.status` begins with
+  `yami-discover-source-status 1` and records `fresh`, `cached <reason>`,
+  `unavailable <reason>`, `inactive-remote` or `not-built` with hex-encoded,
+  bounded reasons. Status is provenance for the last explicit refresh, not a
+  trust proof or a claim of current availability.
+- Remote subscriptions use `remote` registry lines and are always treated as
+  inactive. They never get a snapshot and are never marked fresh or cached.
+  No network request is defined or performed by this milestone.
+- `catalog search` and source listing read only the registry and snapshots;
+  `catalog rebuild` and `source refresh` are the only operations that read
+  source files. No background or implicit refresh exists.
+- Corrupt snapshots degrade the affected source to unavailable (or a
+  snapshot-backed cached state when readable), while a corrupt registry is a
+  hard error because source identity cannot be guessed. All state writes use
+  the same bounded atomic temporary-file strategy as directory authoring.
+
+## 11. Compatibility and versioning
 
 - Directory version 1 requires YLang 0.2. The existing YLang/YSL 0.1 and 0.2
   document formats are unchanged.

@@ -323,7 +323,7 @@ impl Catalog {
     }
 }
 
-fn source_label(label: &str) -> Result<String> {
+pub(crate) fn source_label(label: &str) -> Result<String> {
     let label = label.trim();
     if label.is_empty() {
         return Err(Error::source("label cannot be empty"));

@@ -26,16 +26,27 @@
 //! canonical YLang 0.2 document, [`Directory::save`] and
 //! [`Directory::save_new`] write it atomically, and the entry mutation methods
 //! reject duplicate addresses and entry-count overflow.
+//!
+//! [`DiscoveryStore`] adds a persistent, versioned source registry and bounded
+//! per-source snapshots. `catalog search`-style callers can use
+//! [`DiscoveryStore::load_last`] and [`CatalogView::search`] without reading any
+//! source file; only explicit rebuild or refresh calls read directories. Remote
+//! `yami://` subscriptions are stored as inactive addresses and are never
+//! fetched by this crate.
 
 mod address;
 mod catalog;
 mod directory;
 mod normalize;
+mod registry;
 mod store;
 
 pub use address::WebsiteAddress;
 pub use catalog::{Catalog, Entry, ImportReport, SearchHit, SourceInfo};
 pub use directory::{Directory, DirectoryEntry};
+pub use registry::{
+    CatalogView, DiscoveryStore, Source, SourceKind, SourceRegistry, SourceState, SourceStatus,
+};
 
 use std::{fmt, io};
 use ylang::{Span, SyntaxError};
@@ -71,6 +82,14 @@ pub const MAX_SEARCH_TERMS: usize = 8;
 pub const MAX_RESULTS: usize = 100;
 /// Maximum canonical address size accepted from a directory document.
 pub const MAX_ADDRESS_BYTES: usize = 200;
+/// Maximum size of the persistent source registry file.
+pub const MAX_REGISTRY_BYTES: usize = 128 * 1024;
+/// Maximum UTF-8 bytes in a registered local source path.
+pub const MAX_SOURCE_PATH_BYTES: usize = 1024;
+/// Maximum size of one persisted source-status file.
+pub const MAX_STATUS_BYTES: usize = 4 * 1024;
+/// Maximum characters in a persisted source status reason.
+pub const MAX_STATUS_REASON_CHARS: usize = 240;
 
 /// A 1-based source location, used for actionable validation errors.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -117,6 +136,8 @@ pub enum Error {
     Limit { message: String },
     /// Two directory entries or sources cannot coexist.
     Conflict { message: String },
+    /// A persistent source registry or status file is invalid.
+    Registry { message: String },
     /// A source label or source collection is invalid.
     Source { message: String },
     /// A local search query is invalid.
@@ -146,6 +167,12 @@ impl Error {
 
     pub(crate) fn conflict(message: impl Into<String>) -> Self {
         Self::Conflict {
+            message: message.into(),
+        }
+    }
+
+    pub(crate) fn registry(message: impl Into<String>) -> Self {
+        Self::Registry {
             message: message.into(),
         }
     }
@@ -183,6 +210,7 @@ impl fmt::Display for Error {
             } => f.write_str(message),
             Self::Limit { message } => write!(f, "resource limit: {message}"),
             Self::Conflict { message } => write!(f, "conflict: {message}"),
+            Self::Registry { message } => write!(f, "source registry: {message}"),
             Self::Source { message } => write!(f, "directory source: {message}"),
             Self::Query { message } => write!(f, "search query: {message}"),
         }

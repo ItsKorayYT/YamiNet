@@ -9,8 +9,11 @@ use std::{
     path::{Path, PathBuf},
 };
 use yami_discover::{
-    Catalog, Directory, DirectoryEntry, WebsiteAddress, MAX_RESULTS, MAX_SOURCE_LABEL_CHARS,
+    Catalog, CatalogView, Directory, DirectoryEntry, DiscoveryStore, Source, SourceKind,
+    SourceState, WebsiteAddress, MAX_RESULTS, MAX_SOURCE_LABEL_CHARS,
 };
+
+const DEFAULT_STATE_DIRECTORY: &str = ".yami-discover";
 
 const SAMPLES: &[(&str, &str)] = &[
     (
@@ -39,6 +42,15 @@ Usage:
   yami-discover edit FILE --address YAMI_URL [--title TITLE] [--description TEXT] [--category CATEGORY | --clear-category]
   yami-discover show FILE
 
+  yami-discover source add NAME PATH [--state DIR]
+  yami-discover source add NAME --remote YAMI_URL [--state DIR]
+  yami-discover source list [--state DIR]
+  yami-discover source remove NAME [--state DIR]
+  yami-discover source refresh NAME [--state DIR]
+  yami-discover catalog rebuild [--state DIR]
+  yami-discover catalog search QUERY [--state DIR]
+  yami-discover catalog list [--state DIR]
+
 Commands:
   demo       Import the bundled sample directories and search them (default
              query: yami). No network access.
@@ -51,6 +63,8 @@ Commands:
   remove     Remove the entry with the given canonical address.
   edit       Change an existing entry's title, description or category.
   show       Display one directory's metadata and entries.
+  source     Register, list, remove or explicitly refresh local sources.
+  catalog    Rebuild, search or list the persistent combined catalog.
 
 Options:
   --directory FILE   Directory document to import (repeatable; --dir also works)
@@ -59,15 +73,19 @@ Options:
   --address URL      Canonical yami:// node identity and document key
   --category NAME    Optional category (set at most once)
   --clear-category   Remove the category during edit
+  --state DIR        Registry/snapshot directory (default: .yami-discover)
+  --remote YAMI_URL  Register an inactive remote directory subscription
   -h, --help         Show this help
 
 Authoring writes atomically through a temporary file. Entries keep document
 order: add appends, edit replaces in place, remove deletes in place. Generated
 descriptions are escaped so reserved YLang prefixes and brackets round-trip.
 
-Entries are untrusted hints. Opening a listed site must still authenticate its
-yn1- identity through the normal YamiNet TLS 1.3 stack. This tool opens no
-connections, runs no crawler and sends no query to any directory operator.";
+Persistent sources are read only by an explicit `catalog rebuild` or
+`source refresh`. `catalog search` uses the last validated snapshots, so a
+temporary source outage does not make previously imported listings disappear.
+Remote subscriptions are stored as inactive addresses and are never fetched.
+No operation performs network access or marks a listed website as trusted.";
 
 const TRUST_NOTE: &str = "Entries are untrusted hints: opening one still requires the existing TLS 1.3 identity check. This tool performs no network access.";
 
@@ -97,6 +115,8 @@ fn run(args: Vec<String>) -> Result<(), String> {
         "remove" => remove(&args[1..]),
         "edit" => edit(&args[1..]),
         "show" => show(&args[1..]),
+        "source" => source_command(&args[1..]),
+        "catalog" => catalog_command(&args[1..]),
         other => Err(format!("unknown command {other:?}\n\n{USAGE}")),
     }
 }
@@ -372,6 +392,407 @@ fn show(args: &[String]) -> Result<(), String> {
     }
     println!("\n{TRUST_NOTE}");
     Ok(())
+}
+
+fn source_command(args: &[String]) -> Result<(), String> {
+    let Some(command) = args.first().map(String::as_str) else {
+        return Err(format!("source requires a subcommand\n\n{USAGE}"));
+    };
+    match command {
+        "-h" | "--help" | "help" => {
+            println!("{USAGE}");
+            Ok(())
+        }
+        "add" => source_add(&args[1..]),
+        "list" => source_list(&args[1..]),
+        "remove" => source_remove(&args[1..]),
+        "refresh" => source_refresh(&args[1..]),
+        other => Err(format!("unknown source command {other:?}\n\n{USAGE}")),
+    }
+}
+
+fn catalog_command(args: &[String]) -> Result<(), String> {
+    let Some(command) = args.first().map(String::as_str) else {
+        return Err(format!("catalog requires a subcommand\n\n{USAGE}"));
+    };
+    match command {
+        "-h" | "--help" | "help" => {
+            println!("{USAGE}");
+            Ok(())
+        }
+        "rebuild" => catalog_rebuild(&args[1..]),
+        "search" => catalog_search(&args[1..]),
+        "list" => catalog_list(&args[1..]),
+        other => Err(format!("unknown catalog command {other:?}\n\n{USAGE}")),
+    }
+}
+
+fn source_add(args: &[String]) -> Result<(), String> {
+    if wants_help(args) {
+        println!("{USAGE}");
+        return Ok(());
+    }
+    let options = parse_command_options(args, &["--state", "--remote"], &[], "source add")?;
+    let state = state_directory(&options)?;
+    if let Some(address) = options.values.get("--remote") {
+        if options.positionals.len() != 1 {
+            return Err(format!(
+                "source add NAME --remote YAMI_URL requires exactly one NAME\n\n{USAGE}"
+            ));
+        }
+        let address = parse_address(address)?;
+        let mut store = DiscoveryStore::open(state.clone())
+            .map_err(|error| format!("{}: {error}", state.display()))?;
+        let source = store
+            .register_remote(&options.positionals[0], address)
+            .map_err(|error| error.to_string())?;
+        println!(
+            "Registered inactive remote source {:?} ({}).",
+            source.name(),
+            source
+                .remote_address()
+                .map(ToString::to_string)
+                .unwrap_or_default()
+        );
+        println!(
+            "No network fetch is performed. Run `yami-discover catalog rebuild --state {}` to record its inactive status.",
+            state.display()
+        );
+    } else {
+        if options.positionals.len() != 2 {
+            return Err(format!(
+                "source add NAME PATH requires exactly one NAME and one PATH\n\n{USAGE}"
+            ));
+        }
+        let mut store = DiscoveryStore::open(state.clone())
+            .map_err(|error| format!("{}: {error}", state.display()))?;
+        let source = store
+            .register_local(&options.positionals[0], &options.positionals[1])
+            .map_err(|error| error.to_string())?;
+        println!(
+            "Registered local source {:?} -> {}",
+            source.name(),
+            source
+                .local_path()
+                .map(|path| path.display().to_string())
+                .unwrap_or_default()
+        );
+        println!(
+            "Run `yami-discover catalog rebuild --state {}` to load it into the persistent catalog.",
+            state.display()
+        );
+    }
+    Ok(())
+}
+
+fn source_list(args: &[String]) -> Result<(), String> {
+    if wants_help(args) {
+        println!("{USAGE}");
+        return Ok(());
+    }
+    let options = parse_command_options(args, &["--state"], &[], "source list")?;
+    if !options.positionals.is_empty() {
+        return Err(format!("source list does not accept arguments\n\n{USAGE}"));
+    }
+    let state = state_directory(&options)?;
+    let store = DiscoveryStore::open(state.clone())
+        .map_err(|error| format!("{}: {error}", state.display()))?;
+    if store.registry().is_empty() {
+        println!("No sources registered in {}.", state.display());
+        return Ok(());
+    }
+    let view = store
+        .load_last()
+        .map_err(|error| format!("{}: {error}", state.display()))?;
+    println!("\nRegistered sources in {}:", state.display());
+    for source in store.registry().sources() {
+        println!("  {} — {}", source.name(), source_kind_detail(source));
+        if let Some(status) = view.status_for(source.name()) {
+            println!(
+                "    status: {} ({} entries)",
+                status_detail(&status.state),
+                status.entries
+            );
+        } else {
+            println!("    status: not built (0 entries)");
+        }
+    }
+    println!(
+        "\nSummary: {} unique entries; {}.",
+        view.len(),
+        status_summary(&view)
+    );
+    Ok(())
+}
+
+fn source_remove(args: &[String]) -> Result<(), String> {
+    if wants_help(args) {
+        println!("{USAGE}");
+        return Ok(());
+    }
+    let options = parse_command_options(args, &["--state"], &[], "source remove")?;
+    if options.positionals.len() != 1 {
+        return Err(format!(
+            "source remove NAME requires exactly one NAME\n\n{USAGE}"
+        ));
+    }
+    let state = state_directory(&options)?;
+    let mut store = DiscoveryStore::open(state.clone())
+        .map_err(|error| format!("{}: {error}", state.display()))?;
+    let removed = store
+        .remove_source(&options.positionals[0])
+        .map_err(|error| error.to_string())?;
+    println!(
+        "Removed source {:?} and its cached catalog state.",
+        removed.name()
+    );
+    Ok(())
+}
+
+fn source_refresh(args: &[String]) -> Result<(), String> {
+    if wants_help(args) {
+        println!("{USAGE}");
+        return Ok(());
+    }
+    let options = parse_command_options(args, &["--state"], &[], "source refresh")?;
+    if options.positionals.len() != 1 {
+        return Err(format!(
+            "source refresh NAME requires exactly one NAME\n\n{USAGE}"
+        ));
+    }
+    let state = state_directory(&options)?;
+    let name = options.positionals[0].trim();
+    let store = DiscoveryStore::open(state.clone())
+        .map_err(|error| format!("{}: {error}", state.display()))?;
+    let view = store
+        .refresh_source(name)
+        .map_err(|error| error.to_string())?;
+    let status = view
+        .status_for(name)
+        .ok_or_else(|| format!("source refresh: no status for {name:?}"))?;
+    if matches!(status.state, SourceState::InactiveRemote) {
+        println!("Remote source {name:?} remains inactive; no network fetch was performed.");
+    } else {
+        println!(
+            "Refreshed {name:?}: {} ({} entries).",
+            status_detail(&status.state),
+            status.entries
+        );
+    }
+    println!("Catalog: {} unique entries.", view.len());
+    Ok(())
+}
+
+fn catalog_rebuild(args: &[String]) -> Result<(), String> {
+    if wants_help(args) {
+        println!("{USAGE}");
+        return Ok(());
+    }
+    let options = parse_command_options(args, &["--state"], &[], "catalog rebuild")?;
+    if !options.positionals.is_empty() {
+        return Err(format!(
+            "catalog rebuild does not accept arguments\n\n{USAGE}"
+        ));
+    }
+    let state = state_directory(&options)?;
+    let store = DiscoveryStore::open(state.clone())
+        .map_err(|error| format!("{}: {error}", state.display()))?;
+    if store.registry().is_empty() {
+        return Err(format!(
+            "no sources registered in {}; use `yami-discover source add` first",
+            state.display()
+        ));
+    }
+    let view = store
+        .rebuild()
+        .map_err(|error| format!("{}: {error}", state.display()))?;
+    println!(
+        "\nRebuilt catalog: {} unique entries from {} registered source(s).",
+        view.len(),
+        view.statuses().len()
+    );
+    print_source_statuses(&view);
+    println!("\nSummary: {}.", status_summary(&view));
+    Ok(())
+}
+
+fn catalog_search(args: &[String]) -> Result<(), String> {
+    if wants_help(args) {
+        println!("{USAGE}");
+        return Ok(());
+    }
+    let options = parse_command_options(args, &["--state"], &[], "catalog search")?;
+    if options.positionals.is_empty() {
+        return Err(format!("catalog search requires QUERY\n\n{USAGE}"));
+    }
+    let query = options.positionals.join(" ");
+    let state = state_directory(&options)?;
+    let store = DiscoveryStore::open(state.clone())
+        .map_err(|error| format!("{}: {error}", state.display()))?;
+    if store.registry().is_empty() {
+        return Err(format!(
+            "no sources registered in {}; use `yami-discover source add` first",
+            state.display()
+        ));
+    }
+    let view = store
+        .load_last()
+        .map_err(|error| format!("{}: {error}", state.display()))?;
+    println!(
+        "\nCatalog: {} unique entries ({}).",
+        view.len(),
+        status_summary(&view)
+    );
+    println!("Provenance is from the last explicit refresh; no source file was read.");
+    if view.is_empty() {
+        println!(
+            "No cached catalog is available. Run `yami-discover catalog rebuild --state {}`.",
+            state.display()
+        );
+        return Ok(());
+    }
+    print_catalog_hits(&view, &query)?;
+    println!("\n{TRUST_NOTE}");
+    Ok(())
+}
+
+fn catalog_list(args: &[String]) -> Result<(), String> {
+    if wants_help(args) {
+        println!("{USAGE}");
+        return Ok(());
+    }
+    let options = parse_command_options(args, &["--state"], &[], "catalog list")?;
+    if !options.positionals.is_empty() {
+        return Err(format!("catalog list does not accept arguments\n\n{USAGE}"));
+    }
+    let state = state_directory(&options)?;
+    let store = DiscoveryStore::open(state.clone())
+        .map_err(|error| format!("{}: {error}", state.display()))?;
+    if store.registry().is_empty() {
+        return Err(format!(
+            "no sources registered in {}; use `yami-discover source add` first",
+            state.display()
+        ));
+    }
+    let view = store
+        .load_last()
+        .map_err(|error| format!("{}: {error}", state.display()))?;
+    println!(
+        "\nCatalog: {} unique entries ({}).",
+        view.len(),
+        status_summary(&view)
+    );
+    println!("Provenance is from the last explicit refresh; no source file was read.");
+    if view.is_empty() {
+        println!(
+            "No cached catalog is available. Run `yami-discover catalog rebuild --state {}`.",
+            state.display()
+        );
+        return Ok(());
+    }
+    for (index, entry) in view.entries().iter().enumerate() {
+        let provenance = view
+            .status_for(entry.source())
+            .map(|status| status_detail(&status.state))
+            .unwrap_or_else(|| "unknown".into());
+        println!("{}. {}", index + 1, entry.title());
+        println!("   {}", entry.address());
+        println!("   {}", entry.description());
+        let category = entry
+            .category()
+            .map(|category| format!(" · {category}"))
+            .unwrap_or_default();
+        println!("   source: {}{category} [{provenance}]", entry.source());
+    }
+    println!("\n{TRUST_NOTE}");
+    Ok(())
+}
+
+fn print_catalog_hits(view: &CatalogView, query: &str) -> Result<(), String> {
+    let hits = view.search(query).map_err(|error| error.to_string())?;
+    if hits.is_empty() {
+        println!("\nNo entries matched {query:?}.");
+        return Ok(());
+    }
+    let limit_note = if hits.len() == MAX_RESULTS {
+        format!(" (showing at most {MAX_RESULTS})")
+    } else {
+        String::new()
+    };
+    println!("\nSearch {query:?}: {} result(s){limit_note}", hits.len());
+    for (index, hit) in hits.iter().enumerate() {
+        let entry = hit.entry;
+        let provenance = view
+            .status_for(entry.source())
+            .map(|status| status_detail(&status.state))
+            .unwrap_or_else(|| "unknown".into());
+        println!("{}. {}", index + 1, entry.title());
+        println!("   {}", entry.address());
+        println!("   {}", entry.description());
+        let category = entry
+            .category()
+            .map(|category| format!(" · {category}"))
+            .unwrap_or_default();
+        println!("   source: {}{category} [{provenance}]", entry.source());
+    }
+    Ok(())
+}
+
+fn print_source_statuses(view: &CatalogView) {
+    for status in view.statuses() {
+        println!(
+            "  {:<20} {} ({} entries)",
+            status.name,
+            status_detail(&status.state),
+            status.entries
+        );
+    }
+}
+
+fn status_detail(state: &SourceState) -> String {
+    match state {
+        SourceState::Fresh => "fresh (last refresh)".into(),
+        SourceState::Cached { reason } => format!("cached — {reason}"),
+        SourceState::Unavailable { reason } => format!("unavailable — {reason}"),
+        SourceState::InactiveRemote => "inactive remote (no network fetch)".into(),
+        SourceState::NotBuilt => "not built".into(),
+    }
+}
+
+fn status_summary(view: &CatalogView) -> String {
+    let (mut fresh, mut cached, mut unavailable, mut inactive, mut not_built) = (0, 0, 0, 0, 0);
+    for status in view.statuses() {
+        match &status.state {
+            SourceState::Fresh => fresh += 1,
+            SourceState::Cached { .. } => cached += 1,
+            SourceState::Unavailable { .. } => unavailable += 1,
+            SourceState::InactiveRemote => inactive += 1,
+            SourceState::NotBuilt => not_built += 1,
+        }
+    }
+    format!(
+        "{fresh} fresh, {cached} cached, {unavailable} unavailable, {inactive} inactive remote, {not_built} not built"
+    )
+}
+
+fn source_kind_detail(source: &Source) -> String {
+    match source.kind() {
+        SourceKind::Local(path) => format!("local {}", path.display()),
+        SourceKind::Remote(address) => format!("inactive remote {address}"),
+    }
+}
+
+fn state_directory(options: &CommandOptions) -> Result<PathBuf, String> {
+    let value = options
+        .values
+        .get("--state")
+        .map(String::as_str)
+        .unwrap_or(DEFAULT_STATE_DIRECTORY)
+        .trim();
+    if value.is_empty() {
+        return Err(format!("--state cannot be empty\n\n{USAGE}"));
+    }
+    Ok(PathBuf::from(value))
 }
 
 fn parse_address(text: &str) -> Result<WebsiteAddress, String> {
@@ -787,5 +1208,123 @@ mod tests {
         assert_eq!(std::fs::read_to_string(&bad).unwrap(), "not a directory");
 
         let _ = std::fs::remove_dir_all(&directory);
+    }
+
+    #[test]
+    fn persistent_catalog_cli_workflow_keeps_cached_and_inactive_states() {
+        const ID: &str = "yn1-tiqub4vxm4zslzlrhlfhc5k6b7vvkealot25nodtcixooe6xfzmxfsm6re";
+        let root = std::env::temp_dir().join(format!(
+            "yami-discover-cli-persistent-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        let state = root.join("state");
+        let source = root.join("community.ylang");
+        let source_arg = source.to_string_lossy().into_owned();
+        let state_arg = state.to_string_lossy().into_owned();
+        let address = format!("yami://{ID}/home");
+
+        run(command![
+            "create",
+            &source_arg,
+            "--title",
+            "Persistent Community"
+        ])
+        .unwrap();
+        run(command![
+            "add",
+            &source_arg,
+            "--title",
+            "Café Notes",
+            "--description",
+            "Local-first 日本語 notes",
+            "--address",
+            &address,
+        ])
+        .unwrap();
+
+        run(command![
+            "source",
+            "add",
+            "community",
+            &source_arg,
+            "--state",
+            &state_arg,
+        ])
+        .unwrap();
+        run(command!["source", "list", "--state", &state_arg]).unwrap();
+        let store = DiscoveryStore::open(&state).unwrap();
+        assert_eq!(store.registry().sources().len(), 1);
+        assert!(matches!(
+            store
+                .load_last()
+                .unwrap()
+                .status_for("community")
+                .unwrap()
+                .state,
+            SourceState::NotBuilt
+        ));
+
+        run(command!["catalog", "rebuild", "--state", &state_arg]).unwrap();
+        let store = DiscoveryStore::open(&state).unwrap();
+        let view = store.load_last().unwrap();
+        assert_eq!(view.len(), 1);
+        assert!(view.search("cafe").unwrap().len() == 1);
+        assert!(view.search("日本").unwrap().len() == 1);
+        assert!(matches!(
+            view.status_for("community").unwrap().state,
+            SourceState::Fresh
+        ));
+        run(command!["catalog", "search", "café", "--state", &state_arg,]).unwrap();
+        run(command!["catalog", "list", "--state", &state_arg]).unwrap();
+
+        std::fs::remove_file(&source).unwrap();
+        run(command!["catalog", "rebuild", "--state", &state_arg]).unwrap();
+        let store = DiscoveryStore::open(&state).unwrap();
+        let cached = store.load_last().unwrap();
+        assert_eq!(cached.len(), 1);
+        assert!(matches!(
+            cached.status_for("community").unwrap().state,
+            SourceState::Cached { .. }
+        ));
+        assert!(cached.search("café").unwrap().len() == 1);
+        run(command![
+            "source",
+            "refresh",
+            "community",
+            "--state",
+            &state_arg,
+        ])
+        .unwrap();
+
+        let remote = format!("yami://{ID}/about");
+        run(command![
+            "source", "add", "remote", "--remote", &remote, "--state", &state_arg,
+        ])
+        .unwrap();
+        run(command!["catalog", "rebuild", "--state", &state_arg]).unwrap();
+        let store = DiscoveryStore::open(&state).unwrap();
+        let view = store.load_last().unwrap();
+        assert_eq!(
+            view.status_for("remote").unwrap().state,
+            SourceState::InactiveRemote
+        );
+        run(command!["source", "list", "--state", &state_arg]).unwrap();
+
+        run(command![
+            "source",
+            "remove",
+            "community",
+            "--state",
+            &state_arg,
+        ])
+        .unwrap();
+        let store = DiscoveryStore::open(&state).unwrap();
+        assert_eq!(store.registry().sources().len(), 1);
+        assert_eq!(store.registry().sources()[0].name(), "remote");
+        assert!(store.load_last().unwrap().is_empty());
+
+        let _ = std::fs::remove_dir_all(&root);
     }
 }

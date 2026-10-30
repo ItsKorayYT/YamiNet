@@ -15,8 +15,10 @@ use std::{
 pub(crate) enum Mode {
     /// Fail if the destination already exists.
     CreateNew,
-    /// Atomically replace an existing regular file.
+    /// Atomically replace an existing regular file; fail if it is missing.
     Replace,
+    /// Atomically create or replace a regular file.
+    ReplaceOrCreate,
 }
 
 pub(crate) fn write_atomic(path: &Path, contents: &str, mode: Mode) -> Result<()> {
@@ -51,6 +53,7 @@ pub(crate) fn write_atomic(path: &Path, contents: &str, mode: Mode) -> Result<()
             Err(error) => Err(error),
         },
         Mode::Replace => fs::rename(&temporary, path),
+        Mode::ReplaceOrCreate => fs::rename(&temporary, path),
     };
     match commit {
         Ok(()) => {
@@ -75,9 +78,13 @@ fn check_target(path: &Path, mode: Mode) -> Result<()> {
                 Err(Error::invalid("target must be a regular, non-symlink file"))
             }
             Mode::Replace => Ok(()),
+            Mode::ReplaceOrCreate if !metadata.file_type().is_file() => {
+                Err(Error::invalid("target must be a regular, non-symlink file"))
+            }
+            Mode::ReplaceOrCreate => Ok(()),
         },
         Err(error) if error.kind() == io::ErrorKind::NotFound => match mode {
-            Mode::CreateNew => Ok(()),
+            Mode::CreateNew | Mode::ReplaceOrCreate => Ok(()),
             // Replacing a missing file is treated as an error rather than
             // silently creating it at a mistyped path.
             Mode::Replace => Err(Error::from(error)),
