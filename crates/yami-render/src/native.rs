@@ -561,6 +561,7 @@ impl DocumentBuilder<'_> {
                 NodeKind::Link { target, label } => {
                     self.block(label, depth, self.style.link, 17.0, true, Some(target))?
                 }
+                _ => return Err(RenderError("0.2 AST requires rich native layout")),
             }
         }
         Ok(())

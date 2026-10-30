@@ -190,6 +190,58 @@ impl Builder<'_> {
                     self.sheet.link,
                     Some(target),
                 )?,
+                NodeKind::Text { role, content } => self.emit(
+                    &format!(
+                        "{}{}",
+                        match role {
+                            ylang::TextRole::Paragraph => String::new(),
+                            ylang::TextRole::Heading(level) =>
+                                format!("{} ", "=".repeat(*level as usize)),
+                        },
+                        ylang::plain_text(content)
+                    ),
+                    depth,
+                    if matches!(role, ylang::TextRole::Heading(_)) {
+                        self.sheet.heading
+                    } else {
+                        self.sheet.text
+                    },
+                    None,
+                )?,
+                NodeKind::Container { name, children, .. } => {
+                    if !name.is_empty() {
+                        self.emit(name, depth, self.sheet.section, None)?;
+                    }
+                    self.nodes(children, depth + 1)?;
+                }
+                NodeKind::List { ordered, items } => {
+                    for (index, item) in items.iter().enumerate() {
+                        if let NodeKind::ListItem { content, children } = &item.kind {
+                            self.emit(
+                                &format!(
+                                    "{} {}",
+                                    if *ordered {
+                                        format!("{}.", index + 1)
+                                    } else {
+                                        "-".into()
+                                    },
+                                    ylang::plain_text(content)
+                                ),
+                                depth,
+                                self.sheet.text,
+                                None,
+                            )?;
+                            self.nodes(children, depth + 1)?;
+                        } else {
+                            return Err(RenderError("invalid list AST"));
+                        }
+                    }
+                }
+                NodeKind::ListItem { .. } => return Err(RenderError("list item outside list")),
+                NodeKind::Image { alt, .. } => {
+                    self.emit(&format!("[Image: {alt}]"), depth, self.sheet.text, None)?
+                }
+                NodeKind::Separator => self.emit("-----", depth, self.sheet.section, None)?,
             }
         }
         Ok(())

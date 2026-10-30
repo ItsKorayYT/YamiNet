@@ -1,5 +1,12 @@
-//! YLang 0.1: an inert, indentation-based document language.
+//! Versioned YLang 0.1/0.2: an inert, indentation-based document language.
 use std::fmt;
+mod rich;
+pub use rich::{parse_inline, valid_key, ContainerKind, Inline, InlineKind, TextRole, MAX_NODES};
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Version {
+    V01,
+    V02,
+}
 
 pub const MAX_SOURCE: usize = 256 * 1024;
 pub const MAX_DEPTH: usize = 32;
@@ -36,6 +43,7 @@ pub struct Metadata {
 }
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Document {
+    pub version: Version,
     pub metadata: Metadata,
     pub nodes: Vec<Node>,
 }
@@ -46,10 +54,41 @@ pub struct Node {
 }
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum NodeKind {
-    Heading { level: u8, text: String },
-    Section { name: String, children: Vec<Node> },
+    Heading {
+        level: u8,
+        text: String,
+    },
+    Section {
+        name: String,
+        children: Vec<Node>,
+    },
     Paragraph(String),
-    Link { target: String, label: String },
+    Link {
+        target: String,
+        label: String,
+    },
+    Text {
+        role: TextRole,
+        content: Vec<Inline>,
+    },
+    Container {
+        kind: ContainerKind,
+        name: String,
+        children: Vec<Node>,
+    },
+    List {
+        ordered: bool,
+        items: Vec<Node>,
+    },
+    ListItem {
+        content: Vec<Inline>,
+        children: Vec<Node>,
+    },
+    Image {
+        key: String,
+        alt: String,
+    },
+    Separator,
 }
 
 struct Line<'a> {
@@ -131,9 +170,11 @@ pub fn parse(source: &str) -> Result<Document, SyntaxError> {
     let first = lines
         .first()
         .ok_or_else(|| error_at(0, 0, 1, 1, "expected @page 0.1"))?;
-    if first.indent != 0 || first.text != "@page 0.1" {
-        return Err(first.error("expected @page 0.1 at column 1"));
-    }
+    let version = match (first.indent, first.text) {
+        (0, "@page 0.1") => Version::V01,
+        (0, "@page 0.2") => Version::V02,
+        _ => return Err(first.error("expected @page 0.1 or @page 0.2 at column 1")),
+    };
     let mut cursor = 1;
     let mut title = None;
     let mut language = None;
@@ -162,8 +203,13 @@ pub fn parse(source: &str) -> Result<Document, SyntaxError> {
         cursor += 1;
     }
     let title = title.ok_or_else(|| first.error("missing title metadata"))?;
-    let nodes = parse_block(&lines, &mut cursor, 0)?;
+    let nodes = if version == Version::V01 {
+        parse_block(&lines, &mut cursor, 0)?
+    } else {
+        rich::block(&lines, &mut cursor, 0, None, &mut 0)?
+    };
     Ok(Document {
+        version,
         metadata: Metadata { title, language },
         nodes,
     })
@@ -281,7 +327,7 @@ mod tests {
                 "{body}"
             );
         }
-        assert!(parse("@page 0.2\n  title Test").is_err());
+        assert!(parse("@page 0.3\n  title Test").is_err());
         assert!(parse("@page 0.1\n  title A\n  title B").is_err());
         assert!(parse("@page 0.1\nbody").is_err());
     }
@@ -298,4 +344,19 @@ mod tests {
             NodeKind::Paragraph(_)
         ));
     }
+}
+
+impl NodeKind {
+    pub fn children(&self) -> &[Node] {
+        match self {
+            Self::Section { children, .. }
+            | Self::Container { children, .. }
+            | Self::ListItem { children, .. } => children,
+            Self::List { items, .. } => items,
+            _ => &[],
+        }
+    }
+}
+pub fn plain_text(content: &[Inline]) -> String {
+    content.iter().map(|part| part.text.as_str()).collect()
 }

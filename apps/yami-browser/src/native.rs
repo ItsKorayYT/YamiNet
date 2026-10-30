@@ -450,7 +450,10 @@ pub fn add_bootstrap_from_environment(pin: &str) -> Result<(), String> {
 /// The YLang parser/grammar stays unchanged. Substitution is byte-length
 /// preserving, so parser limits, diagnostics and spans still refer to source.
 pub fn parse_document(source: &str) -> Result<ylang::Document, ylang::SyntaxError> {
-    if source.len() > ylang::MAX_SOURCE || !source.contains("> yami://") {
+    if source.lines().find(|l| !l.trim().is_empty()) == Some("@page 0.2")
+        || source.len() > ylang::MAX_SOURCE
+        || !source.contains("> yami://")
+    {
         return ylang::parse(source);
     }
     let mut adapted = String::new();
