@@ -12,6 +12,35 @@ pub fn run(config: &Config, connect: bool) -> io::Result<()> {
         config.network,
         config.state.display()
     );
+    if let Some(site) = &config.site {
+        let report = crate::authoring::check(site)?;
+        println!("Local site directory: {}; valid pages {}; PNG assets {}. Directory is local operator information; redact paths before sharing reports.", site.display(), report.pages.len(), report.assets.len());
+    }
+    println!(
+        "Hosting mode: {}",
+        if !config.relays.is_empty() {
+            "outbound relay; no home inbound listener"
+        } else if config.public_listen {
+            "explicit public listener"
+        } else {
+            "local loopback listener"
+        }
+    );
+    if let Some(listen) = config.listen {
+        println!("Configured listener: {listen}; public opt-in {}. This is configuration, not proof of a running or externally reachable socket.", config.public_listen);
+    }
+    println!("Firewall requirements: clients/relay hosts need outbound TCP to the exact configured peer and relay ports. A public relay/DHT listener needs explicit inbound TCP at its configured port on both OS and provider firewalls. No UDP, router or firewall changes are performed.");
+    match crate::maintenance::read_status(&crate::maintenance::status_path(&config.state, config.network), config.network) {
+        Ok(status) => println!("DHT snapshot: identity {}; observed {}; publication {:?}; expires {}; latest connection class {:?}. A cached advertisement is not external reachability proof.", status.id, status.observed, status.last_publication, status.expires, status.last_error),
+        Err(_) => println!("DHT publication: no readable maintenance snapshot; not verified."),
+    }
+    if !config.relays.is_empty() {
+        match crate::relay_host::read_health(&config.state) {
+            Ok(health) => println!("Relay registration snapshot: identity {}; observed {}; registered {}/{}; failures {}; latest success {}. Snapshot may be stale; no external reachability proof.", health.id, health.observed, health.registered, health.configured, health.failures, health.last_success),
+            Err(_) => println!("Relay registration: no readable local health snapshot."),
+        }
+        println!("Relay registration: not verified by preflight or TLS-only probes. Inspect live host registration logs and perform an independent end-to-end document/PNG probe.");
+    }
     let local = if let Some(path) = &config.identity {
         let identity = NodeIdentity::load(path).map_err(io::Error::other)?;
         println!(

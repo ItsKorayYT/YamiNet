@@ -54,6 +54,11 @@ fn configured(config: &yami_config::Config, stop: &AtomicBool) -> Result<(), Box
     Ok(())
 }
 fn run() -> Result<(), Box<dyn Error>> {
+    if std::env::args().skip(1).collect::<Vec<_>>() == ["--version"] {
+        println!("Yami Relay {}", env!("CARGO_PKG_VERSION"));
+        return Ok(());
+    }
+
     let args: Vec<_> = std::env::args().skip(1).collect();
     let values: Vec<_> = args.iter().map(String::as_str).collect();
     let stop = Arc::new(AtomicBool::new(false));

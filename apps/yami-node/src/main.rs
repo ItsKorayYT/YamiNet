@@ -16,7 +16,7 @@ use ynp::{DocumentData, Incoming, LocalListener, LoopbackTcp};
 use ynp_tls::{TlsListener, TlsTransport};
 
 type Result<T> = std::result::Result<T, Box<dyn Error>>;
-const USAGE: &str = "yami-node site new <directory> [personal|blog|portfolio]
+const USAGE: &str = "yami-node site setup <directory> --identity <key-directory> --output <new-config> [--new personal|blog|portfolio] [--relay ID@IPv4:port] [--bootstrap ID@IPv4:port] [--preview | --start]\nyami-node site new <directory> [personal|blog|portfolio]
 yami-node site check <directory> | info <directory>
 yami-node site build <directory> <output-directory>
 yami-node site preview <directory> [--identity <identity-directory>]
@@ -984,6 +984,18 @@ fn host_relay(args: &[String]) -> Result<()> {
 }
 fn run() -> Result<()> {
     let mut args: Vec<String> = std::env::args().skip(1).collect();
+    if args == ["--version"] {
+        println!("Yami Node {}", env!("CARGO_PKG_VERSION"));
+        return Ok(());
+    }
+    if args.first().map(String::as_str) == Some("site")
+        && args.get(1).map(String::as_str) == Some("setup")
+    {
+        args = setup_command(&args[2..])?;
+        if args.is_empty() {
+            return Ok(());
+        }
+    }
     if (args.len() == 3 || args.len() == 4) && args[0] == "diagnose" && args[1] == "--config" {
         let connect = match args.get(3).map(String::as_str) {
             None => false,
@@ -1079,6 +1091,62 @@ fn print_source(doc: &DocumentData) {
         println!("{}", line.escape_debug());
     }
 }
+fn setup_command(args: &[String]) -> Result<Vec<String>> {
+    let site = args
+        .first()
+        .ok_or("site setup needs a site directory; see --help")?;
+    let (mut identity, mut output, mut template, mut relay) = (None, None, None, None);
+    let (mut start, mut preview) = (false, false);
+    let mut bootstraps = Vec::new();
+    let mut rest = args[1..].iter();
+    while let Some(flag) = rest.next() {
+        match flag.as_str() {
+            "--identity" if identity.is_none() => identity = Some(rest.next().ok_or(USAGE)?),
+            "--output" if output.is_none() => output = Some(rest.next().ok_or(USAGE)?),
+            "--new" if template.is_none() => template = Some(rest.next().ok_or(USAGE)?.as_str()),
+            "--relay" if relay.is_none() => relay = Some(rest.next().ok_or(USAGE)?.as_str()),
+            "--bootstrap" => bootstraps.push(rest.next().ok_or(USAGE)?.clone()),
+            "--start" if !start => start = true,
+            "--preview" if !preview => preview = true,
+            _ => return Err(USAGE.into()),
+        }
+    }
+    if start && preview {
+        return Err("choose --preview or --start".into());
+    }
+    let prepared = yami_node::setup::prepare(
+        Path::new(site),
+        Path::new(
+            identity.ok_or("setup requires --identity outside the site/application directory")?,
+        ),
+        Path::new(output.ok_or("setup requires --output for a new persistent config")?),
+        template,
+        relay,
+        &bootstraps,
+    )?;
+    println!("1. Site validated: {} pages.\n2. Persistent identity ready: {}\n3. Config validated and saved: {}\n4. Mode: {}.\n5. Canonical address: yami://{}/home", prepared.pages, prepared.id, prepared.output.display(), if relay.is_some() { "explicit outbound relay (public)" } else { "local loopback only" }, prepared.id);
+    println!("No hosting started during preparation. DHT advertisements never prove reachability.\nPreview: yami-node site preview <site> --identity <same-key-directory>\nStart: yami-node --config <saved-config>\nDiagnostics: yami-node diagnose --config <saved-config> [--connect]");
+    if preview {
+        return Ok(vec![
+            "site".into(),
+            "preview".into(),
+            site.clone(),
+            "--identity".into(),
+            prepared
+                .config
+                .identity
+                .as_ref()
+                .unwrap()
+                .display()
+                .to_string(),
+        ]);
+    }
+    if start {
+        return yami_node::configuration::node_args(&prepared.config).map_err(Into::into);
+    }
+    Ok(Vec::new())
+}
+
 fn site_command(args: &[String]) -> Result<()> {
     use yami_node::authoring;
     let report = match args {

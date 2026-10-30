@@ -322,3 +322,5 @@ pub mod configuration;
 pub mod diagnostics;
 
 pub mod authoring;
+
+pub mod setup;
