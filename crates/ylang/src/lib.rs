@@ -285,6 +285,21 @@ fn parse_block(
     Ok(nodes)
 }
 
+impl NodeKind {
+    pub fn children(&self) -> &[Node] {
+        match self {
+            Self::Section { children, .. }
+            | Self::Container { children, .. }
+            | Self::ListItem { children, .. } => children,
+            Self::List { items, .. } => items,
+            _ => &[],
+        }
+    }
+}
+pub fn plain_text(content: &[Inline]) -> String {
+    content.iter().map(|part| part.text.as_str()).collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -344,19 +359,4 @@ mod tests {
             NodeKind::Paragraph(_)
         ));
     }
-}
-
-impl NodeKind {
-    pub fn children(&self) -> &[Node] {
-        match self {
-            Self::Section { children, .. }
-            | Self::Container { children, .. }
-            | Self::ListItem { children, .. } => children,
-            Self::List { items, .. } => items,
-            _ => &[],
-        }
-    }
-}
-pub fn plain_text(content: &[Inline]) -> String {
-    content.iter().map(|part| part.text.as_str()).collect()
 }

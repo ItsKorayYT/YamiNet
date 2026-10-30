@@ -118,6 +118,7 @@ impl Editor {
     }
 }
 struct CachedDocument {
+    revision: u64,
     id: u64,
     generation: u64,
     width: u32,
@@ -301,15 +302,16 @@ impl Desktop {
     }
     fn current_layout(&self) -> Option<&NativeDocument> {
         let tab = self.browser.active();
-        if !matches!(tab.state, PageState::Ready(_)) {
+        let PageState::Ready(page) = &tab.state else {
             return None;
-        }
+        };
         let (_, _, scale) = self.size();
         let width = (self.viewport().w * scale).round() as u32;
         self.native
             .as_ref()
             .filter(|cache| {
-                cache.id == tab.id
+                cache.revision == page.revision
+                    && cache.id == tab.id
                     && cache.generation == tab.generation
                     && cache.width == width
                     && cache.scale == (scale as f64).to_bits()
@@ -398,23 +400,26 @@ impl Desktop {
             let tab = self.browser.active();
             let doc_width = (chrome::viewport(w, h).w * scale).round() as u32;
             let valid = self.native.as_ref().is_some_and(|cache| {
-                cache.id == tab.id
+                cache.revision == page.revision
+                    && cache.id == tab.id
                     && cache.generation == tab.generation
                     && cache.width == doc_width
                     && cache.scale == (scale as f64).to_bits()
             });
             if !valid {
                 self.native = Some(CachedDocument {
+                    revision: page.revision,
                     id: tab.id,
                     generation: tab.generation,
                     width: doc_width,
                     scale: (scale as f64).to_bits(),
-                    document: NativeDocument::layout(
+                    document: NativeDocument::layout_with_assets(
                         &page.document,
                         &page.style,
                         doc_width as f32,
                         scale,
                         &mut self.text,
+                        &page.images,
                     )
                     .map_err(|e| e.to_string()),
                 });

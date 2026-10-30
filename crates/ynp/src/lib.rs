@@ -2,6 +2,10 @@
 //! plaintext, unauthenticated, loopback-only TCP transport.
 //! This crate provides no identity, encryption or anonymity. The `ynp-tls`
 //! crate carries the same frames over TLS 1.3 to a pinned node identity.
+mod assets;
+pub use assets::{
+    request_asset, validate_asset_key, AssetData, MAX_ASSET_BYTES, MAX_ASSET_KEY, MAX_ASSET_PAYLOAD,
+};
 use std::{
     io::{self, Read, Write},
     net::{SocketAddr, TcpListener, TcpStream},
@@ -32,6 +36,9 @@ pub enum Message {
     Get { key: String },
     Document(DocumentData),
     NotFound { key: String },
+    GetAsset { key: String },
+    Asset(AssetData),
+    AssetNotFound { key: String },
 }
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Frame {
@@ -68,6 +75,12 @@ fn put_text(output: &mut Vec<u8>, text: &str, max: usize) -> io::Result<()> {
 }
 
 pub fn write_frame(writer: &mut (impl Write + ?Sized), frame: &Frame) -> io::Result<()> {
+    if matches!(
+        frame.message,
+        Message::GetAsset { .. } | Message::Asset(_) | Message::AssetNotFound { .. }
+    ) {
+        return assets::write_asset(writer, frame);
+    }
     let mut payload = Vec::new();
     let kind = match &frame.message {
         Message::Get { key } => {
@@ -84,6 +97,7 @@ pub fn write_frame(writer: &mut (impl Write + ?Sized), frame: &Frame) -> io::Res
             put_key(&mut payload, key)?;
             3
         }
+        _ => return Err(invalid("not a document message")),
     };
     let mut header = [0u8; HEADER];
     header[..4].copy_from_slice(b"YNP\0");
@@ -138,16 +152,26 @@ impl<'a> Cursor<'a> {
 }
 
 pub fn read_frame(reader: &mut (impl Read + ?Sized)) -> io::Result<Frame> {
+    read_frame_limited(reader, MAX_ASSET_BYTES, false)
+}
+fn read_frame_limited(
+    reader: &mut (impl Read + ?Sized),
+    asset_limit: usize,
+    asset_only: bool,
+) -> io::Result<Frame> {
     let mut header = [0u8; HEADER];
     reader.read_exact(&mut header)?;
     if &header[..4] != b"YNP\0" {
         return Err(invalid("invalid YNP magic"));
     }
-    if header[4] != 1 {
-        return Err(invalid("unsupported YNP wire version"));
-    }
     if header[6..8] != [0, 0] {
         return Err(invalid("reserved header bits must be zero"));
+    }
+    if header[4] == 2 {
+        return assets::read_asset(reader, header, asset_limit);
+    }
+    if header[4] != 1 || asset_only {
+        return Err(invalid("unsupported YNP wire version for this exchange"));
     }
     let kind = header[5];
     if !(1..=3).contains(&kind) {

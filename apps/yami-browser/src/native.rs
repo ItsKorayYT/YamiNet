@@ -114,6 +114,9 @@ impl Resolver {
     pub fn relay_enabled(&self) -> bool {
         self.relay_enabled.load(Ordering::SeqCst)
     }
+    pub(crate) fn public_network(&self) -> bool {
+        self.network == Network::Public
+    }
     pub fn recent_failure_count(&self) -> usize {
         self.failures.len()
     }

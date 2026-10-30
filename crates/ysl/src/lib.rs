@@ -106,8 +106,8 @@ pub fn parse(source: &str) -> Result<Stylesheet, SyntaxError> {
                 }
                 header = true;
             } else if indent == 0 {
-                if !matches!(text, "canvas" | "text" | "heading" | "section" | "link")
-                    && !(sheet.rich.is_some() && matches!(text, "card" | "image" | "row"))
+                if !(matches!(text, "canvas" | "text" | "heading" | "section" | "link")
+                    || sheet.rich.is_some() && matches!(text, "card" | "image" | "row"))
                 {
                     return Err(err(1, 0, "unknown style group"));
                 }

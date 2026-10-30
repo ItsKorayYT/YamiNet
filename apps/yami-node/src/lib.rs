@@ -27,8 +27,14 @@ pub const MAX_WORKERS: usize = 32;
 /// an error closes the connection without a reply.
 pub trait Documents: Sync {
     fn lookup(&self, key: &str) -> io::Result<Option<DocumentData>>;
+    fn asset(&self, _key: &str) -> io::Result<Option<Vec<u8>>> {
+        Ok(None)
+    }
 }
 impl Documents for Site {
+    fn asset(&self, key: &str) -> io::Result<Option<Vec<u8>>> {
+        Site::asset(self, key)
+    }
     fn lookup(&self, key: &str) -> io::Result<Option<DocumentData>> {
         Site::lookup(self, key)
     }
@@ -62,6 +68,8 @@ pub enum Reply {
     Document(String),
     NotFound(String),
     Dht,
+    Asset(String),
+    AssetNotFound(String),
 }
 
 /// Opt-in protocol dispatch AFTER the existing TLS handshake. YNP bytes are
@@ -130,16 +138,39 @@ pub fn serve_connection(
         until: Instant::now() + CONNECTION_DEADLINE,
     };
     let request = ynp::read_frame(&mut connection)?;
-    let Message::Get { key } = request.message else {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidData,
-            "node accepts only Get requests",
-        ));
-    };
-    let (message, reply) = match documents.lookup(&key)? {
-        Some(doc) if doc.key == key => (Message::Document(doc), Reply::Document(key)),
-        Some(_) => return Err(io::Error::other("document source returned another key")),
-        None => (Message::NotFound { key: key.clone() }, Reply::NotFound(key)),
+    let (message, reply) = match request.message {
+        Message::Get { key } => match documents.lookup(&key)? {
+            Some(doc) if doc.key == key => (Message::Document(doc), Reply::Document(key)),
+            Some(_) => return Err(io::Error::other("document source returned another key")),
+            None => (Message::NotFound { key: key.clone() }, Reply::NotFound(key)),
+        },
+        Message::GetAsset { key } => {
+            if connection.inner.protection() != ynp::Protection::Tls13PinnedServer {
+                return Err(io::Error::new(
+                    io::ErrorKind::PermissionDenied,
+                    "PNG assets require authenticated TLS",
+                ));
+            }
+            match documents.asset(&key)? {
+                Some(bytes) => (
+                    Message::Asset(ynp::AssetData {
+                        key: key.clone(),
+                        bytes,
+                    }),
+                    Reply::Asset(key),
+                ),
+                None => (
+                    Message::AssetNotFound { key: key.clone() },
+                    Reply::AssetNotFound(key),
+                ),
+            }
+        }
+        _ => {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "node accepts only document/asset Get requests",
+            ))
+        }
     };
     ynp::write_frame(
         &mut connection,

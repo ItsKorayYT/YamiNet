@@ -435,6 +435,8 @@ fn serve_site(
                 Ok(Reply::Document(key)) => eprintln!("Served {key}"),
                 Ok(Reply::NotFound(key)) => eprintln!("NotFound {key}"),
                 Err(error) => eprintln!("Connection rejected: {error}"),
+                Ok(Reply::Asset(key)) => eprintln!("Served PNG asset {key}"),
+                Ok(Reply::AssetNotFound(key)) => eprintln!("PNG asset not found: {key}"),
                 Ok(Reply::Dht) => eprintln!("Served bounded DHT RPC"),
             }
         },

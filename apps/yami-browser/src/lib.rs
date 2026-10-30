@@ -3,3 +3,5 @@ pub mod model;
 pub mod native;
 
 mod reliability;
+
+pub mod resources;

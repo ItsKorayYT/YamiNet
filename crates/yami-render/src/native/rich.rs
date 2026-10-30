@@ -10,6 +10,73 @@ pub(super) struct Decoration {
     border: Option<(Color, f32)>,
     radius: f32,
 }
+pub(super) struct ImageBlock {
+    pub(super) rect: TextRect,
+    image: std::sync::Arc<crate::assets::Image>,
+}
+pub(super) fn draw_images(
+    images: &[ImageBlock],
+    pixmap: &mut Pixmap,
+    x: f32,
+    y: f32,
+    scroll: f32,
+    clip: TextRect,
+) {
+    let frame_width = pixmap.width() as usize;
+    let frame_height = pixmap.height() as usize;
+    for block in images {
+        if !block.image.valid() {
+            continue;
+        }
+        let rect = TextRect {
+            x: x + block.rect.x,
+            y: y + block.rect.y - scroll,
+            ..block.rect
+        };
+        if !valid_rect(rect) {
+            continue;
+        }
+        let left = rect.x.floor().max(clip.x).max(0.0) as usize;
+        let top = rect.y.floor().max(clip.y).max(0.0) as usize;
+        let right = (rect.x + rect.width)
+            .ceil()
+            .min(clip.x + clip.width)
+            .max(0.0) as usize;
+        let bottom = (rect.y + rect.height)
+            .ceil()
+            .min(clip.y + clip.height)
+            .max(0.0) as usize;
+        let source = &block.image;
+        let target = pixmap.pixels_mut();
+        for py in top..bottom.min(frame_height) {
+            let sy = (((py as f32 + 0.5 - rect.y) / rect.height) * source.height as f32)
+                .clamp(0.0, source.height as f32 - 1.0) as usize;
+            for px in left..right.min(frame_width) {
+                let sx = (((px as f32 + 0.5 - rect.x) / rect.width) * source.width as f32)
+                    .clamp(0.0, source.width as f32 - 1.0) as usize;
+                let index = (sy * source.width as usize + sx) * 4;
+                let rgba = &source.pixels[index..index + 4];
+                let previous = target[py * frame_width + px];
+                let inverse = 255 - u16::from(rgba[3]);
+                let alpha = (u16::from(rgba[3])
+                    + (u16::from(previous.alpha()) * inverse + 127) / 255)
+                    as u8;
+                let blend = |a: u8, b: u8| {
+                    (u16::from(a) + (u16::from(b) * inverse + 127) / 255).min(u16::from(alpha))
+                        as u8
+                };
+                if let Some(pixel) = PremultipliedColorU8::from_rgba(
+                    blend(rgba[0], previous.red()),
+                    blend(rgba[1], previous.green()),
+                    blend(rgba[2], previous.blue()),
+                    alpha,
+                ) {
+                    target[py * frame_width + px] = pixel;
+                }
+            }
+        }
+    }
+}
 fn rounded(rect: TextRect, radius: f32) -> Option<Path> {
     let (x, y, w, h) = (rect.x, rect.y, rect.width, rect.height);
     if !valid_rect(rect) {
@@ -100,6 +167,7 @@ pub(super) fn layout(
     width: f32,
     scale: f32,
     engine: &mut TextEngine,
+    images: &crate::assets::Images,
 ) -> Result<NativeDocument, RenderError> {
     let style = sheet.rich.clone().unwrap_or_else(|| RichStyle {
         width: (sheet.width * 9).clamp(240, 1440) as u16,
@@ -129,6 +197,8 @@ pub(super) fn layout(
         scale,
         blocks: Vec::new(),
         decorations: Vec::new(),
+        images,
+        image_blocks: Vec::new(),
         lines: 0,
         nodes: 0,
         bytes: &mut bytes,
@@ -141,6 +211,7 @@ pub(super) fn layout(
         scale,
         blocks: builder.blocks,
         decorations: builder.decorations,
+        images: builder.image_blocks,
         link_states: Some((style.hover, style.active)),
     })
 }
@@ -151,6 +222,8 @@ struct Builder<'a> {
     scale: f32,
     blocks: Vec<Block>,
     decorations: Vec<Decoration>,
+    images: &'a crate::assets::Images,
+    image_blocks: Vec<ImageBlock>,
     lines: usize,
     nodes: usize,
     bytes: &'a mut usize,
@@ -475,15 +548,15 @@ impl Builder<'_> {
                 NodeKind::ListItem { .. } => return Err(RenderError("orphan list item")),
                 NodeKind::Image { alt, key } => {
                     self.account(key)?;
-                    y = self.text(
-                        &plain(&format!("[Image: {alt}]")),
-                        x,
-                        y,
-                        width,
-                        self.style.text,
-                        ink.unwrap_or(self.sheet.text.ink),
-                        None,
-                    )?;
+                    if let Some(crate::assets::ImageState::Ready(image))=self.images.get(key).filter(|state|matches!(state,crate::assets::ImageState::Ready(image) if image.valid())) {
+                        self.account(alt)?;
+                        let fit=(width.min(self.style.image.width as f32*self.scale)/image.width as f32).min(self.style.image.height as f32*self.scale/image.height as f32);
+                        let (w,h)=(image.width as f32*fit,image.height as f32*fit);let offset=match self.style.image.align{Align::Left=>0.0,Align::Center=>(width-w)/2.0,Align::Right=>width-w};
+                        self.image_blocks.push(ImageBlock{rect:TextRect{x:x+offset,y,width:w,height:h},image:image.clone()});y+=h+self.style.image.gap as f32*self.scale;
+                    } else {
+                        let status=if matches!(self.images.get(key),Some(crate::assets::ImageState::Pending)){"Loading image"}else{"Image unavailable"};
+                        y=self.text(&plain(&format!("[{status}: {alt}]")),x,y,width,self.style.text,ink.unwrap_or(self.sheet.text.ink),None)?;
+                    }
                 }
                 NodeKind::Separator => {
                     let height = self.scale;
@@ -555,5 +628,48 @@ mod tests {
             content: plain(&"x".repeat(16 * 1024 + 1)),
         };
         assert!(NativeDocument::layout(&doc, &sheet, 800.0, 1.0, &mut engine).is_err());
+    }
+}
+
+#[cfg(test)]
+mod image_tests {
+    use super::*;
+    use crate::assets::{self, ImageState, Images};
+    #[test]
+    fn decoded_images_preserve_aspect_ratio_align_scroll_and_clip() {
+        let document =
+            ylang::parse("@page 0.2\n  title Image\n! cover | Red artwork\n> /about | Next\n")
+                .unwrap();
+        let sheet =
+            ysl::parse("@style 0.2\nimage\n  width 200\n  height 200\n  align right\n").unwrap();
+        let image = assets::decode_png(
+            &assets::encode_png(4, 2, &[255, 0, 0, 255].repeat(8)).unwrap(),
+            assets::MAX_DECODED,
+        )
+        .unwrap();
+        let images = Images::from([(
+            "cover".into(),
+            ImageState::Ready(std::sync::Arc::new(image)),
+        )]);
+        let mut engine = TextEngine::new();
+        let layout =
+            NativeDocument::layout_with_assets(&document, &sheet, 400.0, 1.0, &mut engine, &images)
+                .unwrap();
+        assert_eq!(layout.images.len(), 1);
+        let rect = layout.images[0].rect;
+        assert_eq!(rect.width / rect.height, 2.0);
+        assert_eq!(rect.width, 200.0);
+        assert!(rect.x > 24.0);
+        let mut pixels = Pixmap::new(420, 250).unwrap();
+        pixels.fill(tiny_skia::Color::WHITE);
+        layout.draw(&mut pixels, 10.0, 10.0, 10.0, 220.0, &mut engine);
+        assert_eq!(pixels.pixel(0, 0).unwrap().red(), 255);
+        let sample = pixels
+            .pixel((10.0 + rect.x + 5.0) as u32, rect.y as u32 + 5)
+            .unwrap();
+        assert_eq!((sample.red(), sample.green(), sample.blue()), (255, 0, 0));
+        let missing = NativeDocument::layout(&document, &sheet, 400.0, 1.0, &mut engine).unwrap();
+        assert!(missing.images.is_empty());
+        assert!(missing.blocks.len() > 1);
     }
 }

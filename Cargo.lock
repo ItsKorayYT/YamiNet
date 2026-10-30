@@ -2370,6 +2370,7 @@ dependencies = [
  "yami-dht",
  "yami-identity",
  "yami-relay",
+ "yami-render",
  "ylang",
  "ynp",
  "ynp-discovery",
@@ -2405,6 +2406,7 @@ name = "yami-render"
 version = "0.1.0"
 dependencies = [
  "cosmic-text",
+ "png",
  "tiny-skia",
  "ylang",
  "ysl",

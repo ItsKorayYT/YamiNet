@@ -13,6 +13,7 @@ default = []
 native = ["dep:cosmic-text", "dep:tiny-skia"]
 
 [dependencies]
+png = "0.17.16"
 ylang = { path = "../ylang" }
 ysl = { path = "../ysl" }
 cosmic-text = { version = "0.14", optional = true }

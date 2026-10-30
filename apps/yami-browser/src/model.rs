@@ -113,6 +113,9 @@ pub struct Page {
     /// Endpoint of the authenticated native fetch, used only to upgrade old
     /// same-node numeric links while retaining the canonical identity address.
     pub endpoint: Option<SocketAddr>,
+    pub images: yami_render::assets::Images,
+    pub revision: u64,
+    pub(crate) origin: Option<crate::resources::Origin>,
 }
 #[derive(Debug)]
 pub enum PageState {
@@ -174,6 +177,25 @@ impl Tab {
     /// identity targets as native addresses. `Browser::follow` refuses other
     /// plaintext links from native pages.
     pub fn resolve_link(&self, target: &str) -> String {
+        if let Some(key) = target
+            .strip_prefix('/')
+            .filter(|key| ynp::validate_key(key).is_ok())
+        {
+            return match self.location() {
+                Location::Yami(address) => Address {
+                    id: address.id,
+                    key: key.into(),
+                }
+                .url(),
+                Location::Ynps(url) => ynp_tls::parse_url(url)
+                    .map(|(id, endpoint, _)| ynp_tls::format_url(&id, endpoint, key))
+                    .unwrap_or_else(|_| target.into()),
+                Location::Ynp(url) => ynp::parse_url(url)
+                    .map(|(endpoint, _)| format!("ynp://{endpoint}/{key}"))
+                    .unwrap_or_else(|_| target.into()),
+                _ => target.into(),
+            };
+        }
         if let (Location::Yami(current), PageState::Ready(page)) = (self.location(), &self.state) {
             if page.security.destination() == Some(current.id) {
                 if let Some(rest) = target.strip_prefix("ynp://") {
@@ -229,6 +251,7 @@ impl Tab {
             generation: self.generation,
             location: self.location().clone(),
             deadline,
+            cancel: Arc::new(AtomicBool::new(false)),
         };
         if let Err(message) = loader.submit(job) {
             self.state = PageState::Error(message);
@@ -382,6 +405,21 @@ impl Browser {
         while let Ok(result) = loader.results.try_recv() {
             changed |= self.complete(result);
         }
+        while let Ok(update) = loader.resources.try_recv() {
+            if let Some(tab) = self
+                .tabs
+                .iter_mut()
+                .find(|tab| tab.id == update.tab_id && tab.generation == update.generation)
+            {
+                if let PageState::Ready(page) = &mut tab.state {
+                    if let Some(image) = page.images.get_mut(&update.key) {
+                        *image = update.state;
+                        page.revision = page.revision.wrapping_add(1);
+                        changed = true;
+                    }
+                }
+            }
+        }
         changed
     }
     fn complete(&mut self, result: Completion) -> bool {
@@ -405,15 +443,23 @@ struct Job {
     generation: u64,
     location: Location,
     deadline: Instant,
+    cancel: Arc<AtomicBool>,
 }
 struct Completion {
     tab_id: u64,
     generation: u64,
     page: Result<Page, String>,
 }
+struct ResourceCompletion {
+    tab_id: u64,
+    generation: u64,
+    key: String,
+    state: yami_render::assets::ImageState,
+}
 #[derive(Default)]
 struct Pending {
     jobs: VecDeque<Job>,
+    active: Vec<(u64, Arc<AtomicBool>)>,
     closed: bool,
 }
 struct Shared {
@@ -430,6 +476,7 @@ type Fetcher = dyn Fn(&Location, Instant) -> Result<Page, String> + Send + Sync;
 pub struct Loader {
     shared: Arc<Shared>,
     results: mpsc::Receiver<Completion>,
+    resources: mpsc::Receiver<ResourceCompletion>,
     relay_enabled: Arc<AtomicBool>,
     bootstrap: Arc<Bootstrap>,
 }
@@ -497,15 +544,18 @@ impl Loader {
             changed: Condvar::new(),
         });
         let (sender, results) = mpsc::sync_channel(MAX_PENDING);
+        let (resource_sender, resources) = mpsc::sync_channel(MAX_PENDING);
         let loader = Self {
             shared: Arc::clone(&shared),
             results,
+            resources,
             relay_enabled: Arc::new(AtomicBool::new(false)),
             bootstrap: Arc::new(native::add_bootstrap_from_environment),
         };
         for index in 0..WORKERS {
             let shared = Arc::clone(&shared);
             let sender = sender.clone();
+            let resource_sender = resource_sender.clone();
             let wake = Arc::clone(&wake);
             let fetcher = Arc::clone(&fetcher);
             thread::Builder::new()
@@ -522,21 +572,55 @@ impl Loader {
                         if pending.closed {
                             return;
                         }
-                        pending.jobs.pop_front().expect("nonempty queue")
+                        let job = pending.jobs.pop_front().expect("nonempty queue");
+                        pending.active.push((job.tab_id, job.cancel.clone()));
+                        job
                     };
+                    let page =
+                        if Instant::now() >= job.deadline || job.cancel.load(Ordering::SeqCst) {
+                            Err("Navigation deadline exceeded or cancelled while queued.".into())
+                        } else {
+                            fetcher(&job.location, job.deadline)
+                        };
+                    let resources_page = page
+                        .as_ref()
+                        .ok()
+                        .filter(|page| !page.images.is_empty())
+                        .cloned();
                     let result = Completion {
                         tab_id: job.tab_id,
                         generation: job.generation,
-                        page: if Instant::now() >= job.deadline {
-                            Err("Navigation deadline exceeded while queued.".into())
-                        } else {
-                            fetcher(&job.location, job.deadline)
-                        },
+                        page,
                     };
                     if sender.send(result).is_err() {
                         return;
                     }
                     wake();
+                    if let Some(page) = resources_page {
+                        crate::resources::load(&page, &job.cancel, job.deadline, |key, state| {
+                            if job.cancel.load(Ordering::SeqCst) {
+                                return false;
+                            }
+                            let sent = resource_sender
+                                .send(ResourceCompletion {
+                                    tab_id: job.tab_id,
+                                    generation: job.generation,
+                                    key,
+                                    state,
+                                })
+                                .is_ok();
+                            if sent {
+                                wake();
+                            }
+                            sent
+                        });
+                    }
+                    shared
+                        .pending
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner())
+                        .active
+                        .retain(|(_, flag)| !Arc::ptr_eq(flag, &job.cancel));
                 })?;
         }
         Ok(loader)
@@ -564,6 +648,16 @@ impl Loader {
             .pending
             .lock()
             .unwrap_or_else(|e| e.into_inner());
+        for job in &pending.jobs {
+            if job.tab_id == tab_id {
+                job.cancel.store(true, Ordering::SeqCst);
+            }
+        }
+        for (id, flag) in &pending.active {
+            if *id == tab_id {
+                flag.store(true, Ordering::SeqCst);
+            }
+        }
         pending.jobs.retain(|job| job.tab_id != tab_id);
     }
 }
@@ -575,6 +669,12 @@ impl Drop for Loader {
             .lock()
             .unwrap_or_else(|e| e.into_inner());
         pending.closed = true;
+        for job in &pending.jobs {
+            job.cancel.store(true, Ordering::SeqCst);
+        }
+        for (_, flag) in &pending.active {
+            flag.store(true, Ordering::SeqCst);
+        }
         pending.jobs.clear();
         self.shared.changed.notify_all();
     }
@@ -607,7 +707,17 @@ fn load_page(location: &Location) -> Result<Page, String> {
             (data.source, data.style, Security::Verified(id))
         }
     };
-    parse_page(&source, &style, security, None)
+    let mut page = parse_page(&source, &style, security, None)?;
+    if let Location::Ynps(url) = location {
+        let (id, endpoint, _) = ynp_tls::parse_url(url).map_err(|e| e.to_string())?;
+        page.origin = Some(crate::resources::Origin {
+            destination: id,
+            endpoint,
+            relay: None,
+            public_relay: false,
+        });
+    }
+    Ok(page)
 }
 fn load_native_page(
     location: &Location,
@@ -618,7 +728,7 @@ fn load_native_page(
         unreachable!()
     };
     let (data, info) = resolver.fetch_until(address, deadline)?;
-    parse_page(
+    let mut page = parse_page(
         &data.source,
         &data.style,
         info.relay
@@ -631,7 +741,14 @@ fn load_native_page(
         } else {
             Some(info.endpoint)
         },
-    )
+    )?;
+    page.origin = Some(crate::resources::Origin {
+        destination: address.id,
+        endpoint: info.endpoint,
+        relay: info.relay,
+        public_relay: resolver.public_network(),
+    });
+    Ok(page)
 }
 fn parse_page(
     source: &str,
@@ -645,7 +762,14 @@ fn parse_page(
     } else {
         ysl::parse(style).map_err(|error| format!("YSL {error}"))?
     };
+    let images = yami_render::assets::image_keys(&document)
+        .into_iter()
+        .map(|key| (key, yami_render::assets::ImageState::Pending))
+        .collect();
     Ok(Page {
+        images,
+        revision: 0,
+        origin: None,
         document,
         style,
         security,
@@ -695,6 +819,9 @@ mod tests {
             style: ysl::Stylesheet::default(),
             security: Security::BuiltIn,
             endpoint: None,
+            images: yami_render::assets::Images::new(),
+            revision: 0,
+            origin: None,
         }
     }
     fn loader() -> Loader {

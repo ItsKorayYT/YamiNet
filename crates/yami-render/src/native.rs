@@ -308,6 +308,7 @@ pub struct NativeDocument {
     scale: f32,
     blocks: Vec<Block>,
     decorations: Vec<rich::Decoration>,
+    images: Vec<rich::ImageBlock>,
     link_states: Option<(Color, Color)>,
 }
 impl NativeDocument {
@@ -317,6 +318,23 @@ impl NativeDocument {
         width: f32,
         scale: f32,
         engine: &mut TextEngine,
+    ) -> Result<Self, RenderError> {
+        Self::layout_with_assets(
+            document,
+            style,
+            width,
+            scale,
+            engine,
+            &crate::assets::Images::new(),
+        )
+    }
+    pub fn layout_with_assets(
+        document: &Document,
+        style: &Stylesheet,
+        width: f32,
+        scale: f32,
+        engine: &mut TextEngine,
+        images: &crate::assets::Images,
     ) -> Result<Self, RenderError> {
         if !width.is_finite()
             || !(64.0..=16384.0).contains(&width)
@@ -328,7 +346,7 @@ impl NativeDocument {
             ));
         }
         if document.version == ylang::Version::V02 || style.rich.is_some() {
-            return rich::layout(document, style, width, scale, engine);
+            return rich::layout(document, style, width, scale, engine, images);
         }
         if !(20..=160).contains(&style.width)
             || style.padding > 8
@@ -372,6 +390,7 @@ impl NativeDocument {
             scale,
             blocks: builder.blocks,
             decorations: Vec::new(),
+            images: Vec::new(),
             link_states: None,
         })
     }
@@ -428,6 +447,7 @@ impl NativeDocument {
             pixmap.fill_rect(rect, &paint, Transform::identity(), None);
         }
         rich::draw_decorations(&self.decorations, pixmap, origin_x, origin_y, scroll, clip);
+        rich::draw_images(&self.images, pixmap, origin_x, origin_y, scroll, clip);
         for block in &self.blocks {
             let y = origin_y + block.y - scroll;
             if y + block.height < origin_y || y > origin_y + viewport_height {

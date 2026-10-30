@@ -74,6 +74,76 @@ impl Site {
             style: self.style()?,
         }))
     }
+    /// Restricted PNG keys only; never a caller-supplied filesystem path.
+    pub fn asset(&self, key: &str) -> io::Result<Option<Vec<u8>>> {
+        ynp::validate_asset_key(key)?;
+        let directory = self.root.join("assets");
+        match fs::symlink_metadata(&directory) {
+            Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(None),
+            Err(e) => return Err(e),
+            Ok(meta) if !meta.file_type().is_dir() => {
+                return Err(refused("assets", "is not a regular non-symlink directory"))
+            }
+            _ => {}
+        }
+        let name = format!("{key}.png");
+        let path = directory.join(&name);
+        match fs::symlink_metadata(&path) {
+            Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(None),
+            Err(e) => return Err(e),
+            Ok(meta) if !meta.file_type().is_file() => {
+                return Err(refused(&name, "is not a regular non-symlink file"))
+            }
+            _ => {}
+        }
+        let resolved = fs::canonicalize(&path)?;
+        if resolved.parent() != Some(directory.as_path())
+            || resolved.file_name() != Some(name.as_ref())
+        {
+            return Err(refused(
+                &name,
+                "resolves outside the assets directory or to an alias",
+            ));
+        }
+        let mut bytes = Vec::new();
+        let file = File::open(resolved)?;
+        if !file.metadata()?.is_file() {
+            return Err(refused(&name, "is not a regular file"));
+        }
+        file.take((ynp::MAX_ASSET_BYTES + 1) as u64)
+            .read_to_end(&mut bytes)?;
+        if bytes.len() > ynp::MAX_ASSET_BYTES || !bytes.starts_with(b"\x89PNG\r\n\x1a\n") {
+            return Err(refused(&name, "is not a bounded PNG image"));
+        }
+        Ok(Some(bytes))
+    }
+    pub fn assets(&self) -> io::Result<Vec<String>> {
+        let directory = self.root.join("assets");
+        if !directory.exists() {
+            return Ok(Vec::new());
+        }
+        if !fs::symlink_metadata(&directory)?.file_type().is_dir() {
+            return Err(refused("assets", "is not a non-symlink directory"));
+        }
+        let mut keys = Vec::new();
+        for entry in fs::read_dir(directory)? {
+            let entry = entry?;
+            let name = entry.file_name();
+            let Some(name) = name.to_str() else {
+                continue;
+            };
+            if let Some(key) = name.strip_suffix(".png") {
+                if ynp::validate_asset_key(key).is_ok() && entry.file_type()?.is_file() {
+                    keys.push(key.to_string());
+                    if keys.len() >= MAX_LISTED {
+                        break;
+                    }
+                }
+            }
+        }
+        keys.sort();
+        Ok(keys)
+    }
     /// The shared stylesheet. A missing one is allowed and served as empty;
     /// the browser then uses its defaults.
     pub fn style(&self) -> io::Result<String> {
