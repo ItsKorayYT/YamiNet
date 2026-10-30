@@ -330,3 +330,32 @@ concurrent mutation. Keep persistent identities and DHT sequence state outside
 site directories. Preview reuses existing identity loading and loopback TLS.
 See [the exact 0.2 limits and tests](docs/websites-0.2.md). Linux local TLS/relay
 simulations do not establish Windows-runtime, real NAT or Internet behavior.
+
+## Desktop alpha 0.3 distribution and local privacy
+
+Packages and installers are unsigned. Verify published SHA-256 values and their
+provenance; a checksum alone does not establish a trustworthy publisher. The
+per-user installer does not add firewall exceptions, public listeners, services,
+startup tasks or accounts. Keep identity and state directories outside the
+installation and published sites. Back up private keys before upgrades or manual
+user-data deletion; installation, upgrade and uninstall do not replace keys.
+
+First-run defaults to local-only browsing and optional history remains disabled.
+Enabling networking or adding a bootstrap is an explicit user action; no public
+peers are bundled. Search terms stay within the rendered document in RAM. Reset
+clears preferences and optional history, retains bookmarks and keys, and does
+not erase the separate peer store. Persistent DHT anti-rollback metadata remains;
+there is no persistent document/image cache. The bounded RAM PNG decode cache
+is scoped to exact node identity, resource key and fetched bytes. Every resource
+request still authenticates the destination. Closing the browser drops RAM
+caches; active tabs may retain their own bounded document/image data.
+
+A cancelled in-flight connection may finish its already-started authenticated
+operation within existing deadlines; toggling local-only cancels queued/resource
+work and prevents new remote navigations. No network switch can retract bytes
+already sent. Explicit diagnostic probes contact only the requested site and its
+configured/signed DHT routes; they do not scan networks. Reports of successful
+TLS, advertisements or registrations never prove independent external delivery.
+Native accessibility APIs/screen-reader compatibility are not implemented.
+The software remains experimental, unaudited, not anonymous and unsuitable for
+sensitive activity. Strong anonymity routing is a future architectural option.

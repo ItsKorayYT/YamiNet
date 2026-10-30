@@ -35,9 +35,10 @@ def package(platform, binaries, output):
         shutil.copytree(ROOT / directory, stage / directory)
     shutil.copytree(ROOT / 'crates/yami-render/assets/fonts', stage / 'fonts')
     shutil.copytree(ROOT / 'deploy', stage / 'config-examples')
-    for path in (ROOT / f'packaging/{platform}').iterdir():
-        if path.is_file() and path.suffix != '.nsi':
-            shutil.copy2(path, stage / path.name)
+    launchers = ('Launch Browser.cmd',) if platform == 'windows' else (
+        'launch-browser.sh', 'install-desktop.sh', 'uninstall-desktop.sh')
+    for filename in launchers:
+        shutil.copy2(ROOT / f'packaging/{platform}' / filename, stage / filename)
     (stage / 'VERSION.txt').write_text(
         f'YamiNet {version}\n{platform} x86_64\nExperimental alpha; unsigned.\n', encoding='utf-8')
     files = sorted(p for p in stage.rglob('*') if p.is_file())

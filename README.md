@@ -1,4 +1,22 @@
-# YamiNet 0.2.0
+# YamiNet 0.3.0-alpha.1
+
+## Desktop alpha 0.3
+
+Experimental native Rust desktop packages are built for Windows and Linux.
+See [installing and first launch](docs/installation.md),
+[release builds](docs/releases.md), [alpha checklist](docs/alpha-checklist.md)
+and [validation evidence](docs/validation-0.3.md).
+Packages include the browser, node, relay, fonts, examples and documentation;
+end users do not need Rust. Releases are unsigned and require explicit maintainer
+publication; CI artifacts are available only after successful jobs.
+
+The alpha adds local-only onboarding/preferences, Unicode find-in-page, keyboard
+focus/navigation, bounded identity-scoped PNG decode reuse, guided offline
+`yami-node site setup` and explicit authenticated document/PNG probes. Existing
+YLang/YSL 0.1 and 0.2, YNP, DHT, TLS and relay architecture is retained.
+No telemetry, accounts, mandatory central peer, public autorun or firewall changes.
+This is not anonymous, production-secure or suitable for sensitive activity.
+
 
 An experimental Rust platform for an independent document web. YLang is content,
 YSL is presentation, YNP carries documents, and Yami Render performs native

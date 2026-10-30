@@ -36,12 +36,19 @@ jobs:
         run: test "${GITHUB_REF_NAME}" = "v$(cargo metadata --no-deps --locked --format-version=1 | python -c 'import json,sys; print(next(p["version"] for p in json.load(sys.stdin)["packages"] if p["name"] == "yami-browser"))')"
       - name: Package Linux
         if: runner.os == 'Linux'
-        run: python packaging/package.py --platform linux
+        run: |
+          python packaging/package.py --platform linux
+          python packaging/verify.py dist/YamiNet-*-linux-x86_64
+          ldd dist/YamiNet-*-linux-x86_64/yami-browser > dist/linux-dependencies.txt
+          if grep -q "not found" dist/linux-dependencies.txt; then cat dist/linux-dependencies.txt; exit 1; fi
       - name: Package Windows
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
           $stage = python packaging/package.py --platform windows
+          python packaging/verify.py "$stage"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          if (-not (Test-Path "C:/Program Files (x86)/NSIS/makensis.exe")) { choco install nsis --no-progress -y }
           $version = (Get-Content "$stage/VERSION.txt" -First 1).Split(' ')[1]
           & 'C:/Program Files (x86)/NSIS/makensis.exe' "/DSTAGE=$stage" "/DVERSION=$version" packaging/windows/installer.nsi
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

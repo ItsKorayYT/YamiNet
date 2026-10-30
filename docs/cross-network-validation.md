@@ -237,3 +237,42 @@ validation report. Current automated document/PNG/relay tests use local sockets;
 these physical cross-network/Windows checks remain **unexecuted** here. Stop
 processes with Ctrl+C and follow the existing firewall cleanup instructions;
 never delete identity/state directories as part of shutdown.
+
+## 0.3 reproducible preflight and fetch probe
+
+The packaged node's `diagnose --config FILE` checks local configuration, identity,
+site validation, listener intent, DHT maintenance and relay-health snapshots.
+Snapshot timestamps and identities are printed; snapshots may be stale. It sends
+no packets without `--connect`. That flag attempts only configured pins, at most
+eight, with a fifteen-second shared connection budget. Successful TLS alone is
+not a relay registration, publication or fetch result.
+
+From the explicitly selected independent browser client:
+
+```
+yami-browser --config /private/browser.conf --probe yami://FULL-NODE-ID/home --asset cover
+```
+
+For a known direct endpoint use `--probe ynps://FULL-NODE-ID@IPv4:port/home`.
+The probe uses the production DHT resolver/direct or reverse-relay route,
+authenticates the exact destination (and relay, when used), parses the fetched
+YLang/YSL, fetches the explicitly requested same-owner PNG and decodes it within
+existing bounds. It prints a bounded versioned report without content or key
+material. Failure returns a nonzero exit code and a FAIL record; a failed PNG
+must not be recorded as a successful end-to-end site check. Without `--asset`,
+PNG is NOT RUN. The probe never changes firewalls or scans unrelated endpoints.
+
+An endpoint outside loopback does not establish an independent physical network.
+The report explicitly leaves that unverified. Record operator-observed VPS,
+Windows NAT and independent client topology separately in the report template.
+Document/PNG probes do not assert GUI rendering. Open the same address in the
+native browser and check image rendering, layout, links, Back/Forward, reload,
+multiple tabs, Unicode find, keyboard focus, relay indicators and outage recovery.
+
+Firewall requirements are TCP on the explicitly selected relay and DHT listener
+ports. Configure both VPS provider and OS inbound rules manually, scoped to
+intended sources when practical. Home relay-hosting needs outbound TCP to those
+pins; it does not require home inbound forwarding. Clients need outbound TCP to
+peer/relay/direct-site endpoints. No new UDP ports are required by this alpha.
+Store raw local diagnostics privately because preflight includes operator paths;
+redact paths and personal IPs before sharing. The browser probe omits local paths.

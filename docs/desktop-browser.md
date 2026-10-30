@@ -312,3 +312,25 @@ content. `--bootstrap ID@IPv4:port` and `--enable-relays` provide startup settin
 A verified relayed page shows **Verified node · TLS 1.3 · Relayed** and both full
 IDs separately. The destination is still pinned to the original yami:// address.
 See [Windows outbound-only hosting and public testing](public-relay.md).
+
+## Desktop alpha 0.3
+
+For installation without Rust, first launch, data locations and upgrades, see
+[installation.md](installation.md). The UI retains its existing native design.
+Settings provides local-only mode, explicit network browsing, relay preferences,
+reset and reopening onboarding. Config/bootstrap management remains local.
+
+Ctrl+L focuses/selects the address; Ctrl+T opens a tab; Ctrl+W closes it;
+Ctrl+R/F5 reload; Alt+Left/Right navigate; Ctrl+Tab/Shift+Ctrl+Tab switch tabs;
+Ctrl+D bookmarks; Ctrl+Shift+C copies the committed current address when no
+editor is focused. Ctrl+F opens find; Enter/Shift+Enter or F3/Shift+F3 advances
+matches; Escape closes find/dialogs. Editors support Ctrl+A/C/X/V, Shift+arrows,
+Home/End, deletion and Unicode/IME. macOS uses Command for command shortcuts,
+but macOS packaging is outside this milestone.
+
+Find searches rendered text locally, with exact Unicode matching. It does not
+search addresses/source syntax or send queries to peers. The current result is
+highlighted and scrolled into view; counts and previous/next controls appear in
+the find bar. Tab and Shift+Tab focus native controls and visible document links;
+Enter activates the focused control. See [accessibility.md](accessibility.md)
+for the tested scope and missing native accessibility tree.

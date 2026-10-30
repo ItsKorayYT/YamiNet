@@ -312,3 +312,53 @@ The images are written to `target/screenshots/`.
 
 Anyone who can write to the site directory controls what it serves, including
 through hard links. Keep the directory private to you.
+
+## Guided alpha setup (no development tools required)
+
+From the extracted package, run (quote actual paths with spaces):
+
+```
+yami-node site setup /path/to/new-site --new personal --identity /private/yaminet/my-identity --output /private/yaminet/host.conf
+```
+
+Windows example, in PowerShell:
+
+```powershell
+.\yami-node.exe site setup "$env:USERPROFILE\Documents\MyYamiSite" --new personal --identity "$env:LOCALAPPDATA\YamiNet\my-host-key" --output "$env:LOCALAPPDATA\YamiNet\my-host.conf"
+```
+
+Omit `--new personal` to select an existing site. `blog` and `portfolio` are also
+available templates. Setup uses the production validator, creates or loads the
+persistent identity, validates the networking profile, saves a **new** config
+without overwriting one, and prints the canonical address. It performs no network
+requests or hosting by default. Keys must be outside the site/application tree.
+Local mode listens on loopback port 7443 with a local DHT advertisement when
+explicitly started; the printed canonical address is not proof of resolution.
+For a local browser use an explicit local config/bootstrap, or the direct
+`ynps://ID@127.0.0.1:7443/home` address. Port conflicts require editing the saved
+listen/advertise ports together before starting.
+
+Add `--preview` for a loopback TLS preview using the existing preview command.
+Add `--start` to start the selected host explicitly. Otherwise run
+`yami-node --config /private/yaminet/host.conf` later. Preview and start are
+mutually exclusive. Add a full trusted `--relay ID@public-IPv4:port` pin and one
+or more `--bootstrap ID@public-IPv4:port` pins for outbound relay hosting.
+This creates a public-network profile without opening an inbound home listener.
+Choose and verify those services yourself; none are bundled. Use
+`yami-node diagnose --config FILE` for offline preflight and snapshots, and
+`--connect` for bounded explicit pin checks. A registration/publication snapshot
+may be stale; prove document and PNG delivery from an independent connection.
+
+### Optional persistent Windows hosting
+
+Use Task Scheduler's **Create Task** under your ordinary user account. Select
+**Run only when user is logged on** initially; leave highest privileges disabled.
+Program: the absolute packaged `yami-node.exe`; arguments:
+`--config "C:\Users\you\AppData\Local\YamiNet\my-host.conf"`; set **Start in**
+to the application directory. Choose a manual trigger first and inspect host
+and DHT status with the diagnostic CLI. The node does not require an open
+development terminal. Enabling a logon/startup trigger is a separate opt-in action.
+Task Scheduler history and node health snapshots help diagnose failures; protect
+any redirected logs because they may contain operator filesystem paths.
+Disable and remove the task before uninstalling or moving the application.
+No task/service or firewall rule is created by the package or setup command.

@@ -7,7 +7,10 @@ Unicode true
 !error "Pass /DVERSION=release-version"
 !endif
 Name "YamiNet ${VERSION}"
-OutFile "YamiNet-${VERSION}-windows-x86_64-setup.exe"
+!ifndef OUTPUT
+!define OUTPUT "YamiNet-${VERSION}-windows-x86_64-setup.exe"
+!endif
+OutFile "${OUTPUT}"
 InstallDir "$LOCALAPPDATA\Programs\YamiNet"
 RequestExecutionLevel user
 SetCompressor /SOLID lzma

@@ -27,3 +27,13 @@ Do not put identities inside the application folder. Upgrades replace only the
 application bundle; keep the existing user state directory. Uninstallation keeps
 identities, bootstrap pins, bookmarks and optional history. Back up private keys
 before manually deleting user data. See installation.md and alpha-checklist.md.
+
+For a staged real package, run `python packaging/verify.py STAGE` on its native
+OS. It checks every manifest hash, executable versions and all five included
+sites without network access. `--no-execute` checks only the manifest when
+inspecting a cross-built package. Local Windows GNU cross-builds can use
+`cargo build --workspace --release --locked --target x86_64-pc-windows-gnu`
+with an installed MinGW cross linker, then supply that target's release directory
+to `package.py --binaries`. This is separate from native Windows MSVC CI and
+requires Windows runtime testing. NSIS accepts an absolute `OUTPUT` define to
+keep installers outside the source directory.

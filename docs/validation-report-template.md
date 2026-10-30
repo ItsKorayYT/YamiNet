@@ -35,3 +35,21 @@ Automatic loopback/stream-impairment test results (record separately):
 Direct NAT traversal/QUIC prototype: NOT IMPLEMENTED; only documented design and
 socket-free consent/replay prerequisites exist. Independent security audit: NOT
 PERFORMED. Do not attach private keys, credentials or raw environment dumps.
+
+## 0.3 alpha supplement
+
+| Scenario | PASS / FAIL / NOT RUN | Actual evidence |
+| --- | --- | --- |
+| Offline host/site/config preflight | NOT RUN | |
+| Explicit configured pin checks | NOT RUN | |
+| `--probe yami://ID/home --asset cover` from independent client | NOT RUN | |
+| Direct document + PNG comparison | NOT RUN | |
+| Wrong destination and relay pins rejected | NOT RUN | |
+| First launch with no external requests | NOT RUN | |
+| Windows install/upgrade/uninstall and key/library preservation | NOT RUN | |
+| Linux launcher lifecycle | NOT RUN | |
+| Keyboard/find/IME/focus and manual native rendering | NOT RUN | |
+
+Attach the versioned probe output, exit status, timestamp, public identities and
+observed topology. Record each stage independently; do not promote loopback or CI
+results to physical-network PASS. Exclude secret keys and redact private paths.
