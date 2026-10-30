@@ -1,0 +1,36 @@
+@style 0.2
+canvas
+  width 960
+  padding 24
+  paper #101820
+text
+  ink #d8e2ec
+  size 18
+  line-height 155
+heading
+  ink #61dafb
+  size 40
+  weight 600
+section
+  ink #b4d273
+  size 24
+link
+  ink #ffa970
+  hover #ffd5a0
+  active #61dafb
+card
+  paper #192531
+  ink #d8e2ec
+  border #405970
+  border-width 1
+  radius 14
+  padding 20
+  gap 20
+row
+  gap 20
+  min-width 240
+image
+  width 800
+  height 500
+  align center
+  gap 16

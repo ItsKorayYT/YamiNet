@@ -16,7 +16,11 @@ use ynp::{DocumentData, Incoming, LocalListener, LoopbackTcp};
 use ynp_tls::{TlsListener, TlsTransport};
 
 type Result<T> = std::result::Result<T, Box<dyn Error>>;
-const USAGE: &str = "yami-node diagnose --config <file> [--connect]
+const USAGE: &str = "yami-node site new <directory> [personal|blog|portfolio]
+yami-node site check <directory> | info <directory>
+yami-node site build <directory> <output-directory>
+yami-node site preview <directory> [--identity <identity-directory>]
+yami-node diagnose --config <file> [--connect]
 yami-node --config <file> | check-config <file>
 yami-node host-relay <site-directory> --identity <existing-key-directory> --relay <relay-ID@IPv4:port> [--relay <second-relay-ID@IPv4:port>] [--dht-dir <peer-directory>] [--dht-local] [--dht-renew-secs 30..43200] [--dht-health-secs 5..3600]
 yami-node demo
@@ -259,11 +263,9 @@ fn serve_dir(address: SocketAddr, root: &str, options: ServeOptions) -> Result<(
             };
             let address = listener.local_addr()?;
             let shutdown = yami_node::shutdown::Shutdown::default();
-            if options.dht_maintain {
-                let signal = shutdown.clone();
-                ctrlc::set_handler(move || signal.stop())?;
-                listener.set_nonblocking(true)?;
-            }
+            let signal = shutdown.clone();
+            ctrlc::set_handler(move || signal.stop())?;
+            listener.set_nonblocking(true)?;
             let mut maintenance_worker = None;
             let dht = if options.dht {
                 let network = if options.dht_local {
@@ -1010,6 +1012,9 @@ fn run() -> Result<()> {
         println!("{USAGE}");
         return Ok(());
     }
+    if args[0] == "site" {
+        return site_command(&args[1..]);
+    }
     if args[0] == "host-relay" {
         return host_relay(&args[1..]);
     }
@@ -1073,6 +1078,44 @@ fn print_source(doc: &DocumentData) {
     for line in doc.source.lines() {
         println!("{}", line.escape_debug());
     }
+}
+fn site_command(args: &[String]) -> Result<()> {
+    use yami_node::authoring;
+    let report = match args {
+        [command, dir] if command == "new" => authoring::new_site(dir, "personal")?,
+        [command, dir, template] if command == "new" => authoring::new_site(dir, template)?,
+        [command, dir] if command == "check" || command == "info" => authoring::check(dir)?,
+        [command, dir, out] if command == "build" => authoring::build(dir, out)?,
+        [command, dir, rest @ ..] if command == "preview" => {
+            let report = authoring::check(dir)?;
+            let identity = match rest {
+                [] => default_dir().ok_or("no identity directory; pass --identity")?,
+                [flag, path] if flag == "--identity" => PathBuf::from(path),
+                _ => return Err(USAGE.into()),
+            };
+            eprintln!("Validated {} pages and {} PNG assets. Preview listens only on loopback. Identity/state stays outside the site directory.",report.pages.len(),report.assets.len());
+            let identity = identity
+                .to_str()
+                .ok_or("identity path is not Unicode")?
+                .to_string();
+            let options = serve_dir_options(&["--tls".into(), "--identity".into(), identity])?;
+            return serve_dir("127.0.0.1:0".parse()?, dir, options);
+        }
+        _ => return Err(USAGE.into()),
+    };
+    println!(
+        "Valid site: {} pages, {} PNG assets, {} bytes",
+        report.pages.len(),
+        report.assets.len(),
+        report.bytes
+    );
+    for key in report.pages {
+        println!("Page /{key}");
+    }
+    for key in report.assets {
+        println!("PNG {key}");
+    }
+    Ok(())
 }
 fn main() {
     if let Err(error) = run() {

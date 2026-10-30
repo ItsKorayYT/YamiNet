@@ -19,7 +19,10 @@ yami-identity = { path = "../../crates/yami-identity" }
 ynp = { path = "../../crates/ynp" }
 ynp-tls = { path = "../../crates/ynp-tls" }
 
-[dev-dependencies]
 yami-render = { path = "../../crates/yami-render" }
-rustls = { version = "0.23.46", default-features = false, features = ["ring", "std"] }
+ysl = { path = "../../crates/ysl" }
+
 ylang = { path = "../../crates/ylang" }
+
+[dev-dependencies]
+rustls = { version = "0.23.46", default-features = false, features = ["ring", "std"] }

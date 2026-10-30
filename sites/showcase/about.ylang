@@ -1,0 +1,11 @@
+@page 0.2
+  title Selected project
+= Selected project
+This page belongs to the same stable cryptographic identity.
+:: card Publishing
+  Update these files without replacing your identity directory.
+  :: steps
+    + Edit a page
+    + Run site check
+    + Restart or reload the site
+> /home | Return home

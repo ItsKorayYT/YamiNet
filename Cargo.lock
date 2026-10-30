@@ -2375,6 +2375,7 @@ dependencies = [
  "ynp",
  "ynp-discovery",
  "ynp-tls",
+ "ysl",
 ]
 
 [[package]]

@@ -1,0 +1,24 @@
+@page 0.2
+  title My Yami home
+= My Yami home
+Welcome to my own corner of YamiNet. This is [strong: my website], written in [code: YLang 0.2].
+Text can wrap naturally across
+adjacent source lines, including Unicode: café · 日本語.
+
+! cover | Abstract mountains beneath a warm sunset
+:: card About me
+  A quiet place for [em: original ideas] and native documents.
+  :: list
+    - Write something useful
+    - Keep your identity across updates
+      :: steps
+        + Check your site
+        + Publish using your existing node
+  > /about | Read more
+---
+:: row Explore
+  :: card Notes
+    Pages stay inert and readable.
+  :: card Projects
+    Images are served by this node through authenticated YNP.
+> /about | About this site
