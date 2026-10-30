@@ -16,7 +16,8 @@ use ynp::{DocumentData, Incoming, LocalListener, LoopbackTcp};
 use ynp_tls::{TlsListener, TlsTransport};
 
 type Result<T> = std::result::Result<T, Box<dyn Error>>;
-const USAGE: &str = "yami-node demo
+const USAGE: &str = "yami-node host-relay <site-directory> --identity <existing-key-directory> --relay <relay-ID@IPv4:port> [--relay <second-relay-ID@IPv4:port>] [--dht-dir <peer-directory>] [--dht-local] [--dht-renew-secs 30..43200] [--dht-health-secs 5..3600]
+yami-node demo
 yami-node tls-demo <identity-directory-1> <identity-directory-2>
 yami-node serve <loopback-IP:port> <key> <document.ylang> <style.ysl>
 yami-node serve-dir <loopback-IP:port> <site-directory> [--workers 1..32] [--identity <identity-directory> [--tls]]
@@ -880,11 +881,103 @@ fn identity(args: &[String]) -> Result<()> {
     }
     Ok(())
 }
+/// Outbound-only hosting: no listening socket and no inbound router rule.
+fn host_relay(args: &[String]) -> Result<()> {
+    use yami_node::{
+        maintenance::{Config, Maintainer, Worker},
+        relay_host::{ActiveRoutes, Hosts},
+        shutdown::Shutdown,
+    };
+    let root = args.first().ok_or(USAGE)?;
+    let (mut keys, mut directory, mut local) = (None, None, false);
+    let mut routes = Vec::new();
+    let mut config = Config::default();
+    let mut args = args[1..].iter();
+    while let Some(flag) = args.next() {
+        match flag.as_str() {
+            "--identity" if keys.is_none() => keys = Some(PathBuf::from(args.next().ok_or(USAGE)?)),
+            "--dht-dir" if directory.is_none() => {
+                directory = Some(PathBuf::from(args.next().ok_or(USAGE)?))
+            }
+            "--dht-local" if !local => local = true,
+            "--relay" if routes.len() < 2 => {
+                let (id, endpoint) = args
+                    .next()
+                    .ok_or(USAGE)?
+                    .split_once('@')
+                    .ok_or("relay must be full-ID@IPv4:port")?;
+                routes.push(yami_dht::RelayRoute {
+                    relay: id.parse()?,
+                    endpoint: endpoint.parse()?,
+                });
+            }
+            "--dht-renew-secs" => config.renew_secs = args.next().ok_or(USAGE)?.parse()?,
+            "--dht-health-secs" => config.health_secs = args.next().ok_or(USAGE)?.parse()?,
+            _ => return Err(USAGE.into()),
+        }
+    }
+    let network = if local {
+        yami_dht::Network::Loopback
+    } else {
+        yami_dht::Network::Public
+    };
+    config.validate()?;
+    if routes.is_empty() {
+        return Err(
+            "host-relay requires one or two explicitly trusted --relay ID@IPv4:port pins".into(),
+        );
+    }
+    routes.sort();
+    if routes.windows(2).any(|p| p[0] == p[1]) {
+        return Err("duplicate relay".into());
+    }
+    for route in &routes {
+        network.check(route.endpoint)?;
+    }
+    let identity = Arc::new(load_identity(
+        &keys.ok_or("host-relay needs an existing --identity directory")?,
+    )?);
+    let directory = directory.map_or_else(yami_node::peers::default_dir, Ok)?;
+    let site = Arc::new(open_site(root)?);
+    let service = yami_dht::Service::open(
+        dht_path(&directory, network, "server"),
+        *identity.id(),
+        network,
+    )?;
+    let engine = Maintainer::new(service.clone(), identity.clone(), vec![], config)?;
+    let active = ActiveRoutes::default();
+    let shutdown = Shutdown::default();
+    let signal = shutdown.clone();
+    ctrlc::set_handler(move || signal.stop())?;
+    let _hosts = Hosts::start(
+        routes,
+        identity.clone(),
+        site,
+        service,
+        shutdown.clone(),
+        active.clone(),
+    )?;
+    let mut worker =
+        Worker::start_with_routes(engine, directory, None, shutdown.clone(), Some(active))?;
+    eprintln!(
+        "Outbound-only hosting as {}; open yami://{}/home; no direct listener",
+        identity.id(),
+        identity.id()
+    );
+    while !shutdown.is_stopped() {
+        shutdown.wait(std::time::Duration::from_secs(1));
+    }
+    worker.stop();
+    Ok(())
+}
 fn run() -> Result<()> {
     let args: Vec<String> = std::env::args().skip(1).collect();
     if args.is_empty() || args == ["--help"] {
         println!("{USAGE}");
         return Ok(());
+    }
+    if args[0] == "host-relay" {
+        return host_relay(&args[1..]);
     }
     if args[0] == "identity" {
         eprintln!("{IDENTITY_NOTE}");

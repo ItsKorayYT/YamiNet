@@ -204,3 +204,29 @@ suite: **157 passed, 8 existing opt-in tests ignored**. This includes the new
 maintenance simulation and existing DHT/TLS/native-browser compatibility tests.
 Owned public endpoints, selected-interface multicast and manual visual capture
 tests remain opt-in; those environments were not validated by this run.
+
+## Outbound-only relay hosting
+
+`yami-node host-relay SITE --identity KEYS --relay RELAY-ID@IPv4:port
+--dht-dir PEERS` loads existing keys and opens no listening socket. Configure
+ordinary DHT bootstrap peers in PEERS first. Add `--dht-local` only for an
+isolated loopback simulation. Up to two explicit relay pins are supported, with
+one bounded host worker and one outstanding registration/tunnel per relay.
+Each worker uses the existing signed channel-bound challenge protocol and
+250 ms–5 s bounded exponential reconnect delay with OS-random jitter.
+
+The existing DHT maintenance worker samples live registrations once per second.
+Changes schedule a new signed publication, with at least five seconds between
+publication passes. Each accepted registration is retained only through its
+30-second lease or until the worker reports completion/disconnection. Idle leases
+re-register automatically; a serving slot re-registers after its document request.
+DHT publication does not block the registration worker or create extra connections
+per request. Configured relays operate independently, providing bounded fallback.
+
+New publications contain only currently registered routes. Empty signed v2 records
+withdraw all locations and retain the persisted sequence high-water mark. Restart
+always reserves a newer sequence and begins with no stale relay routes. The usual
+DHT maintenance TTL/renewal, per-peer backoff, RPC budgets and clean stop apply.
+Remote peers may retain a previously signed route until expiry; it is a location
+claim, never proof of availability. Disconnected hosts therefore fail closed at
+tunnel establishment and cannot acquire a verified browser indicator.

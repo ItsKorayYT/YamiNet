@@ -2356,6 +2356,7 @@ dependencies = [
  "rustls",
  "yami-dht",
  "yami-identity",
+ "yami-relay",
  "ylang",
  "ynp",
  "ynp-discovery",

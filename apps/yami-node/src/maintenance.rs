@@ -13,7 +13,7 @@ use std::{
     thread,
     time::{Duration, Instant},
 };
-use yami_dht::{Contact, Network, PeerRecord, RpcConnector, Service};
+use yami_dht::{Contact, Network, PeerRecord, RelayRoute, RpcConnector, Service};
 use yami_identity::NodeIdentity;
 
 pub const CONTACTS_PER_PASS: usize = 4;
@@ -82,6 +82,7 @@ pub struct Maintainer {
     network: Network,
     identity: Arc<NodeIdentity>,
     endpoints: Vec<SocketAddrV4>,
+    routes: Vec<RelayRoute>,
     config: Config,
     record: PeerRecord,
     initial: bool,
@@ -113,6 +114,7 @@ impl Maintainer {
             network,
             identity,
             endpoints,
+            routes: Vec::new(),
             config,
             record,
             initial: true,
@@ -154,6 +156,27 @@ impl Maintainer {
         endpoints.dedup();
         if endpoints != self.endpoints {
             self.endpoints = endpoints;
+            self.initial = false;
+            self.next_publication = self.service.now()?;
+        }
+        Ok(())
+    }
+    /// Live outbound registrations feed the existing publication scheduler.
+    pub fn set_routes(&mut self, mut routes: Vec<RelayRoute>) -> io::Result<()> {
+        routes.sort();
+        routes.dedup();
+        // Validate before replacing configuration, including the empty withdrawal.
+        PeerRecord::sign_routes(
+            &self.identity,
+            self.endpoints.clone(),
+            routes.clone(),
+            self.service.now()?.saturating_add(yami_dht::MAX_RECORD_TTL),
+            1,
+            self.network,
+            self.service.now()?,
+        )?;
+        if routes != self.routes {
+            self.routes = routes;
             self.initial = false;
             self.next_publication = self.service.now()?;
         }
@@ -203,10 +226,12 @@ impl Maintainer {
                 self.initial = false;
             } else {
                 self.initial = false;
-                match self
-                    .service
-                    .prepare_self(&self.identity, self.endpoints.clone(), at)
-                {
+                match self.service.prepare_self_routes(
+                    &self.identity,
+                    self.endpoints.clone(),
+                    self.routes.clone(),
+                    at,
+                ) {
                     Ok(record) => self.record = record,
                     Err(error) => {
                         self.last_error = Some(Failure::State);
@@ -448,10 +473,19 @@ pub struct Worker {
 }
 impl Worker {
     pub fn start(
+        engine: Maintainer,
+        directory: PathBuf,
+        endpoints_file: Option<PathBuf>,
+        shutdown: Shutdown,
+    ) -> io::Result<Self> {
+        Self::start_with_routes(engine, directory, endpoints_file, shutdown, None)
+    }
+    pub fn start_with_routes(
         mut engine: Maintainer,
         directory: PathBuf,
         endpoints_file: Option<PathBuf>,
         shutdown: Shutdown,
+        routes: Option<crate::relay_host::ActiveRoutes>,
     ) -> io::Result<Self> {
         let signal = shutdown.clone();
         let network = engine.service.snapshot()?.network;
@@ -469,6 +503,11 @@ impl Worker {
                 let mut startup = true;
                 while !signal.is_stopped() {
                     let mut configuration_error = false;
+                    if let Some(routes) = &routes {
+                        if routes.current().and_then(|r| engine.set_routes(r)).is_err() {
+                            configuration_error = true;
+                        }
+                    }
                     let seeds = read_seeds(&directory, network).unwrap_or_else(|_| {
                         configuration_error = true;
                         Vec::new()
@@ -534,7 +573,11 @@ impl Worker {
                         .now()
                         .map(|at| engine.next_due().saturating_sub(at).clamp(5, 60))
                         .unwrap_or(30);
-                    signal.wait(Duration::from_secs(delay));
+                    signal.wait(Duration::from_secs(if routes.is_some() {
+                        delay.min(1)
+                    } else {
+                        delay
+                    }));
                 }
                 if let Ok(status) = engine.status(false) {
                     let _ = status::write_status(&path, &status);

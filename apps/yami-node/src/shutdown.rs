@@ -20,6 +20,9 @@ impl Shutdown {
         self.0.stopped.store(true, Ordering::SeqCst);
         self.0.changed.notify_all();
     }
+    pub fn flag(&self) -> &AtomicBool {
+        &self.0.stopped
+    }
     pub fn is_stopped(&self) -> bool {
         self.0.stopped.load(Ordering::SeqCst)
     }

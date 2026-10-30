@@ -9,6 +9,7 @@ license.workspace = true
 workspace = true
 
 [dependencies]
+yami-relay = { path = "../../crates/yami-relay" }
 ctrlc = { version = "3.5", features = ["termination"] }
 getrandom = "0.4.3"
 yami-dht = { path = "../../crates/yami-dht" }

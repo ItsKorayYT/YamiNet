@@ -733,3 +733,48 @@ fn cli_opt_in_status_sigterm_and_restart_are_clean() {
         assert!(!output.status.success());
     }
 }
+
+#[test]
+fn relay_only_publication_withdrawal_renewal_and_restart_keep_high_water() {
+    let scratch = Scratch::new("relay-lifecycle");
+    let identity = Arc::new(NodeIdentity::generate().unwrap());
+    let clock = Arc::new(TestClock::new());
+    let at = clock.now().unwrap();
+    let path = scratch.0.join("host.cache");
+    let service = service(&path, *identity.id(), &clock);
+    let mut engine = Maintainer::new(
+        service.clone(),
+        identity.clone(),
+        vec![],
+        Config {
+            renew_secs: 30,
+            health_secs: 5,
+        },
+    )
+    .unwrap();
+    let route = yami_dht::RelayRoute {
+        relay: *NodeIdentity::generate().unwrap().id(),
+        endpoint: "127.0.0.1:7444".parse().unwrap(),
+    };
+    engine.set_routes(vec![route]).unwrap();
+    let signal = Shutdown::default();
+    engine.tick(&[], &signal, 1, &yami_dht::PinnedTls).unwrap();
+    let first = engine.record().clone();
+    assert!(first.endpoints().is_empty());
+    assert_eq!(first.relay_routes(), &[route]);
+    clock.set(at + 60);
+    engine.tick(&[], &signal, 1, &yami_dht::PinnedTls).unwrap();
+    assert!(engine.record().sequence() > first.sequence());
+    engine.set_routes(vec![]).unwrap();
+    clock.set(at + 120);
+    engine.tick(&[], &signal, 1, &yami_dht::PinnedTls).unwrap();
+    let sequence = engine.record().sequence();
+    assert!(engine.record().relay_routes().is_empty());
+    drop(engine);
+    drop(service);
+    let restored =
+        Service::open_with_clock(&path, *identity.id(), Network::Loopback, clock).unwrap();
+    let engine = Maintainer::new(restored, identity, vec![], Config::default()).unwrap();
+    assert!(engine.record().sequence() > sequence);
+    assert!(engine.record().relay_routes().is_empty());
+}
