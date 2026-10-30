@@ -21,7 +21,7 @@ use winit::{
 };
 use yami_render::native::{NativeDocument, TextEngine};
 
-pub fn run(args: Vec<String>) -> Result<(), Box<dyn Error>> {
+pub fn run(args: Vec<String>, relay_enabled: Option<bool>) -> Result<(), Box<dyn Error>> {
     if args.len() > 1 {
         return Err("--desktop accepts at most one yami:// or ynps:// address, localhost ynp:// address or built-in local:welcome/local:about".into());
     }
@@ -31,6 +31,9 @@ pub fn run(args: Vec<String>) -> Result<(), Box<dyn Error>> {
         let _ = proxy.send_event(());
     });
     let loader = Loader::new(Arc::clone(&wake))?;
+    if let Some(enabled) = relay_enabled {
+        loader.set_relay_enabled(enabled);
+    }
     let mut app = Desktop::new(loader);
     app.discovery = crate::discovery::Discovery::new(wake);
     if let Some(address) = args.first() {
@@ -134,6 +137,7 @@ struct Desktop {
     fatal: Option<String>,
     clipboard: Option<arboard::Clipboard>,
     composing: bool,
+    bootstrap_edit: bool,
     /// Logical size and scale used when rendering without a window (tests).
     headless: Option<(f32, f32, f32)>,
 }
@@ -160,6 +164,7 @@ impl Desktop {
             fatal: None,
             clipboard: None,
             composing: false,
+            bootstrap_edit: false,
             headless: None,
         }
     }
@@ -182,6 +187,7 @@ impl Desktop {
         chrome::viewport(w, h)
     }
     fn clear_focus(&mut self) {
+        self.bootstrap_edit = false;
         self.composing = false;
         self.editor.focus = None;
         self.keyboard_focus = None;
@@ -192,12 +198,27 @@ impl Desktop {
         } else {
             self.browser.active().address.clone()
         };
-        let _ = self.browser.navigate(&value, &self.loader);
+        if self.bootstrap_edit {
+            if let Err(error) = yami_browser::native::add_bootstrap_from_environment(&value) {
+                self.browser.active_mut().state = PageState::Error(error);
+            }
+        } else {
+            let _ = self.browser.navigate(&value, &self.loader);
+        }
         self.clear_focus();
         self.redraw();
     }
     fn act(&mut self, action: Action) {
         match action {
+            Action::Bootstrap => {
+                self.clear_focus();
+                self.bootstrap_edit = true;
+                self.editor.activate("Paste full node-ID@IPv4:port");
+            }
+            Action::ToggleRelay => {
+                self.loader.set_relay_enabled(!self.loader.relay_enabled());
+                self.clear_focus();
+            }
             Action::FindLocal => {
                 self.discovery.toggle();
                 self.clear_focus();
@@ -423,6 +444,7 @@ impl Desktop {
         let viewport = self.viewport();
         let mut c = Canvas::new(pix, &mut self.text, scale);
         let mut scene = chrome::paint(&mut c, &self.browser, &ui);
+        chrome::relay_setting(&mut c, &mut scene, &ui, self.loader.relay_enabled());
         match &self.browser.active().state {
             PageState::Home => chrome::home(&mut c, &mut scene, &ui),
             PageState::Loading => {

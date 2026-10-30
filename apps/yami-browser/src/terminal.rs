@@ -19,7 +19,7 @@ fn read_file(path: &str, limit: usize) -> io::Result<String> {
     }
     Ok(text)
 }
-pub fn run(arguments: Vec<String>) -> Result<(), Box<dyn Error>> {
+pub fn run(arguments: Vec<String>, relay_enabled: Option<bool>) -> Result<(), Box<dyn Error>> {
     let mut args = arguments.into_iter();
     let mut source = None;
     let mut style_path = None;
@@ -54,7 +54,17 @@ pub fn run(arguments: Vec<String>) -> Result<(), Box<dyn Error>> {
     let (text, remote_style) = match source.as_deref() {
         Some(url) if url.starts_with(yami_browser::native::SCHEME) => {
             let address = yami_browser::native::Address::parse(url)?;
-            let (data, _) = yami_browser::native::Resolver::from_environment()?.fetch(&address)?;
+            let resolver = yami_browser::native::Resolver::from_environment()?;
+            if let Some(enabled) = relay_enabled {
+                resolver.set_relay_enabled(enabled);
+            }
+            let (data, info) = resolver.fetch_verified(&address)?;
+            if let Some(relay) = info.relay {
+                eprintln!(
+                    "Verified node · TLS 1.3 · Relayed; destination {}; relay {relay}",
+                    address.id
+                );
+            }
             eprintln!(
                 "Verified node {} over TLS 1.3 after distributed lookup",
                 address.id

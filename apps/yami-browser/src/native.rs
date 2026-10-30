@@ -1,5 +1,13 @@
 //! Native identity addresses. Discovery supplies locations, never TLS trust.
-use std::{net::SocketAddr, path::PathBuf, sync::OnceLock};
+use std::{
+    net::SocketAddr,
+    path::PathBuf,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc, OnceLock,
+    },
+    time::{Duration, Instant},
+};
 use yami_dht::{Contact, Network, PeerRecord, Service};
 use yami_identity::NodeId;
 use yami_node::peers::PeerStore;
@@ -36,10 +44,35 @@ impl Address {
 
 /// Files and sockets are opened lazily, on a loader worker. The two browser
 /// workers share Service's synchronized persistent validation/high-water cache.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ConnectionInfo {
+    pub endpoint: SocketAddr,
+    /// Set only after BOTH relay and destination completed their pinned TLS handshakes.
+    pub relay: Option<NodeId>,
+}
+pub const FETCH_TIMEOUT: Duration = Duration::from_secs(30);
+struct DeadlineConnector(Instant);
+impl yami_dht::RpcConnector for DeadlineConnector {
+    fn connect(
+        &self,
+        contact: Contact,
+        budget: Duration,
+    ) -> std::io::Result<Box<dyn ynp::Connection>> {
+        let budget = budget.min(self.0.saturating_duration_since(Instant::now()));
+        if budget.is_zero() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::TimedOut,
+                "browser total deadline exceeded",
+            ));
+        }
+        yami_dht::RpcConnector::connect(&yami_dht::PinnedTls, contact, budget)
+    }
+}
 pub struct Resolver {
     directory: PathBuf,
     network: Network,
     service: OnceLock<Result<Service, String>>,
+    pub(crate) relay_enabled: Arc<AtomicBool>,
 }
 impl Resolver {
     pub fn new(directory: PathBuf, network: Network) -> Self {
@@ -47,6 +80,7 @@ impl Resolver {
             directory,
             network,
             service: OnceLock::new(),
+            relay_enabled: Arc::new(AtomicBool::new(false)),
         }
     }
     pub fn from_environment() -> Result<Self, String> {
@@ -58,7 +92,20 @@ impl Resolver {
         };
         let directory = yami_node::peers::default_dir()
             .map_err(|_| "Cannot locate browser peer configuration; set YAMINET_PEER_DIR.")?;
-        Ok(Self::new(directory, network))
+        let resolver = Self::new(directory, network);
+        let enabled = match std::env::var("YAMINET_BROWSER_RELAYS").as_deref() {
+            Ok("1") => true,
+            Ok("0") | Err(std::env::VarError::NotPresent) => false,
+            _ => return Err("YAMINET_BROWSER_RELAYS must be 0 or 1".into()),
+        };
+        resolver.set_relay_enabled(enabled);
+        Ok(resolver)
+    }
+    pub fn set_relay_enabled(&self, enabled: bool) {
+        self.relay_enabled.store(enabled, Ordering::SeqCst);
+    }
+    pub fn relay_enabled(&self) -> bool {
+        self.relay_enabled.load(Ordering::SeqCst)
     }
     pub fn state_path(&self) -> PathBuf {
         let mode = if self.network == Network::Public {
@@ -89,6 +136,14 @@ impl Resolver {
             .collect())
     }
     pub fn fetch(&self, address: &Address) -> Result<(DocumentData, SocketAddr), String> {
+        self.fetch_verified(address)
+            .map(|(data, info)| (data, info.endpoint))
+    }
+    pub fn fetch_verified(
+        &self,
+        address: &Address,
+    ) -> Result<(DocumentData, ConnectionInfo), String> {
+        let deadline = Instant::now() + FETCH_TIMEOUT;
         // Also validate programmatically constructed addresses at the boundary.
         ynp::validate_key(&address.key).map_err(|_| "Invalid Yami document key.")?;
         let service = self.service()?;
@@ -100,7 +155,7 @@ impl Resolver {
         let cached = state.get(address.id, at);
         let mut previous_failure = None;
         if let Some(record) = &cached {
-            match self.fetch_record(address, record) {
+            match self.fetch_record(address, record, deadline) {
                 Ok(data) => return Ok(data),
                 Err(FetchError::Document(message)) => return Err(message),
                 Err(error) => previous_failure = Some(error.message()),
@@ -123,9 +178,20 @@ impl Resolver {
             }));
         }
         let found = if let Some(record) = &cached {
-            yami_dht::lookup_newer(service, address.id, &seeds, record.sequence())
+            yami_dht::lookup_newer_with_connector(
+                service,
+                address.id,
+                &seeds,
+                record.sequence(),
+                &DeadlineConnector(deadline),
+            )
         } else {
-            yami_dht::lookup(service, address.id, &seeds)
+            yami_dht::lookup_with_connector(
+                service,
+                address.id,
+                &seeds,
+                &DeadlineConnector(deadline),
+            )
         }
         .map_err(|_| "DHT lookup failed: peer state is invalid or unavailable.")?;
         if let Some(record) = found.record {
@@ -136,7 +202,7 @@ impl Resolver {
                 .is_none_or(|old| record.sequence() > old.sequence())
             {
                 return self
-                    .fetch_record(address, &record)
+                    .fetch_record(address, &record, deadline)
                     .map_err(FetchError::message);
             }
         }
@@ -158,7 +224,8 @@ impl Resolver {
         &self,
         address: &Address,
         record: &PeerRecord,
-    ) -> Result<(DocumentData, SocketAddr), FetchError> {
+        deadline: Instant,
+    ) -> Result<(DocumentData, ConnectionInfo), FetchError> {
         let at = yami_dht::now().map_err(|_| FetchError::Record)?;
         if record.id() != address.id || record.verify(self.network, at).is_err() {
             return Err(FetchError::Record);
@@ -173,7 +240,10 @@ impl Resolver {
                 )
                 .map_err(|_| FetchError::Record)?;
             // `connect_with_timeout` bounds handshake AND subsequent YNP I/O.
-            match transport.connect_with_timeout((*endpoint).into(), yami_dht::RPC_TIMEOUT) {
+            match transport.connect_with_timeout(
+                (*endpoint).into(),
+                yami_dht::RPC_TIMEOUT.min(deadline.saturating_duration_since(Instant::now())),
+            ) {
                 Ok(mut connection) => {
                     if connection.protection() != Protection::Tls13PinnedServer {
                         return Err(FetchError::Identity);
@@ -189,7 +259,13 @@ impl Resolver {
                             "Verified node could not return this document: {error}"
                         ))
                     })?;
-                    return Ok((data, (*endpoint).into()));
+                    return Ok((
+                        data,
+                        ConnectionInfo {
+                            endpoint: (*endpoint).into(),
+                            relay: None,
+                        },
+                    ));
                 }
                 Err(error) => {
                     if error
@@ -201,6 +277,62 @@ impl Resolver {
                     }
                 }
             }
+        }
+        if self.relay_enabled() {
+            for advertised in record.relay_routes() {
+                record
+                    .verify(
+                        self.network,
+                        yami_dht::now().map_err(|_| FetchError::Record)?,
+                    )
+                    .map_err(|_| FetchError::Record)?;
+                let budget =
+                    yami_dht::RPC_TIMEOUT.min(deadline.saturating_duration_since(Instant::now()));
+                if budget.is_zero() {
+                    break;
+                }
+                let route = yami_relay::Route {
+                    relay: advertised.relay,
+                    endpoint: advertised.endpoint.into(),
+                    destination: address.id,
+                };
+                match route.connect_with_timeout(self.network == Network::Public, budget) {
+                    Ok(mut connection) => {
+                        if connection.protection() != Protection::Tls13PinnedServer {
+                            return Err(FetchError::Identity);
+                        }
+                        record
+                            .verify(
+                                self.network,
+                                yami_dht::now().map_err(|_| FetchError::Record)?,
+                            )
+                            .map_err(|_| FetchError::Record)?;
+                        let data = ynp::request(&mut *connection, &address.key).map_err(|e| {
+                            FetchError::Document(format!(
+                                "Verified node could not return this document: {e}"
+                            ))
+                        })?;
+                        return Ok((
+                            data,
+                            ConnectionInfo {
+                                endpoint: advertised.endpoint.into(),
+                                relay: Some(advertised.relay),
+                            },
+                        ));
+                    }
+                    Err(error) => {
+                        if error
+                            .get_ref()
+                            .and_then(|e| e.downcast_ref::<IdentityMismatch>())
+                            .is_some()
+                        {
+                            failure = FetchError::Identity;
+                        }
+                    }
+                }
+            }
+        } else if record.endpoints().is_empty() && !record.relay_routes().is_empty() {
+            return Err(FetchError::Document("This node advertises relay routes. Enable relay fallback in the browser settings and reload.".into()));
         }
         Err(failure)
     }
@@ -220,6 +352,20 @@ impl FetchError {
             Self::Document(message) => message,
         }
     }
+}
+
+/// Explicit settings action: persist a pin, without making a connection or fetching content.
+pub fn add_bootstrap_from_environment(pin: &str) -> Result<(), String> {
+    let resolver = Resolver::from_environment()?;
+    let (id, endpoint) = pin.split_once('@').ok_or("Use full-node-ID@IPv4:port")?;
+    let id = id.parse().map_err(|_| "Invalid full bootstrap node ID")?;
+    let endpoint = endpoint
+        .parse()
+        .map_err(|_| "Invalid bootstrap IPv4 endpoint")?;
+    Contact::new(id, endpoint, resolver.network).map_err(|e| e.to_string())?;
+    PeerStore::open(&resolver.directory)
+        .and_then(|mut peers| peers.add(id, endpoint.into()))
+        .map_err(|e| format!("Cannot save bootstrap pin: {e}"))
 }
 
 /// Browser address adapter for native links in the existing inert link nodes.

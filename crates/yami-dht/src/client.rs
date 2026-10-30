@@ -114,6 +114,15 @@ pub fn lookup_newer(
 ) -> io::Result<Lookup> {
     lookup_after(service, target, seeds, &PinnedTls, Some(after_sequence))
 }
+pub fn lookup_newer_with_connector(
+    service: &Service,
+    target: NodeId,
+    seeds: &[Contact],
+    after_sequence: u64,
+    connector: &dyn RpcConnector,
+) -> io::Result<Lookup> {
+    lookup_after(service, target, seeds, connector, Some(after_sequence))
+}
 pub fn lookup_with_connector(
     service: &Service,
     target: NodeId,

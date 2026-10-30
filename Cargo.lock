@@ -2318,6 +2318,7 @@ dependencies = [
  "yami-dht",
  "yami-identity",
  "yami-node",
+ "yami-relay",
  "yami-render",
  "ylang",
  "ynp",

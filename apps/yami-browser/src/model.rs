@@ -7,7 +7,10 @@ use std::{
     collections::VecDeque,
     io,
     net::SocketAddr,
-    sync::{mpsc, Arc, Condvar, Mutex, OnceLock},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        mpsc, Arc, Condvar, Mutex, OnceLock,
+    },
     thread,
 };
 use yami_identity::NodeId;
@@ -83,6 +86,22 @@ pub enum Security {
     Plaintext,
     /// TLS 1.3 in which the node proved this node ID before any request.
     Verified(NodeId),
+    Relayed {
+        destination: NodeId,
+        relay: NodeId,
+    },
+}
+
+impl Security {
+    pub fn destination(&self) -> Option<NodeId> {
+        match self {
+            Self::Verified(id)
+            | Self::Relayed {
+                destination: id, ..
+            } => Some(*id),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -153,7 +172,7 @@ impl Tab {
     /// plaintext links from native pages.
     pub fn resolve_link(&self, target: &str) -> String {
         if let (Location::Yami(current), PageState::Ready(page)) = (self.location(), &self.state) {
-            if page.security == Security::Verified(current.id) {
+            if page.security.destination() == Some(current.id) {
                 if let Some(rest) = target.strip_prefix("ynp://") {
                     if let Ok(linked) = Address::parse(&format!("yami://{rest}")) {
                         return linked.url();
@@ -394,16 +413,26 @@ type Fetcher = dyn Fn(&Location) -> Result<Page, String> + Send + Sync;
 pub struct Loader {
     shared: Arc<Shared>,
     results: mpsc::Receiver<Completion>,
+    relay_enabled: Arc<AtomicBool>,
 }
 impl Loader {
     pub fn new(wake: Arc<dyn Fn() + Send + Sync>) -> io::Result<Self> {
         let resolver = OnceLock::new();
-        Self::with_fetcher(
+        let relay_enabled = Arc::new(AtomicBool::new(
+            std::env::var("YAMINET_BROWSER_RELAYS").as_deref() == Ok("1"),
+        ));
+        let control = relay_enabled.clone();
+        let mut loader = Self::with_fetcher(
             wake,
             Arc::new(move |location| {
                 if matches!(location, Location::Yami(_)) {
                     let resolver = resolver
-                        .get_or_init(Resolver::from_environment)
+                        .get_or_init(|| {
+                            Resolver::from_environment().map(|mut resolver| {
+                                resolver.relay_enabled = control.clone();
+                                resolver
+                            })
+                        })
                         .as_ref()
                         .map_err(Clone::clone)?;
                     load_native_page(location, resolver)
@@ -411,13 +440,22 @@ impl Loader {
                     load_page(location)
                 }
             }),
-        )
+        )?;
+        loader.relay_enabled = relay_enabled;
+        Ok(loader)
+    }
+    pub fn relay_enabled(&self) -> bool {
+        self.relay_enabled.load(Ordering::SeqCst)
+    }
+    pub fn set_relay_enabled(&self, enabled: bool) {
+        self.relay_enabled.store(enabled, Ordering::SeqCst);
     }
     pub fn with_resolver(
         wake: Arc<dyn Fn() + Send + Sync>,
         resolver: Arc<Resolver>,
     ) -> io::Result<Self> {
-        Self::with_fetcher(
+        let relay_enabled = resolver.relay_enabled.clone();
+        let mut loader = Self::with_fetcher(
             wake,
             Arc::new(move |location| {
                 if matches!(location, Location::Yami(_)) {
@@ -426,7 +464,9 @@ impl Loader {
                     load_page(location)
                 }
             }),
-        )
+        )?;
+        loader.relay_enabled = relay_enabled;
+        Ok(loader)
     }
     fn with_fetcher(wake: Arc<dyn Fn() + Send + Sync>, fetcher: Arc<Fetcher>) -> io::Result<Self> {
         let shared = Arc::new(Shared {
@@ -437,6 +477,7 @@ impl Loader {
         let loader = Self {
             shared: Arc::clone(&shared),
             results,
+            relay_enabled: Arc::new(AtomicBool::new(false)),
         };
         for index in 0..WORKERS {
             let shared = Arc::clone(&shared);
@@ -544,12 +585,20 @@ fn load_native_page(location: &Location, resolver: &Resolver) -> Result<Page, St
     let Location::Yami(address) = location else {
         unreachable!()
     };
-    let (data, endpoint) = resolver.fetch(address)?;
+    let (data, info) = resolver.fetch_verified(address)?;
     parse_page(
         &data.source,
         &data.style,
-        Security::Verified(address.id),
-        Some(endpoint),
+        info.relay
+            .map_or(Security::Verified(address.id), |relay| Security::Relayed {
+                destination: address.id,
+                relay,
+            }),
+        if info.relay.is_some() {
+            None
+        } else {
+            Some(info.endpoint)
+        },
     )
 }
 fn parse_page(

@@ -187,3 +187,32 @@ independent security review or production safety is provided. The validation
 here is a one-computer loopback simulation, not evidence of public internet
 reachability. See [the DHT security specification](specs/v0.1/dht.md) and
 [SECURITY.md](../SECURITY.md).
+
+## Relay fallback
+
+Relay use is off by default. Enable it with the sidebar's **Relay fallback**
+toggle, `yami-browser --enable-relays --desktop yami://NODE-ID/home`, or
+`YAMINET_BROWSER_RELAYS=1`. `--disable-relays` overrides the startup setting.
+The toggle affects subsequent attempts; reload a failed page after changing it.
+
+Use **Add bootstrap peer** in the sidebar, paste the complete `NODE-ID@IPv4:port`
+and press Enter. This saves an unverified pin and performs no connection. It
+leaves the current page/address in place. The same setting is available at
+startup with `--bootstrap NODE-ID@IPv4:port`, or through `yami-node dht bootstrap`.
+Pins are stored in `YAMINET_PEER_DIR` (the existing default peer directory if
+unset). `YAMINET_BROWSER_DHT_NETWORK=local` selects isolated loopback testing;
+the default public policy refuses relay/direct probes to private addresses.
+
+The existing two loader workers resolve and validate DHT records, attempt up to
+four direct endpoints first, then up to two signed relay routes if enabled.
+Each attempt has a three-second budget. Lookup, cached attempts and refreshed
+record attempts share a thirty-second total deadline. There is no plaintext
+fallback. The canonical yami:// identity, navigation, tabs, history and reload
+are unchanged. Numeric links naming a relay are not treated as host links.
+
+Only a successfully fetched authenticated page displays **Verified node · TLS
+1.3** or **Verified node · TLS 1.3 · Relayed**. For relayed pages the sidebar
+shows the complete verified destination and relay IDs separately. A signature
+or an available relay alone never earns a verified indicator. Relays see client
+and host IPs, IDs, traffic sizes and timing, and can refuse service; document
+traffic is encrypted by a separate destination-pinned TLS 1.3 session.

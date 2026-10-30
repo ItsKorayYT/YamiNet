@@ -39,6 +39,8 @@ impl Rect {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Action {
     FindLocal,
+    ToggleRelay,
+    Bootstrap,
     SelectLan,
     SearchLan,
     LocalNode(usize),
@@ -653,6 +655,43 @@ pub fn paint(c: &mut Canvas<'_>, browser: &Browser, ui: &ChromeState<'_>) -> Sce
     scene
 }
 
+/// Explicit relay opt-in beside the existing local-discovery utility.
+pub fn relay_setting(c: &mut Canvas<'_>, scene: &mut Scene, ui: &ChromeState<'_>, enabled: bool) {
+    let r = Rect::new(
+        MARGIN + PAD,
+        ui.height - MARGIN - 64.0,
+        SIDEBAR_WIDTH - 2.0 * PAD,
+        26.0,
+    );
+    ghost(c, r, false, r.contains(ui.mouse.0, ui.mouse.1));
+    c.text(
+        if enabled {
+            "Relay fallback: On"
+        } else {
+            "Relay fallback: Off"
+        },
+        r.x + 5.0,
+        text_y(r, 12.0),
+        r.w - 10.0,
+        12.0,
+        MUTED,
+        false,
+    );
+    scene.add(r, Action::ToggleRelay);
+    let r = Rect::new(r.x, r.y - 28.0, r.w, r.h);
+    ghost(c, r, false, r.contains(ui.mouse.0, ui.mouse.1));
+    c.text(
+        "Add bootstrap peer",
+        r.x + 5.0,
+        text_y(r, 12.0),
+        r.w - 10.0,
+        12.0,
+        MUTED,
+        false,
+    );
+    scene.add(r, Action::Bootstrap);
+}
+
 /// A small flyout anchored beside the existing sidebar. It never navigates on
 /// receipt or selection; Open homepage is a separate, explicit action.
 pub fn discovery_panel(
@@ -884,11 +923,16 @@ fn connection_status(c: &mut Canvas<'_>, security: Option<&Security>, left: f32,
             );
             r.y + r.h
         }
-        Some(Security::Verified(id)) => {
+        Some(security @ (Security::Verified(_) | Security::Relayed { .. })) => {
+            let id = security.destination().expect("verified destination");
             let r = row(0.0);
             c.icon("lock", r.x + 12.0, r.y + r.h / 2.0, VERIFIED);
             c.text(
-                "Verified node · TLS 1.3",
+                if matches!(security, Security::Relayed { .. }) {
+                    "Verified node · TLS 1.3 · Relayed"
+                } else {
+                    "Verified node · TLS 1.3"
+                },
                 r.x + 22.0,
                 text_y(r, 10.5),
                 inner - 30.0,
@@ -898,7 +942,11 @@ fn connection_status(c: &mut Canvas<'_>, security: Option<&Security>, left: f32,
             );
             // The full node ID, so it can be compared with the one expected,
             // wrapped by measured width so no character is clipped. IDs are ASCII.
-            let id = id.to_string();
+            let id = if let Security::Relayed { relay, .. } = security {
+                format!("Destination {id} Relay {relay}")
+            } else {
+                id.to_string()
+            };
             let mut rest = id.as_str();
             let mut lines = 0.0;
             while !rest.is_empty() {
