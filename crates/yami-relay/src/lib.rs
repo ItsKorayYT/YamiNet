@@ -414,3 +414,75 @@ mod public_tests {
 
 /// Isolated, socket-free NAT research prerequisites. Not a NAT transport.
 pub mod rendezvous;
+
+#[cfg(test)]
+mod slow_control_tests {
+    use super::*;
+    use std::io::Write;
+    #[test]
+    fn authenticated_relay_cannot_extend_go_control_by_dripping_bytes() {
+        let relay = Arc::new(NodeIdentity::generate().unwrap());
+        let host = Arc::new(NodeIdentity::generate().unwrap());
+        let relay_id = *relay.id();
+        let host_id = *host.id();
+        let listener = ynp_tls::TlsListener::bind("127.0.0.1:0".parse().unwrap(), relay).unwrap();
+        let endpoint = listener.local_addr().unwrap();
+        let server = thread::spawn(move || {
+            let mut outer = listener.accept_session(ynp_tls::MAX_SESSION).unwrap();
+            outer.complete_handshake().unwrap();
+            assert_eq!(
+                wire::read(&mut *outer).unwrap(),
+                wire::Frame::Register(host_id.public_key())
+            );
+            let nonce = [7; 32];
+            let expires = now().unwrap() + CHALLENGE_TTL;
+            wire::write(&mut *outer, &wire::Frame::Challenge(nonce, expires)).unwrap();
+            let wire::Frame::Proof(proof) = wire::read(&mut *outer).unwrap() else {
+                panic!("proof")
+            };
+            let challenge = RelayRegistration {
+                relay: relay_id,
+                host: host_id,
+                nonce,
+                channel: outer.channel_binding().unwrap(),
+                expires,
+            };
+            host_id
+                .verify(&challenge, &yami_identity::Signature::from_bytes(proof))
+                .unwrap();
+            wire::write(
+                &mut *outer,
+                &wire::Frame::Registered(now().unwrap() + REGISTRATION_LEASE.as_secs()),
+            )
+            .unwrap();
+            let mut bytes = Vec::new();
+            wire::write(&mut bytes, &wire::Frame::Go(host_id.public_key())).unwrap();
+            for byte in bytes {
+                if outer
+                    .write_all(&[byte])
+                    .and_then(|_| outer.flush())
+                    .is_err()
+                {
+                    break;
+                }
+                thread::sleep(Duration::from_millis(200));
+            }
+        });
+        let registration = Registration::connect(
+            Route {
+                relay: relay_id,
+                destination: host_id,
+                endpoint,
+            },
+            &host,
+        )
+        .unwrap();
+        let acceptor = TlsAcceptor::new(host).unwrap();
+        let started = Instant::now();
+        assert!(registration
+            .accept(&acceptor, &AtomicBool::new(false))
+            .is_err());
+        assert!(started.elapsed() < Duration::from_secs(6));
+        server.join().unwrap();
+    }
+}

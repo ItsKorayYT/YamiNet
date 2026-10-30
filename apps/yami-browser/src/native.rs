@@ -1,5 +1,5 @@
 //! Native identity addresses. Discovery supplies locations, never TLS trust.
-use crate::reliability::{Endpoint, Failures, Lookups};
+use crate::reliability::{Endpoint, Failures, Lookups, Transfers};
 use std::{
     net::SocketAddr,
     path::PathBuf,
@@ -74,6 +74,7 @@ pub struct Resolver {
     network: Network,
     service: OnceLock<Result<Service, String>>,
     failures: Failures,
+    transfers: Transfers,
     lookups: Lookups,
     pub(crate) relay_enabled: Arc<AtomicBool>,
 }
@@ -83,6 +84,7 @@ impl Resolver {
             directory,
             network,
             failures: Failures::default(),
+            transfers: Transfers::default(),
             lookups: Lookups::default(),
             service: OnceLock::new(),
             relay_enabled: Arc::new(AtomicBool::new(false)),
@@ -299,6 +301,10 @@ impl Resolver {
         if record.id() != address.id || record.verify(self.network, at).is_err() {
             return Err(FetchError::Record);
         }
+        let _permit = self
+            .transfers
+            .acquire(address.id, deadline)
+            .map_err(|_| FetchError::Unreachable)?;
         let transport = TlsTransport::new(address.id).map_err(|_| FetchError::Unreachable)?;
         let mut failure = FetchError::Unreachable;
         let mut retry_delay = None;

@@ -125,7 +125,8 @@ impl Lookups {
                     let index = entries
                         .iter()
                         .position(|(_, f)| {
-                            !f.state.lock().unwrap_or_else(|e| e.into_inner()).running
+                            Arc::strong_count(f) == 1
+                                && !f.state.lock().unwrap_or_else(|e| e.into_inner()).running
                         })
                         .ok_or("DHT discovery is busy; retry shortly.")?;
                     entries.remove(index);
@@ -240,5 +241,85 @@ mod tests {
         assert!(lookups
             .run(id, None, Instant::now(), || unreachable!())
             .is_err());
+    }
+}
+
+#[derive(Default)]
+struct Transfer {
+    busy: Mutex<bool>,
+    changed: Condvar,
+}
+type TransferEntry = (NodeId, Arc<Transfer>);
+#[derive(Default)]
+pub struct Transfers(Mutex<VecDeque<TransferEntry>>);
+pub struct TransferPermit(Arc<Transfer>);
+impl Drop for TransferPermit {
+    fn drop(&mut self) {
+        *self.0.busy.lock().unwrap_or_else(|e| e.into_inner()) = false;
+        self.0.changed.notify_all();
+    }
+}
+impl Transfers {
+    /// The relay protocol has one serving slot per host. Serialize this browser's
+    /// same-owner document attempts without sharing sessions or document data.
+    pub fn acquire(&self, id: NodeId, deadline: Instant) -> Result<TransferPermit, String> {
+        let transfer = {
+            let mut entries = self.0.lock().unwrap_or_else(|e| e.into_inner());
+            if let Some((_, transfer)) = entries.iter().find(|(owner, _)| *owner == id) {
+                transfer.clone()
+            } else {
+                if entries.len() == MAX_LOOKUPS {
+                    let index = entries
+                        .iter()
+                        .position(|(_, t)| Arc::strong_count(t) == 1)
+                        .ok_or("Document connections are busy")?;
+                    entries.remove(index);
+                }
+                let transfer = Arc::new(Transfer::default());
+                entries.push_back((id, transfer.clone()));
+                transfer
+            }
+        };
+        let mut busy = transfer.busy.lock().unwrap_or_else(|e| e.into_inner());
+        while *busy {
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            if remaining.is_zero() {
+                return Err("Navigation deadline exceeded waiting for destination slot".into());
+            }
+            busy = transfer
+                .changed
+                .wait_timeout(busy, remaining)
+                .unwrap_or_else(|e| e.into_inner())
+                .0;
+        }
+        if Instant::now() >= deadline {
+            return Err("Navigation deadline exceeded".into());
+        }
+        *busy = true;
+        drop(busy);
+        Ok(TransferPermit(transfer))
+    }
+}
+#[cfg(test)]
+mod transfer_tests {
+    use super::*;
+    #[test]
+    fn same_owner_connections_wait_with_deadline_and_cleanup_releases_slot() {
+        let transfers = Transfers::default();
+        let owner = *yami_identity::NodeIdentity::generate().unwrap().id();
+        let held = transfers
+            .acquire(owner, Instant::now() + Duration::from_secs(1))
+            .unwrap();
+        assert!(transfers
+            .acquire(owner, Instant::now() + Duration::from_millis(10))
+            .is_err());
+        let other = *yami_identity::NodeIdentity::generate().unwrap().id();
+        assert!(transfers
+            .acquire(other, Instant::now() + Duration::from_secs(1))
+            .is_ok());
+        drop(held);
+        assert!(transfers
+            .acquire(owner, Instant::now() + Duration::from_secs(1))
+            .is_ok());
     }
 }

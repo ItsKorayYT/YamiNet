@@ -71,3 +71,40 @@ commands passed. Workspace tests reported **174 passed, 0 failed, 8 existing
 opt-in tests ignored**. The actual host-relay CLI smoke test also fetched a
 page, stopped cleanly on SIGTERM and restarted with a newer persisted sequence.
 Physical cross-network/VPS and Windows runtime trials were not run.
+
+## Reliability/resilience expansion
+
+`two_relays_two_dht_peers_concurrent_tabs_endpoint_updates_and_restart` adds a
+seven-process loopback topology: relay-host A, direct website N, independent
+DHT peers B/D, relays R/S and a real browser-model client. The client resolves
+and authenticates N directly, falls back from A's unreachable direct claim,
+uses both configured relays as eligible alternatives, and opens six tabs.
+The test stops the actually selected relay, checks the other relay serves new
+clients, stops B and resolves through D, changes A's signed endpoint claim,
+restarts B and observes publication repair before A's twelve-hour renewal,
+restarts the selected relay and A with persistent keys/state, and rejects a
+previously valid but rolled-back publication over real TLS RPCs. Process guards
+reap fixtures, stop signals drain workers and fixtures have finite watchdogs.
+
+The contention test found that concurrent same-owner browser transfers could
+race the relay protocol's single host slot. A shared bounded destination permit
+now serializes that browser's document attempts to the same owner, with the
+original navigation deadline. It caches no document, session or authentication;
+other owners retain separate permits and every connection reauthenticates.
+Lookup-slot eviction also refuses entries held by active/waiting callers.
+Across independent browsers, relay capacity is still limited and busy errors
+remain possible; there is no global fairness guarantee.
+
+`ynp-tls/tests/impaired.rs` injects deterministic read/write fragmentation,
+latency and connection reset in the existing byte-stream adapter. It verifies
+unchanged YNP retrieval under TLS and failure within a short deadline when
+latency/loss prevents authentication. These are **stream** impairments, not IP
+packet-loss, UDP or real-NAT validation. TCP retransmission is handled by the OS;
+physical packet loss and mapping behavior require the separate network plan.
+The malicious authenticated-relay drip test checks the new five-second GO-frame
+control deadline using real nested transport setup.
+
+Configuration smoke tests run actual node/relay/browser executables. They cover
+existing CLI compatibility, idempotent configured bootstraps, missing-identity
+refusal, local status snapshots and clean configured relay shutdown. The isolated
+NAT consent prerequisites have their own tests; no NAT transport is exercised.
