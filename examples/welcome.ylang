@@ -9,5 +9,5 @@ Experimental local documents. Not secure for sensitive use.
   :: Local links
     > ynp://127.0.0.1:7302/about | Read about the second node
 :: Privacy goals
-  No scripts, remote assets, tracking, or automatic link fetching.
-  Identity, encryption, and anonymous routing are future work.
+  No scripts, third-party assets, tracking, or automatic link fetching.
+  Remote sites use authenticated TLS identities. YamiNet is not anonymous.

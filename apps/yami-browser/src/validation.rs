@@ -25,20 +25,57 @@ pub fn probe(url: &str, asset: Option<&str>, resolver: &Resolver) -> Result<Stri
         }
         _ => return Err("Probe requires yami:// or ynps:// with an exact node identity; plaintext and built-in pages are not cross-network checks".into()),
     };
-    ylang::parse(&data.source).map_err(|e| format!("Authenticated document syntax failed: {e}"))?;
-    if !data.style.is_empty() {
+    let document = ylang::parse(&data.source)
+        .map_err(|e| format!("Authenticated document syntax failed: {e}"))?;
+    let style = if data.style.is_empty() {
+        ysl::Stylesheet::default()
+    } else {
         ysl::parse(&data.style)
-            .map_err(|e| format!("Authenticated stylesheet syntax failed: {e}"))?;
-    }
+            .map_err(|e| format!("Authenticated stylesheet syntax failed: {e}"))?
+    };
     let mut report = format!("YAMINET-VALIDATION 1\nversion {}\nscope {}\ndestination {}\nrelay {}\nendpoint {}\ndocument PASS (pinned TLS 1.3; YLang/YSL parsed)\n", env!("CARGO_PKG_VERSION"), if origin.endpoint.ip().is_loopback() { "loopback simulation" } else { "explicit remote endpoint; physical network independence NOT VERIFIED" }, origin.destination, origin.relay.map_or_else(|| "direct".into(), |id| id.to_string()), origin.endpoint);
     if let Some(key) = asset {
-        let mut connection = origin
-            .connect(Duration::from_secs(5))
-            .map_err(|e| format!("PNG authenticated connection failed: {e}"))?;
-        let bytes = ynp::request_asset(&mut *connection, key, ynp::MAX_ASSET_BYTES)
-            .map_err(|e| format!("PNG fetch failed: {e}"))?;
-        let image = yami_render::assets::decode_png(&bytes.bytes, yami_render::assets::MAX_DECODED)
-            .map_err(|e| format!("PNG validation failed: {e}"))?;
+        use yami_render::assets::{ImageState, Images};
+        let security =
+            origin
+                .relay
+                .map_or(model::Security::Verified(origin.destination), |relay| {
+                    model::Security::Relayed {
+                        destination: origin.destination,
+                        relay,
+                    }
+                });
+        let mut images = Images::new();
+        images.insert(key.into(), ImageState::Pending);
+        let page = model::Page {
+            document,
+            style,
+            security,
+            endpoint: Some(origin.endpoint),
+            images,
+            revision: 0,
+            origin: Some(origin),
+        };
+        let cache = crate::image_cache::DecodeCache::default();
+        let cancel = std::sync::atomic::AtomicBool::new(false);
+        let mut result = None;
+        crate::resources::load(
+            &page,
+            &cache,
+            &cancel,
+            Instant::now() + Duration::from_secs(5),
+            |_, state| {
+                result = Some(state);
+                true
+            },
+        );
+        let image = match result {
+            Some(ImageState::Ready(image)) => image,
+            Some(ImageState::Missing(error)) => {
+                return Err(format!("PNG validation failed: {error}"))
+            }
+            _ => return Err("PNG validation did not complete".into()),
+        };
         report.push_str(&format!(
             "png PASS ({key}; {} x {})\n",
             image.width, image.height

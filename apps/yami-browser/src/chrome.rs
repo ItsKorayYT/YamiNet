@@ -1130,7 +1130,11 @@ fn address_field(
     c.icon("search", r.x + 13.0, r.y + r.h / 2.0 + 1.0, MUTED);
 
     let label = if ui.value.is_empty() {
-        "Search or Enter URL…"
+        if action == Action::Find {
+            "Find text…"
+        } else {
+            "Search or Enter URL…"
+        }
     } else {
         ui.value
     };
@@ -1415,18 +1419,18 @@ pub fn find_bar(
     c.round(r, 8.0, SIDEBAR_BG, SIDEBAR_BG, Some(MUTED));
     scene.add(r, Action::DiscoveryPanel);
     let input = Rect::new(r.x + 10.0, r.y + 8.0, r.w - 245.0, 30.0);
-    c.round(input, 4.0, HOVER_BG, HOVER_BG, editing.then_some(VERIFIED));
-    let value = if editing { ui.value } else { &find.query };
-    c.text(
-        value,
-        input.x + 5.0,
-        input.y + 5.0,
-        input.w - 10.0,
-        13.0,
-        INK,
-        false,
-    );
-    scene.add(input, Action::Find);
+    let find_ui = ChromeState {
+        width: ui.width,
+        height: ui.height,
+        mouse: ui.mouse,
+        editing,
+        value: &find.query,
+        selection: ui.selection,
+        selection_range: ui.selection_range.clone(),
+        caret: ui.caret,
+        focus: ui.focus,
+    };
+    address_field(c, scene, input, Action::Find, &find_ui, editing);
     c.text(
         &format!(
             "{} / {}",

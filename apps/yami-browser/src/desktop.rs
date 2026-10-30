@@ -34,7 +34,10 @@ pub fn run(
     let wake: Arc<dyn Fn() + Send + Sync> = Arc::new(move || {
         let _ = proxy.send_event(());
     });
-    let explicit_network = resolver.is_some() || relay_enabled.is_some() || std::env::var_os("YAMINET_BROWSER_DHT_NETWORK").is_some() || std::env::var_os("YAMINET_BROWSER_RELAYS").is_some();
+    let explicit_network = resolver.is_some()
+        || relay_enabled.is_some()
+        || std::env::var_os("YAMINET_BROWSER_DHT_NETWORK").is_some()
+        || std::env::var_os("YAMINET_BROWSER_RELAYS").is_some();
     let loader = if let Some(resolver) = resolver {
         Loader::with_resolver(Arc::clone(&wake), resolver)?
     } else {
@@ -55,6 +58,7 @@ pub fn run(
         Err(error) => {
             eprintln!("Browser library unavailable: {error}");
             app.browser.library_error = Some(error.to_string());
+            app.settings_open = true;
         }
     }
     if explicit_network {
@@ -256,7 +260,13 @@ impl Desktop {
     }
     fn viewport(&self) -> Rect {
         let (w, h, _) = self.size();
-        chrome::viewport(w, h)
+        let mut area = chrome::viewport(w, h);
+        if self.find_open {
+            // Reserve space so the first match cannot sit behind the search bar.
+            area.y += 88.0;
+            area.h = (area.h - 88.0).max(1.0);
+        }
+        area
     }
     fn clear_focus(&mut self) {
         self.find_edit = false;
@@ -271,7 +281,7 @@ impl Desktop {
             self.act(Action::FindNext(self.modifiers.shift_key()));
             return;
         }
-        let value = if self.editor.focus.is_some() {
+        let value = if self.editor.focus.is_some() && !self.find_edit {
             self.editor.value.clone()
         } else {
             self.browser.active().address.clone()
@@ -706,7 +716,7 @@ impl Desktop {
             tab.scroll = tab.target_scroll;
         }
         self.animation = (tab.target_scroll - tab.scroll).abs() > 0.2;
-        let value = if self.editor.focus.is_some() {
+        let value = if self.editor.focus.is_some() && !self.find_edit {
             &self.editor.value
         } else {
             &self.browser.active().address
@@ -719,7 +729,7 @@ impl Desktop {
             width: w,
             height: h,
             mouse: self.mouse,
-            editing: self.editor.focus.is_some(),
+            editing: self.editor.focus.is_some() && !self.find_edit,
             value,
             selection: self.editor.selected,
             selection_range: self.editor.range(),
@@ -1307,7 +1317,20 @@ mod tests {
         app.browser.navigate("local:welcome", &app.loader).unwrap();
         settle(&mut app);
         frame(&mut app);
+        app.act(Action::Navigate("local:about"));
+        settle(&mut app);
+        app.modifiers = ModifiersState::ALT;
+        app.keyboard(&Key::Named(NamedKey::ArrowLeft), None, None);
+        settle(&mut app);
+        assert_eq!(app.browser.active().address, "local:welcome");
+        app.keyboard(&Key::Named(NamedKey::ArrowRight), None, None);
+        settle(&mut app);
+        assert_eq!(app.browser.active().address, "local:about");
         app.modifiers = ModifiersState::CONTROL;
+        app.keyboard(&Key::Character("r".into()), None, None);
+        settle(&mut app);
+        app.keyboard(&Key::Named(NamedKey::F5), None, None);
+        settle(&mut app);
         app.keyboard(&Key::Character("l".into()), None, None);
         assert!(app.editor.selected);
         app.keyboard(&Key::Character("t".into()), None, None);
@@ -1736,6 +1759,16 @@ mod tests {
         frame(&mut app);
         frame(&mut app)
             .save_png(dir.join("desktop-document.png"))
+            .unwrap();
+        app.settings_open = true;
+        frame(&mut app)
+            .save_png(dir.join("desktop-onboarding.png"))
+            .unwrap();
+        app.settings_open = false;
+        app.act(Action::Find);
+        app.editor.replace("YamiNet");
+        frame(&mut app)
+            .save_png(dir.join("desktop-find.png"))
             .unwrap();
     }
 

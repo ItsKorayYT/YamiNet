@@ -380,7 +380,7 @@ fn png_assets_keep_nested_tls_destination_pinning_through_a_relay() {
     let cache = Service::open_lookup(resolver.state_path(), Network::Loopback).unwrap();
     cache.accept(record, now).unwrap();
     drop(cache);
-    let loader = Loader::with_resolver(Arc::new(|| {}), resolver).unwrap();
+    let loader = Loader::with_resolver(Arc::new(|| {}), resolver.clone()).unwrap();
     let mut browser = Browser::new();
     browser
         .navigate(&format!("yami://{host}/home"), &loader)
@@ -402,6 +402,13 @@ fn png_assets_keep_nested_tls_destination_pinning_through_a_relay() {
     poll(&mut browser, &loader);
     assert_eq!(browser.active().address, format!("yami://{host}/about"));
     assert_eq!(browser.active().title(), "Relayed about");
+    let report =
+        yami_browser::validation::probe(&format!("yami://{host}/home"), Some("cover"), &resolver)
+            .unwrap();
+    assert!(report.contains("document PASS"));
+    assert!(report.contains("png PASS"));
+    assert!(report.contains(&format!("relay {}", relay_key.id())));
+    assert!(report.contains("independent_networks NOT VERIFIED"));
 }
 
 #[test]

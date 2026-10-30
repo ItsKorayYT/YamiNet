@@ -10,8 +10,8 @@ fn measure(name: &str, count: u32, mut run: impl FnMut()) {
         run();
     }
     println!(
-        "{name}: {} us/iteration ({count} iterations)",
-        start.elapsed().as_micros() / u128::from(count)
+        "{name}: {:.3} us/iteration ({count} iterations)",
+        start.elapsed().as_secs_f64() * 1_000_000.0 / f64::from(count)
     );
 }
 fn main() {

@@ -5,6 +5,6 @@
 = Hello from node two
 This document arrived in a custom binary YNP frame.
 :: Experimental network
-  TCP is restricted to numeric loopback addresses.
-  Traffic is plaintext and unauthenticated. Do not send sensitive data.
+  This legacy ynp:// demo is restricted to numeric loopback addresses.
+  The demo is plaintext. Remote yami:// and ynps:// sites require pinned TLS.
   > ynp://127.0.0.1:7301/welcome | Return to the first node
