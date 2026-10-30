@@ -2370,6 +2370,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "yami-discover"
+version = "0.3.1-alpha.1"
+dependencies = [
+ "yami-dht",
+ "yami-identity",
+ "yami-relay",
+ "ylang",
+ "ynp",
+ "ynp-tls",
+]
+
+[[package]]
 name = "yami-identity"
 version = "0.3.1-alpha.1"
 dependencies = [
