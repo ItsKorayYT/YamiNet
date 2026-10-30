@@ -1,5 +1,7 @@
 //! YSL 0.1: original line-oriented presentation settings, with no execution.
 use std::{collections::HashSet, fmt};
+mod rich;
+pub use rich::{Align, CardStyle, ImageStyle, RichStyle, Typography};
 
 pub const MAX_SOURCE: usize = 16 * 1024;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -11,6 +13,7 @@ pub struct TextStyle {
 }
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Stylesheet {
+    pub rich: Option<RichStyle>,
     pub width: usize,
     pub padding: usize,
     pub paper: Color,
@@ -22,6 +25,7 @@ pub struct Stylesheet {
 impl Default for Stylesheet {
     fn default() -> Self {
         Self {
+            rich: None,
             width: 76,
             padding: 2,
             paper: Color(16, 24, 32),
@@ -94,12 +98,17 @@ pub fn parse(source: &str) -> Result<Stylesheet, SyntaxError> {
         }
         if !text.is_empty() {
             if !header {
-                if indent != 0 || text != "@style 0.1" {
-                    return Err(err(1, 0, "expected @style 0.1 at column 1"));
+                if indent != 0 || !matches!(text, "@style 0.1" | "@style 0.2") {
+                    return Err(err(1, 0, "expected @style 0.1 or @style 0.2 at column 1"));
+                }
+                if text == "@style 0.2" {
+                    sheet.rich = Some(RichStyle::default());
                 }
                 header = true;
             } else if indent == 0 {
-                if !matches!(text, "canvas" | "text" | "heading" | "section" | "link") {
+                if !matches!(text, "canvas" | "text" | "heading" | "section" | "link")
+                    && !(sheet.rich.is_some() && matches!(text, "card" | "image" | "row"))
+                {
                     return Err(err(1, 0, "unknown style group"));
                 }
                 if !groups.insert(text) {
@@ -143,6 +152,19 @@ pub fn parse(source: &str) -> Result<Stylesheet, SyntaxError> {
                         .map_err(|_| value_error("invalid color"))?;
                     Ok(Color((n >> 16) as u8, (n >> 8) as u8, n as u8))
                 };
+                let handled = if let Some(rich) = &mut sheet.rich {
+                    rich.set(group, name, value)
+                        .map_err(|message| value_error(&message))?
+                } else {
+                    false
+                };
+                if handled {
+                    offset += raw.len();
+                    continue;
+                }
+                if matches!(group, "card" | "image" | "row") {
+                    return Err(err(3, 2, "unknown property for this 0.2 group"));
+                }
                 if group == "canvas" {
                     match name {
                         "width" => sheet.width = number(20, 160)?,

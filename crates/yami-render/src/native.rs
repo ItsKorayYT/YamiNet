@@ -3,6 +3,7 @@
 //! The browser chrome uses `TextEngine`, while website presentation comes only
 //! from its YSL sheet. This module neither loads resources nor performs I/O.
 use std::collections::VecDeque;
+mod rich;
 
 use cosmic_text::{Attrs, Buffer, Family, FontSystem, Metrics, Shaping, SwashCache, Weight, Wrap};
 use tiny_skia::{Paint, Pixmap, PremultipliedColorU8, Rect, Transform};
@@ -55,6 +56,9 @@ impl TextEngine {
         let mut database = cosmic_text::fontdb::Database::new();
         database.load_font_data(include_bytes!("../assets/fonts/OpenSans-Regular.ttf").to_vec());
         database.load_font_data(include_bytes!("../assets/fonts/OpenSans-Semibold.ttf").to_vec());
+        database.load_font_data(include_bytes!("../assets/fonts/DejaVuSans-Oblique.ttf").to_vec());
+        database.load_font_data(include_bytes!("../assets/fonts/DejaVuSansMono.ttf").to_vec());
+        database.set_monospace_family("DejaVu Sans Mono");
         database.set_sans_serif_family("Open Sans");
         Self {
             fonts: FontSystem::new_with_locale_and_db("en-US".into(), database),
@@ -303,6 +307,8 @@ pub struct NativeDocument {
     pub paper: Color,
     scale: f32,
     blocks: Vec<Block>,
+    decorations: Vec<rich::Decoration>,
+    link_states: Option<(Color, Color)>,
 }
 impl NativeDocument {
     pub fn layout(
@@ -320,6 +326,9 @@ impl NativeDocument {
             return Err(RenderError(
                 "native viewport or scale outside supported bounds",
             ));
+        }
+        if document.version == ylang::Version::V02 || style.rich.is_some() {
+            return rich::layout(document, style, width, scale, engine);
         }
         if !(20..=160).contains(&style.width)
             || style.padding > 8
@@ -362,6 +371,8 @@ impl NativeDocument {
             paper: style.paper,
             scale,
             blocks: builder.blocks,
+            decorations: Vec::new(),
+            link_states: None,
         })
     }
 
@@ -376,6 +387,29 @@ impl NativeDocument {
         scroll: f32,
         viewport_height: f32,
         engine: &mut TextEngine,
+    ) {
+        self.draw_interactive(
+            pixmap,
+            origin_x,
+            origin_y,
+            scroll,
+            viewport_height,
+            engine,
+            None,
+            false,
+        );
+    }
+    #[allow(clippy::too_many_arguments)]
+    pub fn draw_interactive(
+        &self,
+        pixmap: &mut Pixmap,
+        origin_x: f32,
+        origin_y: f32,
+        scroll: f32,
+        viewport_height: f32,
+        engine: &mut TextEngine,
+        pointer: Option<(f32, f32)>,
+        active: bool,
     ) {
         let clip = TextRect {
             x: origin_x,
@@ -393,11 +427,22 @@ impl NativeDocument {
             paint.set_color_rgba8(r, g, b, 255);
             pixmap.fill_rect(rect, &paint, Transform::identity(), None);
         }
+        rich::draw_decorations(&self.decorations, pixmap, origin_x, origin_y, scroll, clip);
         for block in &self.blocks {
             let y = origin_y + block.y - scroll;
             if y + block.height < origin_y || y > origin_y + viewport_height {
                 continue;
             }
+            let color = if block.target.is_some()
+                && pointer.is_some_and(|(x, y)| block.links.iter().any(|r| r.contains(x, y)))
+            {
+                self.link_states.map_or(
+                    block.color,
+                    |(hover, pressed)| if active { pressed } else { hover },
+                )
+            } else {
+                block.color
+            };
             paint_buffer(
                 &block.buffer,
                 &mut engine.fonts,
@@ -405,11 +450,11 @@ impl NativeDocument {
                 pixmap,
                 origin_x + block.x,
                 y,
-                block.color,
+                color,
                 clip,
             );
             if block.target.is_some() {
-                let Color(r, g, b) = block.color;
+                let Color(r, g, b) = color;
                 let mut paint = Paint::default();
                 paint.set_color_rgba8(r, g, b, 150);
                 for line in &block.links {
