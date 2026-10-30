@@ -1,5 +1,5 @@
-//! Loopback-only reverse relay MVP. Outer TLS authenticates the relay; inner
-//! TLS authenticates the destination. No DHT advertisements or browser policy.
+//! Explicitly configured reverse relay. Outer TLS authenticates the relay; inner
+//! TLS authenticates the destination. Public operation requires a separate opt-in.
 mod server;
 mod wire;
 pub use server::{Limits, Relay, Statistics};
@@ -45,16 +45,35 @@ pub struct Route {
     pub destination: NodeId,
 }
 impl Route {
-    fn session(&self, lifetime: Duration) -> io::Result<Box<dyn SecureStream>> {
-        // Deliberately no public deployment mode in this milestone.
-        ynp::require_loopback(self.endpoint)?;
+    fn session(&self, lifetime: Duration, public: bool) -> io::Result<Box<dyn SecureStream>> {
+        if public {
+            let SocketAddr::V4(endpoint) = self.endpoint else {
+                return Err(invalid("public relay requires IPv4"));
+            };
+            if endpoint.port() == 0 || !ynp_tls::is_public_ipv4(*endpoint.ip()) {
+                return Err(invalid("public relay endpoint must be public unicast IPv4"));
+            }
+        } else {
+            ynp::require_loopback(self.endpoint)?;
+        }
         TlsTransport::new(self.relay)?.connect_session(self.endpoint, lifetime)
     }
     /// Return only a byte tunnel. This is NOT authenticated as the destination.
     /// Use connect() or explicitly apply the destination's pinned TLS verifier.
     pub fn open_tunnel(&self) -> io::Result<Box<dyn ByteStream>> {
-        let mut outer = self.session(CLIENT_LIFETIME)?;
-        let until = Instant::now() + Duration::from_secs(CHALLENGE_TTL);
+        self.open_tunnel_budget(false, CLIENT_LIFETIME)
+    }
+    fn open_tunnel_budget(
+        &self,
+        public: bool,
+        budget: Duration,
+    ) -> io::Result<Box<dyn ByteStream>> {
+        if budget.is_zero() || budget > CLIENT_LIFETIME {
+            return Err(invalid("invalid relay client budget"));
+        }
+        let deadline = Instant::now() + budget;
+        let mut outer = self.session(budget, public)?;
+        let until = deadline.min(Instant::now() + Duration::from_secs(CHALLENGE_TTL));
         wire::write(
             &mut Control {
                 stream: &mut *outer,
@@ -73,10 +92,19 @@ impl Route {
         }
     }
     pub fn connect(&self) -> io::Result<Box<dyn Connection>> {
+        self.connect_with_timeout(false, CLIENT_LIFETIME)
+    }
+    /// Policy comes from explicit configuration, never from an advertisement.
+    /// The total budget covers outer TLS, pairing, inner TLS and document I/O.
+    pub fn connect_with_timeout(
+        &self,
+        public: bool,
+        budget: Duration,
+    ) -> io::Result<Box<dyn Connection>> {
         let started = Instant::now();
-        let tunnel = self.open_tunnel()?;
-        let budget = ynp_tls::DEADLINE.min(CLIENT_LIFETIME.saturating_sub(started.elapsed()));
-        TlsTransport::new(self.destination)?.connect_over(tunnel, budget)
+        let tunnel = self.open_tunnel_budget(public, budget)?;
+        let remaining = ynp_tls::DEADLINE.min(budget.saturating_sub(started.elapsed()));
+        TlsTransport::new(self.destination)?.connect_over(tunnel, remaining)
     }
     pub fn fetch(&self, key: &str) -> io::Result<ynp::DocumentData> {
         ynp::validate_key(key)?;
@@ -130,10 +158,16 @@ pub struct Registration {
 }
 impl Registration {
     pub fn connect(route: Route, identity: &NodeIdentity) -> io::Result<Self> {
+        Self::connect_mode(route, identity, false)
+    }
+    pub fn connect_public(route: Route, identity: &NodeIdentity) -> io::Result<Self> {
+        Self::connect_mode(route, identity, true)
+    }
+    fn connect_mode(route: Route, identity: &NodeIdentity, public: bool) -> io::Result<Self> {
         if route.destination != *identity.id() {
             return Err(invalid("registration signer is not the destination"));
         }
-        let mut outer = route.session(ynp_tls::MAX_SESSION)?;
+        let mut outer = route.session(ynp_tls::MAX_SESSION, public)?;
         let until = Instant::now() + Duration::from_secs(CHALLENGE_TTL);
         wire::write(
             &mut Control {
@@ -260,6 +294,7 @@ pub enum HostEvent {
     Registered,
     Served,
     Retrying,
+    Unregistered,
 }
 /// One outbound slot per host with bounded jittered reconnection, not discovery.
 pub fn run_host(
@@ -269,10 +304,34 @@ pub fn run_host(
     handler: &dyn Fn(&mut dyn Connection) -> io::Result<()>,
     report: &dyn Fn(HostEvent),
 ) -> io::Result<()> {
+    run_host_mode(route, identity, stop, handler, report, false)
+}
+pub fn run_host_public(
+    route: Route,
+    identity: Arc<NodeIdentity>,
+    stop: &AtomicBool,
+    handler: &dyn Fn(&mut dyn Connection) -> io::Result<()>,
+    report: &dyn Fn(HostEvent),
+) -> io::Result<()> {
+    run_host_mode(route, identity, stop, handler, report, true)
+}
+fn run_host_mode(
+    route: Route,
+    identity: Arc<NodeIdentity>,
+    stop: &AtomicBool,
+    handler: &dyn Fn(&mut dyn Connection) -> io::Result<()>,
+    report: &dyn Fn(HostEvent),
+    public: bool,
+) -> io::Result<()> {
     let acceptor = TlsAcceptor::new(identity.clone())?;
     let mut failures = 0u32;
     while !stop.load(Ordering::SeqCst) {
-        let attempt = Registration::connect(route, &identity).and_then(|registration| {
+        let registration = if public {
+            Registration::connect_public(route, &identity)
+        } else {
+            Registration::connect(route, &identity)
+        };
+        let attempt = registration.and_then(|registration| {
             report(HostEvent::Registered);
             if let Some(mut connection) = registration.accept(&acceptor, stop)? {
                 handler(&mut *connection)?;
@@ -280,6 +339,7 @@ pub fn run_host(
             }
             Ok(())
         });
+        report(HostEvent::Unregistered);
         if attempt.is_err() {
             failures = failures.saturating_add(1);
             report(HostEvent::Retrying);
@@ -296,4 +356,51 @@ pub fn run_host(
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod public_tests {
+    use super::*;
+    #[test]
+    fn public_mode_is_explicit_and_rejects_wildcard_and_special_endpoints() {
+        let identity = Arc::new(NodeIdentity::generate().unwrap());
+        for endpoint in [
+            "0.0.0.0:7443",
+            "224.0.0.1:7443",
+            "[::]:7443",
+            "198.51.100.1:7443",
+        ] {
+            assert!(Relay::bind_public(
+                endpoint.parse().unwrap(),
+                identity.clone(),
+                Limits::default()
+            )
+            .is_err());
+        }
+        assert!(Relay::bind(
+            "192.168.1.1:7443".parse().unwrap(),
+            identity.clone(),
+            Limits::default()
+        )
+        .is_err());
+        let relay = Relay::bind_public(
+            "127.0.0.1:0".parse().unwrap(),
+            identity.clone(),
+            Limits::default(),
+        )
+        .unwrap();
+        assert!(relay.local_addr().unwrap().port() > 0);
+        let route = Route {
+            relay: *identity.id(),
+            destination: *NodeIdentity::generate().unwrap().id(),
+            endpoint: relay.local_addr().unwrap(),
+        };
+        assert!(route
+            .connect_with_timeout(true, Duration::from_secs(1))
+            .is_err());
+        assert!(route.connect_with_timeout(false, Duration::ZERO).is_err());
+        assert!(route
+            .connect_with_timeout(false, CLIENT_LIFETIME + Duration::from_secs(1))
+            .is_err());
+    }
 }

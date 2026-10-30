@@ -180,3 +180,27 @@ configuration. Public relay deployment, DHT relay records/maintenance, browser
 relay selection, NAT hole punching, Tor and I2P are separate future work.
 
 See [local operation and three-process tests](../../relay-testing.md).
+
+## Explicit public mode
+
+`yami-relay serve <specific-local-IPv4:port> --identity <directory> --public
+--advertise <public-IPv4:port>` loads an existing identity and opts into public
+clients. Wildcard binds are refused. The advertised address is an operator claim;
+it may differ from the bound address on a VPS with provider NAT. No automatic
+external-IP discovery, router configuration or central service is used. Hosts
+and browsers pin the advertised relay key, independently of destination pinning.
+Loopback `serve`, `host`, and `fetch` remain isolated unless public APIs are
+explicitly selected. Public route endpoints must pass public unicast IPv4 policy.
+
+Public listeners additionally reuse TLS pre-handshake admission (32 active,
+2 active per IP, 32 starts/second total, 8 starts/second per IP). Relay limits
+remain 32 tracked sessions, 8 registrations, 4 tunnels, 16 admitted starts/IP/s
+and 8 sessions/IP. The stricter applicable limit wins. Each tunnel has an 8192
+byte forwarding buffer, 2 MiB total byte quota, 256 KiB per one-second window
+bandwidth cutoff (up to one pump iteration overshoot), five-second idle cutoff
+and fifteen-second lifetime. Over-quota sessions close rather than queue traffic.
+
+These are application resource limits, not protection against volumetric DoS,
+TCP backlog exhaustion, distributed attacks or TLS CPU starvation. Use provider
+DDoS protection and an OS firewall. Public mode remains experimental and must
+not be described as production-secure without independent security review.

@@ -7,8 +7,9 @@ use std::{
 };
 use yami_identity::NodeIdentity;
 use yami_relay::{HostEvent, Limits, Relay, Route};
-const USAGE: &str = "Reverse relay MVP (loopback only; experimental, no anonymity)\n\
+const USAGE: &str = "Reverse relay (explicit public opt-in; experimental, no anonymity)\n\
 yami-relay serve <loopback-IP:port> --identity <relay-key-directory>\n\
+yami-relay serve <specific-IPv4:port> --identity <relay-key-directory> --public --advertise <public-IPv4:port>\n\
 yami-relay host <relay-ID> <loopback-IP:port> <site-directory> --identity <host-key-directory>\n\
 yami-relay fetch <relay-ID> <loopback-IP:port> <destination-ID> <document-key>\n\
 Create persistent identities first with yami-node identity new --dir <directory>.\n\
@@ -28,6 +29,23 @@ fn run() -> Result<(), Box<dyn Error>> {
                 "Relay listening on {} as {} (loopback simulation only)",
                 relay.local_addr()?,
                 identity.id()
+            );
+            relay.run(&stop)?;
+        }
+        ["serve", endpoint, "--identity", directory, "--public", "--advertise", advertised] => {
+            let advertised: std::net::SocketAddrV4 = advertised.parse()?;
+            if advertised.port() == 0 || !ynp_tls::is_public_ipv4(*advertised.ip()) {
+                return Err(
+                    "advertised endpoint must be a public unicast IPv4 address and nonzero port"
+                        .into(),
+                );
+            }
+            let identity = Arc::new(NodeIdentity::load(directory)?);
+            let relay = Relay::bind_public(endpoint.parse()?, identity.clone(), Limits::default())?;
+            ctrlc::set_handler(move || signal.store(true, Ordering::SeqCst))?;
+            eprintln!("Relay listening on {} as {} (PUBLIC, experimental; independent security review required)", relay.local_addr()?, identity.id());
+            eprintln!(
+                "Advertised endpoint {advertised}; operator must verify routing and firewall"
             );
             relay.run(&stop)?;
         }
@@ -51,6 +69,7 @@ fn run() -> Result<(), Box<dyn Error>> {
                         identity.id(),
                         route.relay
                     ),
+                    HostEvent::Unregistered => {}
                     HostEvent::Served => eprintln!("Served document through end-to-end TLS"),
                     HostEvent::Retrying => eprintln!(
                         "Relay connection ended or unavailable; retrying with bounded backoff"

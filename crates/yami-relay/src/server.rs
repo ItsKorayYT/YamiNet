@@ -91,9 +91,32 @@ impl Relay {
         limits: Limits,
     ) -> io::Result<Self> {
         ynp::require_loopback(endpoint)?;
+        Self::bind_mode(endpoint, identity, limits, false)
+    }
+    /// Explicit public listening mode. No wildcard bind, implicit identity or endpoint discovery.
+    pub fn bind_public(
+        endpoint: SocketAddr,
+        identity: Arc<NodeIdentity>,
+        limits: Limits,
+    ) -> io::Result<Self> {
+        if !endpoint.is_ipv4() {
+            return Err(invalid("public relay requires a specific IPv4 address"));
+        }
+        Self::bind_mode(endpoint, identity, limits, true)
+    }
+    fn bind_mode(
+        endpoint: SocketAddr,
+        identity: Arc<NodeIdentity>,
+        limits: Limits,
+        public: bool,
+    ) -> io::Result<Self> {
         let limits = limits.validate()?;
         let id = *identity.id();
-        let listener = TlsListener::bind(endpoint, identity)?;
+        let listener = if public {
+            TlsListener::bind_public(endpoint, identity)?
+        } else {
+            TlsListener::bind(endpoint, identity)?
+        };
         listener.set_nonblocking(true)?;
         Ok(Self {
             listener,
@@ -463,12 +486,30 @@ fn pump(
     let until = Instant::now() + TUNNEL_LIFETIME;
     let mut buffer = [0; 8192];
     let mut total = 0;
+    let mut window = (Instant::now(), 0usize);
+    let mut activity = Instant::now();
     while Instant::now() < until && !shared.stopped() {
+        if window.0.elapsed() >= Duration::from_secs(1) {
+            window = (Instant::now(), total);
+        }
+        let before = total;
         if !forward(host, client, &mut buffer, &mut total, shared)? {
             return Ok(());
         }
         if !forward(client, host, &mut buffer, &mut total, shared)? {
             return Ok(());
+        }
+        if total != before {
+            activity = Instant::now();
+        }
+        if total - window.1 > 256 * 1024 {
+            return Err(invalid("relay tunnel bandwidth quota exceeded"));
+        }
+        if activity.elapsed() >= Duration::from_secs(5) {
+            return Err(io::Error::new(
+                io::ErrorKind::TimedOut,
+                "relay tunnel idle timeout",
+            ));
         }
     }
     Err(io::Error::new(
