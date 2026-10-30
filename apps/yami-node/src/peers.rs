@@ -254,6 +254,15 @@ fn parse(text: &str) -> io::Result<Vec<Peer>> {
     Ok(peers)
 }
 
+// Release the lock explicitly before closing its handle. On Unix an in-flight
+// process spawn can briefly inherit the open file description despite CLOEXEC;
+// closing only our descriptor otherwise leaves a stale lock until that exec.
+impl Drop for PeerStore {
+    fn drop(&mut self) {
+        let _ = self._lock.unlock();
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -273,6 +282,24 @@ mod tests {
             let _ = fs::remove_dir_all(&self.0);
         }
     }
+    #[cfg(unix)]
+    #[test]
+    fn owner_drop_unlocks_even_with_a_duplicated_description_alive() {
+        let dir = Scratch::new("inherited-description");
+        let peers = PeerStore::open(&dir.0).unwrap();
+        let inherited = peers._lock.try_clone().unwrap();
+        assert!(PeerStore::open(&dir.0).is_err());
+        drop(peers);
+        let reopened = PeerStore::open(&dir.0)
+            .expect("owner drop explicitly releases the inherited-description lock");
+        drop(inherited);
+        assert!(
+            PeerStore::open(&dir.0).is_err(),
+            "old descriptor close must not release a new owner's lock"
+        );
+        drop(reopened);
+    }
+
     #[test]
     fn persistent_manual_peers_lock_and_atomic_updates() {
         let dir = Scratch::new("roundtrip");
