@@ -40,6 +40,14 @@ struct Disk {
     _lock: File,
     faulted: bool,
 }
+impl Drop for Disk {
+    fn drop(&mut self) {
+        // A concurrent Unix fork can retain this open file description until
+        // exec, even with CLOEXEC. Unlock when the final Service owner drops
+        // instead of waiting for every inherited descriptor to close.
+        let _ = self._lock.unlock();
+    }
+}
 #[derive(Clone)]
 pub struct Service {
     stores: Arc<Mutex<StoreBudget>>,
@@ -382,6 +390,46 @@ fn read_snapshot(path: &Path, network: Network) -> io::Result<State> {
 #[cfg(test)]
 mod admission_tests {
     use super::*;
+    #[cfg(unix)]
+    #[test]
+    fn last_service_drop_unlocks_with_an_inherited_description_alive() {
+        struct Scratch(PathBuf);
+        impl Drop for Scratch {
+            fn drop(&mut self) {
+                let _ = fs::remove_dir_all(&self.0);
+            }
+        }
+        let scratch = Scratch(
+            std::env::temp_dir().join(format!("yami-dht-inherited-lock-{}", std::process::id())),
+        );
+        let path = scratch.0.join("state.cache");
+        let identity = NodeIdentity::generate().unwrap();
+        let open = || Service::open(&path, *identity.id(), Network::Loopback);
+        let service = open().unwrap();
+        let clone = service.clone();
+        // A duplicated descriptor deterministically models the open file
+        // description briefly inherited by a concurrent fork before exec.
+        let inherited = service.disk.lock().unwrap()._lock.try_clone().unwrap();
+        assert!(open().is_err(), "a live service owns the writer lock");
+        drop(service);
+        assert!(
+            open().is_err(),
+            "a service clone still owns the writer lock"
+        );
+        drop(clone);
+        let reopened = open().expect("the final service drop must release the writer lock");
+        drop(inherited);
+        assert!(
+            open().is_err(),
+            "closing an old descriptor must not unlock the new owner"
+        );
+        drop(reopened);
+        assert!(
+            open().is_ok(),
+            "the replacement owner also releases its lock"
+        );
+    }
+
     #[test]
     fn store_budget_bounds_validation_persistence_work_and_recovers() {
         let at = Instant::now();
