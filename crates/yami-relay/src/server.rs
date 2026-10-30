@@ -150,8 +150,21 @@ impl Relay {
     }
     /// Bounded tracked tasks, joined on shutdown. No detached connection threads.
     pub fn run(&self, stop: &AtomicBool) -> io::Result<()> {
+        self.run_with_observer(stop, &|_, _| {})
+    }
+    /// Local diagnostics run in the existing accept loop, without a new worker.
+    pub fn run_with_observer(
+        &self,
+        stop: &AtomicBool,
+        observe: &dyn Fn(Statistics, bool),
+    ) -> io::Result<()> {
+        let mut next_status = Instant::now();
         let mut tasks: Vec<thread::JoinHandle<()>> = Vec::new();
         while !stop.load(Ordering::SeqCst) {
+            if Instant::now() >= next_status {
+                observe(self.statistics(), true);
+                next_status = Instant::now() + Duration::from_secs(1);
+            }
             let mut index = 0;
             while index < tasks.len() {
                 if tasks[index].is_finished() {
@@ -208,6 +221,7 @@ impl Relay {
         for task in tasks {
             let _ = task.join();
         }
+        observe(self.statistics(), false);
         Ok(())
     }
 }

@@ -13,6 +13,7 @@ path = "src/main.rs"
 workspace = true
 
 [dependencies]
+yami-config = { path = "../../crates/yami-config" }
 ctrlc = { version = "3.5", features = ["termination"] }
 yami-relay = { path = "../../crates/yami-relay" }
 yami-node = { path = "../yami-node" }

@@ -1,0 +1,13 @@
+yaminet-config 1
+role node
+network public
+public-listen yes
+identity /var/lib/yaminet/dht/identity
+state /var/lib/yaminet/dht/state
+site /var/lib/yaminet/dht/site
+listen LOCAL_INTERFACE_IPV4:17444
+advertise REAL_PUBLIC_IPV4:17444
+dht yes
+workers 4
+renew-secs 21600
+health-secs 300

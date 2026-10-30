@@ -1,0 +1,6 @@
+yaminet-config 1
+role browser
+network public
+state /home/YOUR_USER/.local/share/yaminet/browser-peers
+bootstrap FULL_DHT_PEER_ID@REAL_PUBLIC_IPV4:17444
+relay-fallback yes

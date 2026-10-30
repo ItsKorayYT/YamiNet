@@ -16,7 +16,8 @@ use ynp::{DocumentData, Incoming, LocalListener, LoopbackTcp};
 use ynp_tls::{TlsListener, TlsTransport};
 
 type Result<T> = std::result::Result<T, Box<dyn Error>>;
-const USAGE: &str = "yami-node host-relay <site-directory> --identity <existing-key-directory> --relay <relay-ID@IPv4:port> [--relay <second-relay-ID@IPv4:port>] [--dht-dir <peer-directory>] [--dht-local] [--dht-renew-secs 30..43200] [--dht-health-secs 5..3600]
+const USAGE: &str = "yami-node --config <file> | check-config <file>
+yami-node host-relay <site-directory> --identity <existing-key-directory> --relay <relay-ID@IPv4:port> [--relay <second-relay-ID@IPv4:port>] [--dht-dir <peer-directory>] [--dht-local] [--dht-renew-secs 30..43200] [--dht-health-secs 5..3600]
 yami-node demo
 yami-node tls-demo <identity-directory-1> <identity-directory-2>
 yami-node serve <loopback-IP:port> <key> <document.ylang> <style.ysl>
@@ -977,7 +978,22 @@ fn host_relay(args: &[String]) -> Result<()> {
     Ok(())
 }
 fn run() -> Result<()> {
-    let args: Vec<String> = std::env::args().skip(1).collect();
+    let mut args: Vec<String> = std::env::args().skip(1).collect();
+    if args.len() == 2 && args[0] == "check-config" {
+        let config = yami_config::Config::load(&args[1])?;
+        config.expect_role(yami_config::Role::Node)?;
+        println!("Valid node configuration: {:?}; public listener opt-in: {}; {} bootstrap(s), {} relay(s); state {}",config.network,config.public_listen,config.bootstrap.len(),config.relays.len(),config.state.display());
+        return Ok(());
+    }
+    if args.len() == 2 && args[0] == "--config" {
+        let config = yami_config::Config::load(&args[1])?;
+        eprintln!(
+            "Node configuration: {:?}; state {}; existing identity required",
+            config.network,
+            config.state.display()
+        );
+        args = yami_node::configuration::node_args(&config)?;
+    }
     if args.is_empty() || args == ["--help"] {
         println!("{USAGE}");
         return Ok(());

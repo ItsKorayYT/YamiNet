@@ -1,0 +1,12 @@
+yaminet-config 1
+role node
+network public
+identity /home/YOUR_USER/.local/share/yaminet/identity
+state /home/YOUR_USER/.local/share/yaminet/host-peers
+site /home/YOUR_USER/yami-site
+relay FULL_RELAY_ID@REAL_PUBLIC_IPV4:17550
+# Optional second independently operated relay (maximum two).
+# relay SECOND_RELAY_ID@SECOND_REAL_PUBLIC_IPV4:17550
+bootstrap FULL_DHT_PEER_ID@REAL_PUBLIC_IPV4:17444
+renew-secs 21600
+health-secs 300

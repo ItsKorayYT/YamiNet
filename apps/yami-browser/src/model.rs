@@ -420,6 +420,7 @@ struct Shared {
     pending: Mutex<Pending>,
     changed: Condvar,
 }
+type Bootstrap = dyn Fn(&str) -> Result<(), String> + Send + Sync;
 type Fetcher = dyn Fn(&Location, Instant) -> Result<Page, String> + Send + Sync;
 
 /// A fixed worker pool with bounded request and completion queues. Dropping it
@@ -430,6 +431,7 @@ pub struct Loader {
     shared: Arc<Shared>,
     results: mpsc::Receiver<Completion>,
     relay_enabled: Arc<AtomicBool>,
+    bootstrap: Arc<Bootstrap>,
 }
 impl Loader {
     pub fn new(wake: Arc<dyn Fn() + Send + Sync>) -> io::Result<Self> {
@@ -471,6 +473,7 @@ impl Loader {
         resolver: Arc<Resolver>,
     ) -> io::Result<Self> {
         let relay_enabled = resolver.relay_enabled.clone();
+        let bootstrap_resolver = resolver.clone();
         let mut loader = Self::with_fetcher(
             wake,
             Arc::new(move |location, deadline| {
@@ -482,7 +485,11 @@ impl Loader {
             }),
         )?;
         loader.relay_enabled = relay_enabled;
+        loader.bootstrap = Arc::new(move |pin| bootstrap_resolver.add_bootstrap(pin));
         Ok(loader)
+    }
+    pub fn add_bootstrap(&self, pin: &str) -> Result<(), String> {
+        (self.bootstrap)(pin)
     }
     fn with_fetcher(wake: Arc<dyn Fn() + Send + Sync>, fetcher: Arc<Fetcher>) -> io::Result<Self> {
         let shared = Arc::new(Shared {
@@ -494,6 +501,7 @@ impl Loader {
             shared: Arc::clone(&shared),
             results,
             relay_enabled: Arc::new(AtomicBool::new(false)),
+            bootstrap: Arc::new(native::add_bootstrap_from_environment),
         };
         for index in 0..WORKERS {
             let shared = Arc::clone(&shared);

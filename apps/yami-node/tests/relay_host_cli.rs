@@ -113,9 +113,28 @@ fn host_relay_cli_publishes_fetches_stops_and_restarts_with_new_sequence() {
                 .unwrap(),
         )
     };
+    let config_path = base.join("host.conf");
+    fs::write(&config_path,format!("yaminet-config 1\nrole node\nnetwork loopback\nidentity {}\nstate {}\nsite {}\nrelay {pin}\nbootstrap {}@{peer_endpoint}\n",base.join("host-keys").display(),base.join("host-peers").display(),base.join("site").display(),peer.id())).unwrap();
+    assert!(Command::new(env!("CARGO_BIN_EXE_yami-node"))
+        .arg("check-config")
+        .arg(&config_path)
+        .status()
+        .unwrap()
+        .success());
     let mut previous = 0;
-    for _ in 0..2 {
-        let mut child = spawn();
+    for configured in [false, true] {
+        let mut child = if configured {
+            Process(
+                Command::new(env!("CARGO_BIN_EXE_yami-node"))
+                    .arg("--config")
+                    .arg(&config_path)
+                    .stderr(Stdio::inherit())
+                    .spawn()
+                    .unwrap(),
+            )
+        } else {
+            spawn()
+        };
         wait(|| {
             dht.snapshot()
                 .unwrap()

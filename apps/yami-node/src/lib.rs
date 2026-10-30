@@ -285,3 +285,5 @@ mod tests {
 }
 
 pub mod relay_host;
+
+pub mod configuration;

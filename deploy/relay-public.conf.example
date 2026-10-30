@@ -1,0 +1,9 @@
+yaminet-config 1
+# TEMPLATE: replace addresses; this file is deliberately not runnable as shipped.
+role relay
+network public
+public-listen yes
+identity /var/lib/yaminet/relay/identity
+state /var/lib/yaminet/relay/state
+listen LOCAL_INTERFACE_IPV4:17550
+advertise REAL_PUBLIC_IPV4:17550

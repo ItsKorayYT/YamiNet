@@ -95,8 +95,9 @@ struct Flight {
     state: Mutex<Query>,
     changed: Condvar,
 }
+type LookupEntry = ((NodeId, Option<u64>), Arc<Flight>);
 #[derive(Default)]
-pub struct Lookups(Mutex<VecDeque<((NodeId, Option<u64>), Arc<Flight>)>>);
+pub struct Lookups(Mutex<VecDeque<LookupEntry>>);
 struct Running(Arc<Flight>);
 impl Drop for Running {
     fn drop(&mut self) {

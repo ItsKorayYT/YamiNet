@@ -21,7 +21,11 @@ use winit::{
 };
 use yami_render::native::{NativeDocument, TextEngine};
 
-pub fn run(args: Vec<String>, relay_enabled: Option<bool>) -> Result<(), Box<dyn Error>> {
+pub fn run(
+    args: Vec<String>,
+    relay_enabled: Option<bool>,
+    resolver: Option<Arc<yami_browser::native::Resolver>>,
+) -> Result<(), Box<dyn Error>> {
     if args.len() > 1 {
         return Err("--desktop accepts at most one yami:// or ynps:// address, localhost ynp:// address or built-in local:welcome/local:about".into());
     }
@@ -30,7 +34,11 @@ pub fn run(args: Vec<String>, relay_enabled: Option<bool>) -> Result<(), Box<dyn
     let wake: Arc<dyn Fn() + Send + Sync> = Arc::new(move || {
         let _ = proxy.send_event(());
     });
-    let loader = Loader::new(Arc::clone(&wake))?;
+    let loader = if let Some(resolver) = resolver {
+        Loader::with_resolver(Arc::clone(&wake), resolver)?
+    } else {
+        Loader::new(Arc::clone(&wake))?
+    };
     if let Some(enabled) = relay_enabled {
         loader.set_relay_enabled(enabled);
     }
@@ -199,7 +207,7 @@ impl Desktop {
             self.browser.active().address.clone()
         };
         if self.bootstrap_edit {
-            if let Err(error) = yami_browser::native::add_bootstrap_from_environment(&value) {
+            if let Err(error) = self.loader.add_bootstrap(&value) {
                 self.browser.active_mut().state = PageState::Error(error);
             }
         } else {

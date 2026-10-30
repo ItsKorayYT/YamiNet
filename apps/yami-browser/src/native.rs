@@ -115,6 +115,42 @@ impl Resolver {
     pub fn recent_failure_count(&self) -> usize {
         self.failures.len()
     }
+    pub fn from_config(config: &yami_config::Config) -> Result<Self, String> {
+        config
+            .expect_role(yami_config::Role::Browser)
+            .map_err(|e| e.to_string())?;
+        yami_node::configuration::prepare_bootstraps(config).map_err(|e| e.to_string())?;
+        let resolver = Self::new(config.state.clone(), config.network);
+        resolver.set_relay_enabled(config.relay_fallback);
+        Ok(resolver)
+    }
+    pub fn add_bootstrap(&self, pin: &str) -> Result<(), String> {
+        let (id, endpoint) = pin.split_once('@').ok_or("Use full-node-ID@IPv4:port")?;
+        let id = id.parse().map_err(|_| "Invalid full bootstrap node ID")?;
+        let endpoint = endpoint
+            .parse()
+            .map_err(|_| "Invalid bootstrap IPv4 endpoint")?;
+        Contact::new(id, endpoint, self.network).map_err(|e| e.to_string())?;
+        PeerStore::open(&self.directory)
+            .and_then(|mut peers| peers.add(id, endpoint.into()))
+            .map_err(|e| format!("Cannot save bootstrap pin: {e}"))
+    }
+    pub fn diagnostics(&self) -> Result<String, String> {
+        let state = match Service::read_snapshot(&self.state_path(), self.network) {
+            Ok(state) => state,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                return Ok(format!(
+                    "No cached records; {} configured bootstrap(s); network {:?}; state {}",
+                    self.seeds()?.len(),
+                    self.network,
+                    self.directory.display()
+                ))
+            }
+            Err(e) => return Err(format!("Cannot read network diagnostics: {e}")),
+        };
+        let at = yami_dht::now().map_err(|e| e.to_string())?;
+        Ok(format!("Network {:?}; {} live signed owner(s), {} retained history slots; {} bootstrap(s); relay fallback {}; {} remembered failures. Cached locations are not verified connections.",self.network,state.records().iter().filter(|r|state.get(r.id(),at).is_some()).count(),state.records().len(),self.seeds()?.len(),self.relay_enabled(),self.recent_failure_count()))
+    }
     pub fn state_path(&self) -> PathBuf {
         let mode = if self.network == Network::Public {
             "public"
@@ -208,7 +244,7 @@ impl Resolver {
             cached.as_ref().map(PeerRecord::sequence),
             deadline,
             || {
-                let found = if let Some(record) = &cached {
+                if let Some(record) = &cached {
                     yami_dht::lookup_newer_with_connector(
                         service,
                         address.id,
@@ -224,10 +260,7 @@ impl Resolver {
                         &DeadlineConnector(deadline),
                     )
                 }
-                .map_err(|_| {
-                    "DHT lookup failed: peer state is invalid or unavailable.".to_string()
-                });
-                found
+                .map_err(|_| "DHT lookup failed: peer state is invalid or unavailable.".to_string())
             },
         )?;
         if let Some(record) = found.record {
@@ -404,16 +437,7 @@ impl FetchError {
 
 /// Explicit settings action: persist a pin, without making a connection or fetching content.
 pub fn add_bootstrap_from_environment(pin: &str) -> Result<(), String> {
-    let resolver = Resolver::from_environment()?;
-    let (id, endpoint) = pin.split_once('@').ok_or("Use full-node-ID@IPv4:port")?;
-    let id = id.parse().map_err(|_| "Invalid full bootstrap node ID")?;
-    let endpoint = endpoint
-        .parse()
-        .map_err(|_| "Invalid bootstrap IPv4 endpoint")?;
-    Contact::new(id, endpoint, resolver.network).map_err(|e| e.to_string())?;
-    PeerStore::open(&resolver.directory)
-        .and_then(|mut peers| peers.add(id, endpoint.into()))
-        .map_err(|e| format!("Cannot save bootstrap pin: {e}"))
+    Resolver::from_environment()?.add_bootstrap(pin)
 }
 
 /// Browser address adapter for native links in the existing inert link nodes.

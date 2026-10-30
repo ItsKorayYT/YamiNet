@@ -7,19 +7,83 @@ use std::{
 };
 use yami_identity::NodeIdentity;
 use yami_relay::{HostEvent, Limits, Relay, Route};
-const USAGE: &str = "Reverse relay (explicit public opt-in; experimental, no anonymity)\n\
+const USAGE: &str = "yami-relay --config <file> | check-config <file> | status --config <file>\n\
+Reverse relay (explicit public opt-in; experimental, no anonymity)\n\
 yami-relay serve <loopback-IP:port> --identity <relay-key-directory>\n\
 yami-relay serve <specific-IPv4:port> --identity <relay-key-directory> --public --advertise <public-IPv4:port>\n\
 yami-relay host <relay-ID> <loopback-IP:port> <site-directory> --identity <host-key-directory>\n\
 yami-relay fetch <relay-ID> <loopback-IP:port> <destination-ID> <document-key>\n\
 Create persistent identities first with yami-node identity new --dir <directory>.\n\
 Host opens outbound connections only. Relay authentication and destination authentication are separate.";
+fn configured(config: &yami_config::Config, stop: &AtomicBool) -> Result<(), Box<dyn Error>> {
+    config.expect_role(yami_config::Role::Relay)?;
+    let identity = Arc::new(NodeIdentity::load(
+        config.identity.as_ref().ok_or("missing relay identity")?,
+    )?);
+    let id = *identity.id();
+    let writer = yami_config::status::StatusWriter::open(&config.state)?;
+    let endpoint = config.listen.ok_or("missing relay listener")?;
+    let relay = if config.public_listen {
+        Relay::bind_public(endpoint, identity, Limits::default())?
+    } else {
+        Relay::bind(endpoint, identity, Limits::default())?
+    };
+    eprintln!(
+        "Relay listening on {} as {id}; explicit public mode {}; advertised {:?}; state {}",
+        relay.local_addr()?,
+        config.public_listen,
+        config.advertised,
+        config.state.display()
+    );
+    relay.run_with_observer(stop, &|stats, running| {
+        let status = yami_config::status::RelayStatus {
+            id,
+            observed: std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_or(0, |t| t.as_secs()),
+            running,
+            connections: stats.connections,
+            registrations: stats.registrations,
+            tunnels: stats.tunnels,
+            forwarded: stats.forwarded_bytes,
+        };
+        if writer.write(&status).is_err() {
+            eprintln!("Relay diagnostic snapshot could not be saved");
+        }
+    })?;
+    Ok(())
+}
 fn run() -> Result<(), Box<dyn Error>> {
     let args: Vec<_> = std::env::args().skip(1).collect();
     let values: Vec<_> = args.iter().map(String::as_str).collect();
     let stop = Arc::new(AtomicBool::new(false));
     let signal = stop.clone();
     match values.as_slice() {
+        ["check-config", path] => {
+            let config = yami_config::Config::load(path)?;
+            config.expect_role(yami_config::Role::Relay)?;
+            println!(
+                "Valid relay configuration; public listener opt-in: {}; state {}",
+                config.public_listen,
+                config.state.display()
+            );
+        }
+        ["--config", path] => {
+            let config = yami_config::Config::load(path)?;
+            config.expect_role(yami_config::Role::Relay)?;
+            ctrlc::set_handler(move || signal.store(true, Ordering::SeqCst))?;
+            configured(&config, &stop)?;
+        }
+        ["status", "--config", path] => {
+            let config = yami_config::Config::load(path)?;
+            config.expect_role(yami_config::Role::Relay)?;
+            let status = yami_config::status::RelayStatus::read(&config.state)?;
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)?
+                .as_secs();
+            let age = now.saturating_sub(status.observed);
+            println!("Relay {}: {} (sample age {}s); connections {}; registrations {}; tunnels {}; forwarded bytes {}. Local diagnostics, not a reachability proof.",status.id,if status.running&&age<=10&&status.observed<=now {"recently running"}else{"stopped or stale"},age,status.connections,status.registrations,status.tunnels,status.forwarded);
+        }
         ["--help"] | [] => println!("{USAGE}"),
         ["serve", endpoint, "--identity", directory] => {
             let identity = Arc::new(NodeIdentity::load(directory)?);

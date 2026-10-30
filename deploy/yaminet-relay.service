@@ -1,0 +1,25 @@
+# Optional Linux systemd example. Install/configure explicitly; never auto-enabled.
+[Unit]
+Description=YamiNet experimental reverse relay
+After=network-online.target
+Wants=network-online.target
+[Service]
+Type=simple
+User=yaminet
+Group=yaminet
+ExecStart=/opt/yaminet/yami-relay --config /etc/yaminet/relay.conf
+Restart=on-failure
+RestartSec=5s
+TimeoutStopSec=20s
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/yaminet/relay/state
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+LimitNOFILE=512
+TasksMax=80
+MemoryMax=256M
+[Install]
+WantedBy=multi-user.target

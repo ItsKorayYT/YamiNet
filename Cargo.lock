@@ -2316,6 +2316,7 @@ dependencies = [
  "softbuffer",
  "tiny-skia",
  "winit",
+ "yami-config",
  "yami-dht",
  "yami-identity",
  "yami-node",
@@ -2326,6 +2327,15 @@ dependencies = [
  "ynp-discovery",
  "ynp-tls",
  "ysl",
+]
+
+[[package]]
+name = "yami-config"
+version = "0.1.0"
+dependencies = [
+ "yami-dht",
+ "yami-identity",
+ "ynp-tls",
 ]
 
 [[package]]
@@ -2356,6 +2366,7 @@ dependencies = [
  "ctrlc",
  "getrandom 0.4.3",
  "rustls",
+ "yami-config",
  "yami-dht",
  "yami-identity",
  "yami-relay",
@@ -2380,6 +2391,7 @@ name = "yami-relay-cli"
 version = "0.1.0"
 dependencies = [
  "ctrlc",
+ "yami-config",
  "yami-identity",
  "yami-node",
  "yami-relay",

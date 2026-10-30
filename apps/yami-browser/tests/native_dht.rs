@@ -252,9 +252,22 @@ fn three_nodes_resolve_render_navigate_refresh_and_authenticate() {
         .add(b.contact.id, b.contact.endpoint.into())
         .unwrap();
     let ppm = scratch.0.join("native.ppm");
+    let browser_config = scratch.0.join("browser.conf");
+    fs::write(
+        &browser_config,
+        format!(
+            "yaminet-config 1\nrole browser\nnetwork loopback\nstate {}\nbootstrap {}@{}\n",
+            cli_directory.display(),
+            b.contact.id,
+            b.contact.endpoint
+        ),
+    )
+    .unwrap();
     let output = std::process::Command::new(env!("CARGO_BIN_EXE_yami-browser"))
         .env("YAMINET_PEER_DIR", &cli_directory)
         .env("YAMINET_BROWSER_DHT_NETWORK", "local")
+        .arg("--config")
+        .arg(&browser_config)
         .args([&home, "--ppm"])
         .arg(&ppm)
         .output()

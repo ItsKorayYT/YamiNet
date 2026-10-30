@@ -19,7 +19,11 @@ fn read_file(path: &str, limit: usize) -> io::Result<String> {
     }
     Ok(text)
 }
-pub fn run(arguments: Vec<String>, relay_enabled: Option<bool>) -> Result<(), Box<dyn Error>> {
+pub fn run(
+    arguments: Vec<String>,
+    relay_enabled: Option<bool>,
+    resolver: Option<std::sync::Arc<yami_browser::native::Resolver>>,
+) -> Result<(), Box<dyn Error>> {
     let mut args = arguments.into_iter();
     let mut source = None;
     let mut style_path = None;
@@ -54,7 +58,10 @@ pub fn run(arguments: Vec<String>, relay_enabled: Option<bool>) -> Result<(), Bo
     let (text, remote_style) = match source.as_deref() {
         Some(url) if url.starts_with(yami_browser::native::SCHEME) => {
             let address = yami_browser::native::Address::parse(url)?;
-            let resolver = yami_browser::native::Resolver::from_environment()?;
+            let resolver = match resolver {
+                Some(resolver) => resolver,
+                None => std::sync::Arc::new(yami_browser::native::Resolver::from_environment()?),
+            };
             if let Some(enabled) = relay_enabled {
                 resolver.set_relay_enabled(enabled);
             }
