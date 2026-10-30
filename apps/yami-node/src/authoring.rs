@@ -134,9 +134,8 @@ fn validate_nodes(
                         )));
                     }
                 } else if let Some(rest) = target.strip_prefix("yami://") {
-                    let (id, key) = rest
-                        .split_once('/')
-                        .ok_or_else(|| invalid("identity link requires /page"))?;
+                    let (id, key) = rest.split_once('/').unwrap_or((rest, "home"));
+                    let key = if key.is_empty() { "home" } else { key };
                     let _: yami_identity::NodeId = id
                         .parse()
                         .map_err(|_| invalid("invalid full destination identity in link"))?;
@@ -162,7 +161,9 @@ fn validate_nodes(
             }
             _ => {}
         }
-        validate_nodes(node.kind.children(), pages, images, depth + 1)?;
+        if !node.kind.children().is_empty() {
+            validate_nodes(node.kind.children(), pages, images, depth + 1)?;
+        }
     }
     Ok(())
 }
@@ -262,6 +263,54 @@ pub const STYLE:&str="@style 0.2\ncanvas\n  width 960\n  padding 24\n  paper #10
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn site_checks_exact_identities_asset_counts_and_symlinks() {
+        let root =
+            std::env::temp_dir().join(format!("yami-authoring-policy-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        new_site(&root, "personal").unwrap();
+        let id = yami_identity::NodeIdentity::generate().unwrap();
+        fs::write(
+            root.join("about.ylang"),
+            format!(
+                "@page 0.2\n  title Other site\n> yami://{} | Other home\n",
+                id.id()
+            ),
+        )
+        .unwrap();
+        assert!(check(&root).is_ok());
+        let mut damaged = id.id().to_string();
+        damaged.replace_range(5..6, if &damaged[5..6] == "a" { "b" } else { "a" });
+        fs::write(
+            root.join("about.ylang"),
+            format!("@page 0.2\n  title Other site\n> yami://{damaged}/home | Other home\n"),
+        )
+        .unwrap();
+        assert!(check(&root).unwrap_err().to_string().contains("identity"));
+        fs::write(
+            root.join("about.ylang"),
+            "@page 0.2\n  title Bounded\n= Valid\n",
+        )
+        .unwrap();
+        #[cfg(unix)]
+        {
+            std::os::unix::fs::symlink(
+                root.join("assets/cover.png"),
+                root.join("assets/alias.png"),
+            )
+            .unwrap();
+            assert!(check(&root).is_err());
+            fs::remove_file(root.join("assets/alias.png")).unwrap();
+        }
+        for n in 0..256 {
+            fs::write(root.join("assets").join(format!("extra{n}.png")), []).unwrap();
+        }
+        assert!(check(&root)
+            .unwrap_err()
+            .to_string()
+            .contains("inventory limit"));
+        fs::remove_dir_all(root).unwrap();
+    }
     #[test]
     fn templates_validate_export_and_refuse_overwrite() {
         let root = std::env::temp_dir().join(format!("yami-authoring-{}", std::process::id()));

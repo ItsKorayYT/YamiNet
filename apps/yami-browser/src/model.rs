@@ -45,7 +45,7 @@ impl Location {
             "" => Ok(Self::Home),
             "local:welcome" => Ok(Self::Welcome),
             "local:about" => Ok(Self::About),
-            _ if address.starts_with(native::SCHEME) => Address::parse(address)
+            _ if address.starts_with(native::SCHEME) => Address::parse(input)
                 .map(Self::Yami)
                 .map_err(|error| format!("Cannot open this address: {error}")),
             _ if address.starts_with(ynp_tls::SCHEME) => {

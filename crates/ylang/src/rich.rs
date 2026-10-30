@@ -364,6 +364,30 @@ mod tests {
         assert!(matches!(doc.nodes[5].kind, NodeKind::Separator));
     }
     #[test]
+    fn rich_node_paragraph_row_and_nesting_budgets_have_explicit_errors() {
+        let nodes = format!(
+            "@page 0.2\n  title Too many\n{}",
+            "---\n".repeat(MAX_NODES + 1)
+        );
+        assert!(parse(&nodes).unwrap_err().message.contains("4096 nodes"));
+        let paragraph = format!(
+            "@page 0.2\n  title Long\n{}",
+            format!("{}\n", "a".repeat(4000)).repeat(5)
+        );
+        assert!(parse(&paragraph).is_err());
+        let row="@page 0.2\n  title Row\n:: row\n  One\n  > /two | Two\n  ---\n  > /three | Three\n  ---\n";
+        assert!(parse(row).is_err());
+        let mut nested = String::from("@page 0.2\n  title Deep\n");
+        for n in 0..34 {
+            nested.push_str(&format!("{}:: group\n", "  ".repeat(n)));
+        }
+        assert!(parse(&nested).is_err());
+        let escaped = parse("@page 0.2\n  title Literal\n\\[strong: plain]\n").unwrap();
+        assert!(
+            matches!(&escaped.nodes[0].kind,NodeKind::Text{content,..} if content.len()==1 && content[0].kind==InlineKind::Plain && content[0].text=="[strong: plain]")
+        );
+    }
+    #[test]
     fn legacy_markers_are_not_reinterpreted_and_new_errors_keep_source_positions() {
         let old=parse("@page 0.1\n  title Legacy\n[strong: literal]\n:: card\n  - literal list text\n! literal image\n---\n").unwrap();
         assert!(

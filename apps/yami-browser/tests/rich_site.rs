@@ -577,3 +577,33 @@ fn explicit_cross_identity_links_require_navigation_and_reauthentication() {
     );
     assert_eq!(browser.active().address, target);
 }
+
+#[test]
+fn closing_a_tab_cancels_its_remaining_image_work() {
+    let scratch = Scratch::new("close");
+    fs::write(
+        scratch.0.join("site/home.ylang"),
+        "@page 0.2\n  title Closing\n! first | First\n! second | Second\n",
+    )
+    .unwrap();
+    let host = Host::start(&scratch);
+    host.slow.store(true, Ordering::SeqCst);
+    let loader = Loader::new(Arc::new(|| {})).unwrap();
+    let mut browser = Browser::new();
+    browser
+        .navigate(
+            &ynp_tls::format_url(&host.id, host.endpoint, "home"),
+            &loader,
+        )
+        .unwrap();
+    poll(&mut browser, &loader);
+    wait(|| host.requests.load(Ordering::SeqCst) > 0);
+    browser.open_tab();
+    browser.close_tab_with_loader(0, &loader);
+    browser.navigate("local:welcome", &loader).unwrap();
+    poll(&mut browser, &loader);
+    thread::sleep(Duration::from_millis(650));
+    browser.poll(&loader);
+    assert_eq!(host.requests.load(Ordering::SeqCst), 1);
+    assert_eq!(browser.active().security(), Some(&Security::BuiltIn));
+}

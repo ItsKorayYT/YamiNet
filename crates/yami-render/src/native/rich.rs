@@ -169,6 +169,20 @@ pub(super) fn layout(
     engine: &mut TextEngine,
     images: &crate::assets::Images,
 ) -> Result<NativeDocument, RenderError> {
+    if sheet.rich.is_none()
+        && (!(20..=160).contains(&sheet.width)
+            || sheet.padding > 8
+            || [
+                sheet.text.gap,
+                sheet.heading.gap,
+                sheet.section.gap,
+                sheet.link.gap,
+            ]
+            .iter()
+            .any(|gap| *gap > 3))
+    {
+        return Err(RenderError("legacy stylesheet outside supported bounds"));
+    }
     let style = sheet.rich.clone().unwrap_or_else(|| RichStyle {
         width: (sheet.width * 9).clamp(240, 1440) as u16,
         ..RichStyle::default()
@@ -369,6 +383,9 @@ impl Builder<'_> {
                     y = self.text(content, x, y, width, font, color, None)?;
                 }
                 NodeKind::Heading { level, text } => {
+                    if !(1..=6).contains(level) {
+                        return Err(RenderError("invalid heading level"));
+                    }
                     let content = plain(text);
                     let mut font = self.style.heading;
                     font.size =
@@ -548,14 +565,51 @@ impl Builder<'_> {
                 NodeKind::ListItem { .. } => return Err(RenderError("orphan list item")),
                 NodeKind::Image { alt, key } => {
                     self.account(key)?;
-                    if let Some(crate::assets::ImageState::Ready(image))=self.images.get(key).filter(|state|matches!(state,crate::assets::ImageState::Ready(image) if image.valid())) {
+                    let image = match self.images.get(key) {
+                        Some(crate::assets::ImageState::Ready(image)) if image.valid() => {
+                            Some(image)
+                        }
+                        _ => None,
+                    };
+                    if let Some(image) = image {
                         self.account(alt)?;
-                        let fit=(width.min(self.style.image.width as f32*self.scale)/image.width as f32).min(self.style.image.height as f32*self.scale/image.height as f32);
-                        let (w,h)=(image.width as f32*fit,image.height as f32*fit);let offset=match self.style.image.align{Align::Left=>0.0,Align::Center=>(width-w)/2.0,Align::Right=>width-w};
-                        self.image_blocks.push(ImageBlock{rect:TextRect{x:x+offset,y,width:w,height:h},image:image.clone()});y+=h+self.style.image.gap as f32*self.scale;
+                        let fit = (width.min(self.style.image.width as f32 * self.scale)
+                            / image.width as f32)
+                            .min(self.style.image.height as f32 * self.scale / image.height as f32);
+                        let (w, h) = (image.width as f32 * fit, image.height as f32 * fit);
+                        let offset = match self.style.image.align {
+                            Align::Left => 0.0,
+                            Align::Center => (width - w) / 2.0,
+                            Align::Right => width - w,
+                        };
+                        self.image_blocks.push(ImageBlock {
+                            rect: TextRect {
+                                x: x + offset,
+                                y,
+                                width: w,
+                                height: h,
+                            },
+                            image: image.clone(),
+                        });
+                        y += h + self.style.image.gap as f32 * self.scale;
                     } else {
-                        let status=if matches!(self.images.get(key),Some(crate::assets::ImageState::Pending)){"Loading image"}else{"Image unavailable"};
-                        y=self.text(&plain(&format!("[{status}: {alt}]")),x,y,width,self.style.text,ink.unwrap_or(self.sheet.text.ink),None)?;
+                        let status = if matches!(
+                            self.images.get(key),
+                            Some(crate::assets::ImageState::Pending)
+                        ) {
+                            "Loading image"
+                        } else {
+                            "Image unavailable"
+                        };
+                        y = self.text(
+                            &plain(&format!("[{status}: {alt}]")),
+                            x,
+                            y,
+                            width,
+                            self.style.text,
+                            ink.unwrap_or(self.sheet.text.ink),
+                            None,
+                        )?;
                     }
                 }
                 NodeKind::Separator => {
@@ -573,6 +627,9 @@ impl Builder<'_> {
                     });
                     y += 24.0 * self.scale;
                 }
+            }
+            if !y.is_finite() || y > 131072.0 * self.scale {
+                return Err(RenderError("rich document exceeds flow height budget"));
             }
         }
         Ok(y)
@@ -614,6 +671,29 @@ mod tests {
         assert_ne!(normal.data(), hovered.data());
         assert_eq!(hovered.pixel(0, 0), normal.pixel(0, 0));
         assert_eq!(hovered.pixel(0, 0).unwrap().red(), 255);
+    }
+    #[test]
+    fn rich_documents_validate_legacy_style_projection_and_flow_height() {
+        let doc = ylang::parse("@page 0.2\n  title Bounds\n= Title\n").unwrap();
+        let sheet = Stylesheet {
+            width: usize::MAX,
+            ..Stylesheet::default()
+        };
+        let mut engine = TextEngine::new();
+        assert!(NativeDocument::layout(&doc, &sheet, 400.0, 1.0, &mut engine).is_err());
+        let mut doc = doc;
+        doc.nodes[0].kind = NodeKind::Heading {
+            level: 0,
+            text: "Bad".into(),
+        };
+        assert!(
+            NativeDocument::layout(&doc, &Stylesheet::default(), 400.0, 1.0, &mut engine).is_err()
+        );
+        let mut doc = ylang::parse("@page 0.2\n  title Tall\n= Title\n").unwrap();
+        doc.nodes = vec![doc.nodes[0].clone(); 900];
+        let sheet =
+            ysl::parse("@style 0.2\nheading\n  size 72\n  line-height 220\n  gap 64\n").unwrap();
+        assert!(NativeDocument::layout(&doc, &sheet, 400.0, 1.0, &mut engine).is_err());
     }
     #[test]
     fn rich_programmatic_bounds_fail_without_unbounded_layout() {
