@@ -407,7 +407,7 @@ impl Desktop {
                 }
             }
             Action::Close(index) => {
-                self.browser.close_tab(index);
+                self.browser.close_tab_with_loader(index, &self.loader);
                 self.clear_focus();
             }
             Action::Tab(index) => {
@@ -1089,6 +1089,65 @@ mod tests {
         pix
     }
 
+    #[test]
+    fn library_controls_edit_custom_titles_folders_and_home_without_trust() {
+        let dir = std::env::temp_dir().join(format!("yami-ui-library-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let mut app = headless(1000.0, 700.0);
+        app.browser.library = Some(yami_browser::library::Library::open(&dir).unwrap());
+        app.browser.navigate("local:welcome", &app.loader).unwrap();
+        settle(&mut app);
+        app.act(Action::SaveBookmark);
+        app.editor.replace("My start page");
+        app.commit();
+        assert_eq!(
+            app.browser.library.as_ref().unwrap().bookmarks()[0].title,
+            "My start page"
+        );
+        app.act(Action::EditBookmark(0, true));
+        app.editor.replace("Local");
+        app.commit();
+        assert_eq!(
+            app.browser.library.as_ref().unwrap().bookmarks()[0].folder,
+            "Local"
+        );
+        frame(&mut app);
+        assert!(app
+            .scene
+            .hits
+            .iter()
+            .any(|h| h.action == Action::OpenBookmark(0)));
+        app.act(Action::SetHomepage);
+        app.act(Action::NewTab);
+        app.act(Action::Home);
+        settle(&mut app);
+        assert_eq!(app.browser.active().address, "local:welcome");
+        assert_eq!(
+            app.browser.active().security(),
+            Some(&crate::model::Security::BuiltIn)
+        );
+        app.act(Action::ToggleHistory);
+        assert!(app.browser.library.as_ref().unwrap().history_enabled());
+        app.act(Action::ClearHistory);
+        app.act(Action::RemoveBookmark(0));
+        assert!(app.browser.library.as_ref().unwrap().bookmarks().is_empty());
+        drop(app);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+    #[test]
+    fn editor_shift_selection_is_unicode_safe_and_replaces_only_range() {
+        let mut editor = Editor::default();
+        editor.activate("aé日z");
+        editor.move_caret(1, false);
+        editor.move_caret(3, true);
+        assert_eq!(&editor.value[editor.range().unwrap()], "é");
+        editor.replace("Ω");
+        assert_eq!(editor.value, "aΩ日z");
+        editor.move_caret(editor.value.len(), false);
+        editor.move_caret(3, true);
+        editor.backspace();
+        assert_eq!(editor.value, "aΩ");
+    }
     #[test]
     fn discovery_selection_is_untrusted_and_does_not_navigate_or_replace_tabs() {
         let mut app = headless(1440.0, 900.0);

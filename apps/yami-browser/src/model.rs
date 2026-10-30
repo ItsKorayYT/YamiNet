@@ -319,6 +319,12 @@ impl Browser {
     }
     /// Keep one blank tab when the last tab closes. Pending results cannot
     /// target its replacement because tab IDs are never reused.
+    pub fn close_tab_with_loader(&mut self, index: usize, loader: &Loader) {
+        if let Some(tab) = self.tabs.get(index) {
+            loader.cancel(tab.id);
+        }
+        self.close_tab(index);
+    }
     pub fn close_tab(&mut self, index: usize) {
         if index >= self.tabs.len() {
             return;

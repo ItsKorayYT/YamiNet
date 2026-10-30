@@ -165,3 +165,41 @@ pub(crate) fn load(
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Read;
+    struct Input(std::io::Cursor<Vec<u8>>);
+    impl std::io::Read for Input {
+        fn read(&mut self, b: &mut [u8]) -> std::io::Result<usize> {
+            self.0.read(b)
+        }
+    }
+    impl std::io::Write for Input {
+        fn write(&mut self, b: &[u8]) -> std::io::Result<usize> {
+            Ok(b.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+    impl ynp::Connection for Input {
+        fn protection(&self) -> ynp::Protection {
+            ynp::Protection::Tls13PinnedServer
+        }
+    }
+    #[test]
+    fn malformed_response_bytes_are_charged_and_never_exceed_remaining_budget() {
+        let mut input = Input(std::io::Cursor::new(vec![0; 100]));
+        let mut metered = Metered {
+            inner: &mut input,
+            limit: 17,
+            read: 0,
+        };
+        let mut bytes = [0; 100];
+        assert_eq!(metered.read(&mut bytes).unwrap(), 17);
+        assert!(metered.read(&mut bytes).is_err());
+        assert_eq!(metered.read, 17);
+    }
+}

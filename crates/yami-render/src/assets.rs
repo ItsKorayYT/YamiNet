@@ -192,6 +192,31 @@ mod tests {
         assert!(decode_png(&large, MAX_DECODED).is_err());
     }
     #[test]
+    fn valid_png_headers_cannot_exceed_dimensions_pixels_or_animate() {
+        fn png(width: u32, height: u32, animated: bool) -> Vec<u8> {
+            let mut bytes = Vec::new();
+            let mut encoder = png::Encoder::new(&mut bytes, width, height);
+            encoder.set_color(png::ColorType::Rgba);
+            encoder.set_depth(png::BitDepth::Eight);
+            if animated {
+                encoder.set_animated(1, 0).unwrap();
+            }
+            {
+                let mut writer = encoder.write_header().unwrap();
+                writer
+                    .write_image_data(&vec![0; (width * height * 4) as usize])
+                    .unwrap();
+            }
+            bytes
+        }
+        for (w, h, a) in [(2049, 1, false), (1025, 1024, false), (1, 1, true)] {
+            let bytes = png(w, h, a);
+            assert!(bytes.len() < MAX_COMPRESSED);
+            assert!(decode_png(&bytes, MAX_DECODED).is_err());
+        }
+        assert!(decode_png(b"GIF89a", MAX_DECODED).is_err());
+    }
+    #[test]
     fn page_image_discovery_is_deduplicated_and_bounded() {
         let source = format!(
             "@page 0.2\n  title Assets\n{}",

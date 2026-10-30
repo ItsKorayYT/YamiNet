@@ -150,7 +150,9 @@ fn native_identity_site_loads_rich_content_images_and_local_links_over_tls() {
         assets::encode_png(8, 4, &[220, 30, 50, 255].repeat(32)).unwrap(),
     )
     .unwrap();
-    fs::write(scratch.0.join("site/assets/corrupt.png"), b"not a PNG").unwrap();
+    let mut corrupt = assets::encode_png(1, 1, &[0, 0, 0, 255]).unwrap();
+    corrupt[29] ^= 1;
+    fs::write(scratch.0.join("site/assets/corrupt.png"), corrupt).unwrap();
     let host = Host::start(&scratch);
     let directory = scratch.0.join("browser");
     yami_node::peers::PeerStore::open(&directory)
@@ -400,4 +402,178 @@ fn png_assets_keep_nested_tls_destination_pinning_through_a_relay() {
     poll(&mut browser, &loader);
     assert_eq!(browser.active().address, format!("yami://{host}/about"));
     assert_eq!(browser.active().title(), "Relayed about");
+}
+
+#[test]
+fn authored_site_build_identity_bookmark_restart_and_native_render() {
+    let scratch = Scratch::new("authoring");
+    fs::remove_dir_all(scratch.0.join("site")).unwrap();
+    let source = scratch.0.join("source");
+    yami_node::authoring::new_site(&source, "portfolio").unwrap();
+    yami_node::authoring::build(&source, scratch.0.join("site")).unwrap();
+    let host = Host::start(&scratch);
+    let loader = Loader::new(Arc::new(|| {})).unwrap();
+    let url = ynp_tls::format_url(&host.id, host.endpoint, "home");
+    let library = scratch.0.join("library");
+    let mut browser = Browser::new();
+    browser.library = Some(yami_browser::library::Library::open(&library).unwrap());
+    browser.library.as_mut().unwrap().set_history(true).unwrap();
+    browser.navigate(&url, &loader).unwrap();
+    poll(&mut browser, &loader);
+    done(&mut browser, &loader);
+    browser
+        .bookmark_current("My portfolio", "Projects")
+        .unwrap();
+    assert_eq!(
+        browser.active().security(),
+        Some(&Security::Verified(host.id))
+    );
+    let p = page(&browser);
+    let mut engine = TextEngine::new();
+    for width in [340, 1000] {
+        let layout = NativeDocument::layout_with_assets(
+            &p.document,
+            &p.style,
+            width as f32,
+            1.0,
+            &mut engine,
+            &p.images,
+        )
+        .unwrap();
+        let mut pix = tiny_skia::Pixmap::new(width, 1600).unwrap();
+        layout.draw(&mut pix, 0.0, 0.0, 0.0, 1600.0, &mut engine);
+        assert!(pix
+            .pixels()
+            .iter()
+            .any(|p| p.red() == 36 && p.green() == 72 && p.blue() == 85));
+        if width == 1000 {
+            if let Some(path) = std::env::var_os("YAMINET_CAPTURE_SITE") {
+                pix.save_png(path).unwrap();
+            }
+        }
+    }
+    browser.follow("/about", &loader).unwrap();
+    poll(&mut browser, &loader);
+    assert_eq!(
+        browser.active().address,
+        ynp_tls::format_url(&host.id, host.endpoint, "about")
+    );
+    assert_eq!(browser.library.as_ref().unwrap().visits().len(), 2);
+    drop(browser);
+    let mut browser = Browser::new();
+    browser.library = Some(yami_browser::library::Library::open(&library).unwrap());
+    let bookmark = browser.library.as_ref().unwrap().bookmarks()[0].clone();
+    assert_eq!(bookmark.title, "My portfolio");
+    assert_eq!(bookmark.address, url);
+    assert!(browser.active().security().is_none());
+    browser.navigate(&bookmark.address, &loader).unwrap();
+    poll(&mut browser, &loader);
+    done(&mut browser, &loader);
+    assert_eq!(
+        browser.active().security(),
+        Some(&Security::Verified(host.id))
+    );
+    browser
+        .library
+        .as_mut()
+        .unwrap()
+        .set_history(false)
+        .unwrap();
+    browser.library.as_mut().unwrap().clear_history().unwrap();
+    browser.reload(&loader);
+    poll(&mut browser, &loader);
+    assert!(browser.library.as_ref().unwrap().visits().is_empty());
+}
+
+#[test]
+fn assets_reauthenticate_exact_parent_even_when_endpoint_changes_identity() {
+    let scratch = Scratch::new("asset-impostor");
+    fs::write(
+        scratch.0.join("site/home.ylang"),
+        "@page 0.2\n  title Authenticated parent\n! cover | Identity must match the parent\n",
+    )
+    .unwrap();
+    let site = Site::open(scratch.0.join("site")).unwrap();
+    let identity = Arc::new(NodeIdentity::generate().unwrap());
+    let id = *identity.id();
+    let wrong = Arc::new(NodeIdentity::generate().unwrap());
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let endpoint = listener.local_addr().unwrap();
+    let server = thread::spawn(move || {
+        let accept = ynp_tls::TlsAcceptor::new(identity).unwrap();
+        let (socket, _) = listener.accept().unwrap();
+        let mut connection = accept
+            .accept_over(Box::new(socket), Duration::from_secs(3))
+            .unwrap();
+        yami_node::serve_connection(&mut *connection, &site).unwrap();
+        drop(connection);
+        let (socket, _) = listener.accept().unwrap();
+        let accept = ynp_tls::TlsAcceptor::new(wrong).unwrap();
+        assert!(accept
+            .accept_over(Box::new(socket), Duration::from_secs(3))
+            .is_err());
+    });
+    let loader = Loader::new(Arc::new(|| {})).unwrap();
+    let mut browser = Browser::new();
+    browser
+        .navigate(&ynp_tls::format_url(&id, endpoint, "home"), &loader)
+        .unwrap();
+    poll(&mut browser, &loader);
+    done(&mut browser, &loader);
+    assert_eq!(browser.active().security(), Some(&Security::Verified(id)));
+    assert!(matches!(
+        page(&browser).images.get("cover"),
+        Some(ImageState::Missing(_))
+    ));
+    server.join().unwrap();
+}
+
+#[test]
+fn explicit_cross_identity_links_require_navigation_and_reauthentication() {
+    let a = Scratch::new("cross-a");
+    let b = Scratch::new("cross-b");
+    fs::write(
+        b.0.join("site/home.ylang"),
+        "@page 0.2\n  title Other identity\n= Other identity\n",
+    )
+    .unwrap();
+    let bh = Host::start(&b);
+    fs::write(
+        a.0.join("site/home.ylang"),
+        format!(
+            "@page 0.2\n  title First identity\n> yami://{}/home | Other site\n",
+            bh.id
+        ),
+    )
+    .unwrap();
+    let ah = Host::start(&a);
+    let directory = a.0.join("peers");
+    {
+        let mut peers = yami_node::peers::PeerStore::open(&directory).unwrap();
+        peers.add(ah.id, ah.endpoint).unwrap();
+        peers.add(bh.id, bh.endpoint).unwrap();
+    }
+    let loader = Loader::with_resolver(
+        Arc::new(|| {}),
+        Arc::new(Resolver::new(directory, Network::Loopback)),
+    )
+    .unwrap();
+    let mut browser = Browser::new();
+    browser
+        .navigate(&format!("yami://{}/home", ah.id), &loader)
+        .unwrap();
+    poll(&mut browser, &loader);
+    assert_eq!(
+        browser.active().security(),
+        Some(&Security::Verified(ah.id))
+    );
+    assert_eq!(browser.active().history.len(), 2);
+    let target = format!("yami://{}/home", bh.id);
+    browser.follow(&target, &loader).unwrap();
+    poll(&mut browser, &loader);
+    assert_eq!(
+        browser.active().security(),
+        Some(&Security::Verified(bh.id))
+    );
+    assert_eq!(browser.active().address, target);
 }
