@@ -2312,6 +2312,7 @@ name = "yami-browser"
 version = "0.1.0"
 dependencies = [
  "arboard",
+ "getrandom 0.4.3",
  "softbuffer",
  "tiny-skia",
  "winit",

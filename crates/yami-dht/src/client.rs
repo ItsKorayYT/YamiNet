@@ -88,7 +88,7 @@ pub fn exchange(
     }
     attempt
 }
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct Lookup {
     pub record: Option<PeerRecord>,
     pub queries: usize,

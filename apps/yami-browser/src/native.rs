@@ -1,4 +1,5 @@
 //! Native identity addresses. Discovery supplies locations, never TLS trust.
+use crate::reliability::{Endpoint, Failures, Lookups};
 use std::{
     net::SocketAddr,
     path::PathBuf,
@@ -72,6 +73,8 @@ pub struct Resolver {
     directory: PathBuf,
     network: Network,
     service: OnceLock<Result<Service, String>>,
+    failures: Failures,
+    lookups: Lookups,
     pub(crate) relay_enabled: Arc<AtomicBool>,
 }
 impl Resolver {
@@ -79,6 +82,8 @@ impl Resolver {
         Self {
             directory,
             network,
+            failures: Failures::default(),
+            lookups: Lookups::default(),
             service: OnceLock::new(),
             relay_enabled: Arc::new(AtomicBool::new(false)),
         }
@@ -106,6 +111,9 @@ impl Resolver {
     }
     pub fn relay_enabled(&self) -> bool {
         self.relay_enabled.load(Ordering::SeqCst)
+    }
+    pub fn recent_failure_count(&self) -> usize {
+        self.failures.len()
     }
     pub fn state_path(&self) -> PathBuf {
         let mode = if self.network == Network::Public {
@@ -143,7 +151,16 @@ impl Resolver {
         &self,
         address: &Address,
     ) -> Result<(DocumentData, ConnectionInfo), String> {
-        let deadline = Instant::now() + FETCH_TIMEOUT;
+        self.fetch_until(address, Instant::now() + FETCH_TIMEOUT)
+    }
+    pub fn fetch_until(
+        &self,
+        address: &Address,
+        deadline: Instant,
+    ) -> Result<(DocumentData, ConnectionInfo), String> {
+        if Instant::now() >= deadline {
+            return Err("Navigation deadline exceeded.".into());
+        }
         // Also validate programmatically constructed addresses at the boundary.
         ynp::validate_key(&address.key).map_err(|_| "Invalid Yami document key.")?;
         let service = self.service()?;
@@ -177,23 +194,33 @@ impl Resolver {
                 "No bootstrap peers configured for this DHT network. Configure an ordinary peer and retry.".into()
             }));
         }
-        let found = if let Some(record) = &cached {
-            yami_dht::lookup_newer_with_connector(
-                service,
-                address.id,
-                &seeds,
-                record.sequence(),
-                &DeadlineConnector(deadline),
-            )
-        } else {
-            yami_dht::lookup_with_connector(
-                service,
-                address.id,
-                &seeds,
-                &DeadlineConnector(deadline),
-            )
-        }
-        .map_err(|_| "DHT lookup failed: peer state is invalid or unavailable.")?;
+        let found = self.lookups.run(
+            address.id,
+            cached.as_ref().map(PeerRecord::sequence),
+            deadline,
+            || {
+                let found = if let Some(record) = &cached {
+                    yami_dht::lookup_newer_with_connector(
+                        service,
+                        address.id,
+                        &seeds,
+                        record.sequence(),
+                        &DeadlineConnector(deadline),
+                    )
+                } else {
+                    yami_dht::lookup_with_connector(
+                        service,
+                        address.id,
+                        &seeds,
+                        &DeadlineConnector(deadline),
+                    )
+                }
+                .map_err(|_| {
+                    "DHT lookup failed: peer state is invalid or unavailable.".to_string()
+                });
+                found
+            },
+        )?;
         if let Some(record) = found.record {
             // A failed cached endpoint is retried only after an accepted newer
             // signed record. Equal-sequence changes are rejected by Service.
@@ -232,116 +259,118 @@ impl Resolver {
         }
         let transport = TlsTransport::new(address.id).map_err(|_| FetchError::Unreachable)?;
         let mut failure = FetchError::Unreachable;
-        for endpoint in record.endpoints() {
-            record
-                .verify(
-                    self.network,
-                    yami_dht::now().map_err(|_| FetchError::Record)?,
-                )
-                .map_err(|_| FetchError::Record)?;
-            // `connect_with_timeout` bounds handshake AND subsequent YNP I/O.
-            match transport.connect_with_timeout(
-                (*endpoint).into(),
-                yami_dht::RPC_TIMEOUT.min(deadline.saturating_duration_since(Instant::now())),
+        let mut retry_delay = None;
+        for pass in 0..2 {
+            if pass > 0 {
+                let Some(delay) = retry_delay else {
+                    break;
+                };
+                std::thread::sleep(std::cmp::min(
+                    delay,
+                    deadline.saturating_duration_since(Instant::now()),
+                ));
+            }
+            for (endpoint, relay) in record.endpoints().iter().map(|e| (*e, None)).chain(
+                record
+                    .relay_routes()
+                    .iter()
+                    .filter(|_| self.relay_enabled())
+                    .map(|r| (r.endpoint, Some(r.relay))),
             ) {
-                Ok(mut connection) => {
-                    if connection.protection() != Protection::Tls13PinnedServer {
-                        return Err(FetchError::Identity);
-                    }
-                    record
-                        .verify(
-                            self.network,
-                            yami_dht::now().map_err(|_| FetchError::Record)?,
-                        )
-                        .map_err(|_| FetchError::Record)?;
-                    let data = ynp::request(&mut *connection, &address.key).map_err(|error| {
-                        FetchError::Document(format!(
-                            "Verified node could not return this document: {error}"
-                        ))
-                    })?;
-                    return Ok((
-                        data,
-                        ConnectionInfo {
-                            endpoint: (*endpoint).into(),
-                            relay: None,
-                        },
-                    ));
-                }
-                Err(error) => {
-                    if error
-                        .get_ref()
-                        .and_then(|e| e.downcast_ref::<IdentityMismatch>())
-                        .is_some()
-                    {
+                let key = Endpoint {
+                    destination: address.id,
+                    relay,
+                    address: endpoint.into(),
+                };
+                if !self.failures.eligible(key, Instant::now()) {
+                    if self.failures.identity_failure(key) {
                         failure = FetchError::Identity;
                     }
+                    continue;
                 }
-            }
-        }
-        if self.relay_enabled() {
-            for advertised in record.relay_routes() {
+                let budget =
+                    yami_dht::RPC_TIMEOUT.min(deadline.saturating_duration_since(Instant::now()));
+                if budget.is_zero() {
+                    return Err(FetchError::Unreachable);
+                }
                 record
                     .verify(
                         self.network,
                         yami_dht::now().map_err(|_| FetchError::Record)?,
                     )
                     .map_err(|_| FetchError::Record)?;
-                let route_deadline = deadline.min(Instant::now() + yami_dht::RPC_TIMEOUT);
-                for attempt in 0..2 {
-                    if attempt > 0 {
-                        std::thread::sleep(
-                            Duration::from_millis(400)
-                                .min(route_deadline.saturating_duration_since(Instant::now())),
-                        );
-                    }
-                    let budget = route_deadline.saturating_duration_since(Instant::now());
-                    if budget.is_zero() {
-                        break;
-                    }
-                    let route = yami_relay::Route {
-                        relay: advertised.relay,
-                        endpoint: advertised.endpoint.into(),
+                let connected = if let Some(relay) = relay {
+                    yami_relay::Route {
+                        relay,
+                        endpoint: endpoint.into(),
                         destination: address.id,
-                    };
-                    match route.connect_with_timeout(self.network == Network::Public, budget) {
-                        Ok(mut connection) => {
-                            if connection.protection() != Protection::Tls13PinnedServer {
-                                return Err(FetchError::Identity);
-                            }
-                            record
-                                .verify(
-                                    self.network,
-                                    yami_dht::now().map_err(|_| FetchError::Record)?,
-                                )
-                                .map_err(|_| FetchError::Record)?;
-                            let data =
-                                ynp::request(&mut *connection, &address.key).map_err(|e| {
-                                    FetchError::Document(format!(
-                                        "Verified node could not return this document: {e}"
-                                    ))
-                                })?;
-                            return Ok((
-                                data,
-                                ConnectionInfo {
-                                    endpoint: advertised.endpoint.into(),
-                                    relay: Some(advertised.relay),
-                                },
-                            ));
+                    }
+                    .connect_with_timeout(self.network == Network::Public, budget)
+                } else {
+                    transport.connect_with_timeout(endpoint.into(), budget)
+                };
+                let mut identity_failure = false;
+                match connected {
+                    Ok(mut connection) => {
+                        if connection.protection() != Protection::Tls13PinnedServer {
+                            return Err(FetchError::Identity);
                         }
-                        Err(error) => {
-                            if error
-                                .get_ref()
-                                .and_then(|e| e.downcast_ref::<IdentityMismatch>())
-                                .is_some()
-                            {
-                                failure = FetchError::Identity;
-                                break;
+                        record
+                            .verify(
+                                self.network,
+                                yami_dht::now().map_err(|_| FetchError::Record)?,
+                            )
+                            .map_err(|_| FetchError::Record)?;
+                        match ynp::request(&mut *connection, &address.key) {
+                            Ok(data) => {
+                                self.failures.succeeded(key);
+                                return Ok((
+                                    data,
+                                    ConnectionInfo {
+                                        endpoint: endpoint.into(),
+                                        relay,
+                                    },
+                                ));
                             }
+                            Err(error)
+                                if matches!(
+                                    error.kind(),
+                                    std::io::ErrorKind::TimedOut
+                                        | std::io::ErrorKind::WouldBlock
+                                        | std::io::ErrorKind::UnexpectedEof
+                                        | std::io::ErrorKind::ConnectionReset
+                                        | std::io::ErrorKind::BrokenPipe
+                                ) => {}
+                            Err(error) => {
+                                return Err(FetchError::Document(format!(
+                                    "Verified node could not return this document: {error}"
+                                )))
+                            }
+                        }
+                    }
+                    Err(error) => {
+                        if error
+                            .get_ref()
+                            .and_then(|e| e.downcast_ref::<IdentityMismatch>())
+                            .is_some()
+                        {
+                            failure = FetchError::Identity;
+                            identity_failure = true;
                         }
                     }
                 }
+                // Record failures across tabs and navigations. OS entropy failure fails closed.
+                let delay = self
+                    .failures
+                    .failed(key, identity_failure)
+                    .map_err(|_| FetchError::Unreachable)?;
+                retry_delay = Some(retry_delay.map_or(delay, |old: Duration| old.max(delay)));
             }
-        } else if record.endpoints().is_empty() && !record.relay_routes().is_empty() {
+        }
+        if !self.relay_enabled()
+            && record.endpoints().is_empty()
+            && !record.relay_routes().is_empty()
+        {
             return Err(FetchError::Document("This node advertises relay routes. Enable relay fallback in the browser settings and reload.".into()));
         }
         Err(failure)

@@ -9,6 +9,7 @@ license.workspace = true
 workspace = true
 
 [dependencies]
+getrandom = "0.4.3"
 yami-relay = { path = "../../crates/yami-relay" }
 yami-dht = { path = "../../crates/yami-dht" }
 yami-node = { path = "../yami-node" }

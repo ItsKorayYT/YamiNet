@@ -12,6 +12,7 @@ use std::{
         mpsc, Arc, Condvar, Mutex, OnceLock,
     },
     thread,
+    time::Instant,
 };
 use yami_identity::NodeId;
 use ynp::{DocumentData, Protection, Transport};
@@ -131,12 +132,14 @@ pub struct Tab {
     pub address: String,
     pub scroll: f64,
     pub target_scroll: f64,
+    deadline: Option<Instant>,
 }
 impl Tab {
     fn new(id: u64) -> Self {
         Self {
             id,
             generation: 0,
+            deadline: None,
             history: vec![Location::Home],
             cursor: 0,
             state: PageState::Home,
@@ -219,10 +222,13 @@ impl Tab {
             return;
         }
         self.state = PageState::Loading;
+        let deadline = Instant::now() + native::FETCH_TIMEOUT;
+        self.deadline = Some(deadline);
         let job = Job {
             tab_id: self.id,
             generation: self.generation,
             location: self.location().clone(),
+            deadline,
         };
         if let Err(message) = loader.submit(job) {
             self.state = PageState::Error(message);
@@ -364,6 +370,15 @@ impl Browser {
     /// currently active tab. Closed tabs and superseded requests are discarded.
     pub fn poll(&mut self, loader: &Loader) -> bool {
         let mut changed = false;
+        for tab in &mut self.tabs {
+            if matches!(tab.state, PageState::Loading)
+                && tab.deadline.is_some_and(|d| Instant::now() >= d)
+            {
+                tab.state = PageState::Error("Navigation deadline exceeded.".into());
+                loader.cancel(tab.id);
+                changed = true;
+            }
+        }
         while let Ok(result) = loader.results.try_recv() {
             changed |= self.complete(result);
         }
@@ -389,6 +404,7 @@ struct Job {
     tab_id: u64,
     generation: u64,
     location: Location,
+    deadline: Instant,
 }
 struct Completion {
     tab_id: u64,
@@ -404,7 +420,7 @@ struct Shared {
     pending: Mutex<Pending>,
     changed: Condvar,
 }
-type Fetcher = dyn Fn(&Location) -> Result<Page, String> + Send + Sync;
+type Fetcher = dyn Fn(&Location, Instant) -> Result<Page, String> + Send + Sync;
 
 /// A fixed worker pool with bounded request and completion queues. Dropping it
 /// closes the queues without joining a potentially slow socket on the UI thread.
@@ -424,7 +440,7 @@ impl Loader {
         let control = relay_enabled.clone();
         let mut loader = Self::with_fetcher(
             wake,
-            Arc::new(move |location| {
+            Arc::new(move |location, deadline| {
                 if matches!(location, Location::Yami(_)) {
                     let resolver = resolver
                         .get_or_init(|| {
@@ -435,7 +451,7 @@ impl Loader {
                         })
                         .as_ref()
                         .map_err(Clone::clone)?;
-                    load_native_page(location, resolver)
+                    load_native_page(location, resolver, deadline)
                 } else {
                     load_page(location)
                 }
@@ -457,9 +473,9 @@ impl Loader {
         let relay_enabled = resolver.relay_enabled.clone();
         let mut loader = Self::with_fetcher(
             wake,
-            Arc::new(move |location| {
+            Arc::new(move |location, deadline| {
                 if matches!(location, Location::Yami(_)) {
-                    load_native_page(location, &resolver)
+                    load_native_page(location, &resolver, deadline)
                 } else {
                     load_page(location)
                 }
@@ -503,7 +519,11 @@ impl Loader {
                     let result = Completion {
                         tab_id: job.tab_id,
                         generation: job.generation,
-                        page: fetcher(&job.location),
+                        page: if Instant::now() >= job.deadline {
+                            Err("Navigation deadline exceeded while queued.".into())
+                        } else {
+                            fetcher(&job.location, job.deadline)
+                        },
                     };
                     if sender.send(result).is_err() {
                         return;
@@ -581,11 +601,15 @@ fn load_page(location: &Location) -> Result<Page, String> {
     };
     parse_page(&source, &style, security, None)
 }
-fn load_native_page(location: &Location, resolver: &Resolver) -> Result<Page, String> {
+fn load_native_page(
+    location: &Location,
+    resolver: &Resolver,
+    deadline: Instant,
+) -> Result<Page, String> {
     let Location::Yami(address) = location else {
         unreachable!()
     };
-    let (data, info) = resolver.fetch_verified(address)?;
+    let (data, info) = resolver.fetch_until(address, deadline)?;
     parse_page(
         &data.source,
         &data.style,
@@ -668,7 +692,7 @@ mod tests {
     fn loader() -> Loader {
         Loader::with_fetcher(
             Arc::new(|| {}),
-            Arc::new(|location| Ok(page(location.label()))),
+            Arc::new(|location, _| Ok(page(location.label()))),
         )
         .unwrap()
     }
@@ -679,6 +703,16 @@ mod tests {
             assert!(Instant::now() < deadline, "loader did not complete");
             thread::yield_now();
         }
+    }
+    #[test]
+    fn queued_navigation_deadline_expires_without_waiting_for_completion() {
+        let loader = loader();
+        let mut browser = Browser::new();
+        browser.navigate("local:welcome", &loader).unwrap();
+        browser.active_mut().deadline = Some(Instant::now());
+        browser.poll(&loader);
+        assert!(matches!(&browser.active().state,PageState::Error(e) if e.contains("deadline")));
+        assert!(browser.active().security().is_none());
     }
     #[test]
     fn addresses_are_explicit_and_loopback_only() {
@@ -778,7 +812,7 @@ mod tests {
         let worker_gate = Arc::clone(&gate);
         let loader = Loader::with_fetcher(
             Arc::new(|| {}),
-            Arc::new(move |_| {
+            Arc::new(move |_, _| {
                 started.send(()).unwrap();
                 let (lock, changed) = &*worker_gate;
                 let mut released = lock.lock().unwrap();
