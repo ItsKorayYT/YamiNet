@@ -7,7 +7,13 @@ use crate::{
 };
 use std::time::{Duration, Instant};
 
-pub fn probe(url: &str, asset: Option<&str>, resolver: &Resolver) -> Result<String, String> {
+pub struct Observation {
+    pub destination: yami_identity::NodeId,
+    pub origin: Origin,
+    pub png: Option<(u32, u32)>,
+    pub elapsed_ms: u128,
+}
+pub fn inspect(url: &str, asset: Option<&str>, resolver: &Resolver) -> Result<Observation, String> {
     let location = Location::parse(url)?;
     if let Some(key) = asset {
         ynp::validate_asset_key(key).map_err(|e| e.to_string())?;
@@ -33,8 +39,7 @@ pub fn probe(url: &str, asset: Option<&str>, resolver: &Resolver) -> Result<Stri
         ysl::parse(&data.style)
             .map_err(|e| format!("Authenticated stylesheet syntax failed: {e}"))?
     };
-    let mut report = format!("YAMINET-VALIDATION 1\nversion {}\nscope {}\ndestination {}\nrelay {}\nendpoint {}\ndocument PASS (pinned TLS 1.3; YLang/YSL parsed)\n", env!("CARGO_PKG_VERSION"), if origin.endpoint.ip().is_loopback() { "loopback simulation" } else { "explicit remote endpoint; physical network independence NOT VERIFIED" }, origin.destination, origin.relay.map_or_else(|| "direct".into(), |id| id.to_string()), origin.endpoint);
-    if let Some(key) = asset {
+    let png = if let Some(key) = asset {
         use yami_render::assets::{ImageState, Images};
         let security =
             origin
@@ -54,7 +59,7 @@ pub fn probe(url: &str, asset: Option<&str>, resolver: &Resolver) -> Result<Stri
             endpoint: Some(origin.endpoint),
             images,
             revision: 0,
-            origin: Some(origin),
+            origin: Some(origin.clone()),
         };
         let cache = crate::image_cache::DecodeCache::default();
         let cancel = std::sync::atomic::AtomicBool::new(false);
@@ -76,13 +81,28 @@ pub fn probe(url: &str, asset: Option<&str>, resolver: &Resolver) -> Result<Stri
             }
             _ => return Err("PNG validation did not complete".into()),
         };
+        Some((image.width, image.height))
+    } else {
+        None
+    };
+    Ok(Observation {
+        destination: origin.destination,
+        origin,
+        png,
+        elapsed_ms: started.elapsed().as_millis(),
+    })
+}
+pub fn probe(url: &str, asset: Option<&str>, resolver: &Resolver) -> Result<String, String> {
+    let o = inspect(url, asset, resolver)?;
+    let mut report = format!("YAMINET-VALIDATION 1\nversion {}\nscope {}\ndestination {}\nrelay {}\nendpoint {}\ndocument PASS (pinned TLS 1.3; YLang/YSL parsed)\n", env!("CARGO_PKG_VERSION"), if o.origin.endpoint.ip().is_loopback() { "loopback simulation" } else { "explicit remote endpoint; physical network independence NOT VERIFIED" }, o.destination, o.origin.relay.map_or_else(|| "direct".into(), |id| id.to_string()), o.origin.endpoint);
+    if let Some((w, h)) = o.png {
         report.push_str(&format!(
-            "png PASS ({key}; {} x {})\n",
-            image.width, image.height
+            "png PASS ({}; {w} x {h})\n",
+            asset.unwrap_or_default()
         ));
     } else {
         report.push_str("png NOT RUN (pass --asset KEY)\n");
     }
-    report.push_str(&format!("elapsed_ms {}\nrendering NOT RUN (native desktop checklist required)\nindependent_networks NOT VERIFIED\n", started.elapsed().as_millis()));
+    report.push_str(&format!("elapsed_ms {}\nrendering NOT RUN (native desktop checklist required)\nindependent_networks NOT VERIFIED\n", o.elapsed_ms));
     Ok(report)
 }

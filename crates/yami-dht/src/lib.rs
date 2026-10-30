@@ -10,8 +10,8 @@ mod tests;
 mod wire;
 
 pub use client::{
-    exchange, lookup, lookup_newer, lookup_newer_with_connector, lookup_with_connector, publish,
-    publish_with_connector, Lookup, PinnedTls, RpcConnector,
+    exchange, lookup, lookup_fresh, lookup_newer, lookup_newer_with_connector,
+    lookup_with_connector, publish, publish_with_connector, Lookup, PinnedTls, RpcConnector,
 };
 pub use record::{PeerRecord, MAX_RECORD_BYTES, MAX_RECORD_TTL};
 pub use routing::{distance, Contact, RoutingTable, BUCKET_SIZE, MAX_ROUTES};

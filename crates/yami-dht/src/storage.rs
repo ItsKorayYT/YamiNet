@@ -308,19 +308,19 @@ fn save(path: &Path, state: &State, installed: &mut bool) -> io::Result<()> {
     let mut file = options.open(&temp)?;
     let result = file.write_all(&bytes).and_then(|()| file.sync_all());
     drop(file);
-    let result = result
-        .and_then(|()| fs::rename(&temp, path))
-        .and_then(|()| {
-            *installed = true;
-            // Persist the directory entry before any signed record is advertised.
-            #[cfg(unix)]
-            File::open(
-                path.parent()
-                    .ok_or_else(|| invalid("missing snapshot parent"))?,
-            )?
-            .sync_all()?;
-            Ok(())
-        });
+    let result = result.and_then(|()| fs::rename(&temp, path));
+    if result.is_ok() {
+        *installed = true;
+    }
+    // Persist the directory entry before any signed record is advertised.
+    #[cfg(unix)]
+    let result = result.and_then(|()| {
+        File::open(
+            path.parent()
+                .ok_or_else(|| invalid("missing snapshot parent"))?,
+        )?
+        .sync_all()
+    });
     if result.is_err() {
         let _ = fs::remove_file(temp);
     }

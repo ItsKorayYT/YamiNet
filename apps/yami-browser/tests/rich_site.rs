@@ -216,6 +216,43 @@ fn native_identity_site_loads_rich_content_images_and_local_links_over_tls() {
     poll(&mut browser, &loader);
     done(&mut browser, &loader);
     assert_eq!(browser.active().title(), "Rich homepage");
+    let config = yami_config::Config::parse(&format!(
+        "yaminet-config 1\nrole browser\nnetwork loopback\nstate {}\nbootstrap {}@{}\n",
+        scratch.0.join("trial").display(),
+        host.id,
+        host.endpoint
+    ))
+    .unwrap();
+    let (report, success) = yami_browser::network_trial::run(
+        &config,
+        &format!("yami://{}/home", host.id),
+        "cover",
+        None,
+        false,
+        false,
+    );
+    assert!(success, "{report}");
+    assert!(report.to_string().contains("signed-publication-resolution"));
+    assert!(!report.to_string().contains(scratch.0.to_str().unwrap()));
+    assert!(!report.to_string().contains("127.0.0.1"));
+    let wrong = yami_identity::NodeIdentity::generate().unwrap();
+    let config = yami_config::Config::parse(&format!(
+        "yaminet-config 1\nrole browser\nnetwork loopback\nstate {}\nbootstrap {}@{}\n",
+        scratch.0.join("wrong-trial").display(),
+        wrong.id(),
+        host.endpoint
+    ))
+    .unwrap();
+    let (report, success) = yami_browser::network_trial::run(
+        &config,
+        &format!("yami://{}/home", host.id),
+        "cover",
+        None,
+        false,
+        false,
+    );
+    assert!(!success);
+    assert_eq!(report["result"], "FAIL");
 }
 #[test]
 fn slow_assets_do_not_block_navigation_and_cancellation_stops_remaining_requests() {

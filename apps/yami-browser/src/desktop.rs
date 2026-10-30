@@ -3,6 +3,7 @@ use crate::{
     chrome::{self, Action, Canvas, ChromeState, Rect, Scene, INK},
     model::{Browser, Loader, Location, PageState},
 };
+mod smoke;
 use softbuffer::{Context, Surface};
 use std::{
     error::Error,
@@ -25,6 +26,8 @@ pub fn run(
     args: Vec<String>,
     relay_enabled: Option<bool>,
     resolver: Option<Arc<yami_browser::native::Resolver>>,
+    diagnostic_dir: Option<std::path::PathBuf>,
+    smoke_output: Option<std::path::PathBuf>,
 ) -> Result<(), Box<dyn Error>> {
     if args.len() > 1 {
         return Err("--desktop accepts at most one yami:// or ynps:// address, localhost ynp:// address or built-in local:welcome/local:about".into());
@@ -70,6 +73,16 @@ pub fn run(
     }
     app.loader.set_local_only(app.settings.local_only);
     app.loader.set_relay_enabled(app.settings.relays);
+    if let Some(dir) = diagnostic_dir {
+        app.log = Some(yami_browser::diagnostics::Log::open(&dir)?);
+        app.record("startup");
+    }
+    if let Some(output) = smoke_output {
+        app.settings.local_only = true;
+        app.apply_local_only(true);
+        app.loader.set_relay_enabled(false);
+        app.smoke = Some(smoke::Smoke::new(output, app.settings.onboarded));
+    }
     app.discovery = crate::discovery::Discovery::new(wake);
     if let Some(address) = args.first() {
         let _ = app.browser.navigate(address, &app.loader);
@@ -173,6 +186,9 @@ struct CachedDocument {
     document: Result<NativeDocument, String>,
 }
 struct Desktop {
+    smoke: Option<smoke::Smoke>,
+    frames: u64,
+    log: Option<yami_browser::diagnostics::Log>,
     find: yami_browser::find::Find,
     find_open: bool,
     find_edit: bool,
@@ -210,6 +226,9 @@ struct Desktop {
 impl Desktop {
     fn new(loader: Loader) -> Self {
         Self {
+            smoke: None,
+            frames: 0,
+            log: None,
             find: yami_browser::find::Find::default(),
             find_open: false,
             find_edit: false,
@@ -242,6 +261,14 @@ impl Desktop {
             bookmark_edit: None,
             pressed_link: None,
             headless: None,
+        }
+    }
+    fn record(&mut self, code: &'static str) {
+        if let Some(log) = &mut self.log {
+            if log.event(code).is_err() {
+                self.log = None;
+                eprintln!("Local diagnostic log unavailable; logging disabled");
+            }
         }
     }
     fn redraw(&self) {
@@ -278,7 +305,13 @@ impl Desktop {
     }
     fn commit(&mut self) {
         if self.find_edit {
-            self.act(Action::FindNext(self.modifiers.shift_key()));
+            let changed = self.find.query != self.editor.value;
+            self.update_find();
+            if !changed {
+                self.find.step(self.modifiers.shift_key());
+            }
+            self.scroll_to_match();
+            self.redraw();
             return;
         }
         let value = if self.editor.focus.is_some() && !self.find_edit {
@@ -318,6 +351,16 @@ impl Desktop {
         self.redraw();
     }
     fn act(&mut self, action: Action) {
+        if matches!(
+            &action,
+            Action::Follow(_)
+                | Action::Navigate(_)
+                | Action::Back
+                | Action::Forward
+                | Action::Reload
+        ) {
+            self.record("navigation-start");
+        }
         match action {
             Action::Follow(target) => {
                 let _ = self.browser.follow(&target, &self.loader);
@@ -343,21 +386,16 @@ impl Desktop {
             }
             Action::FinishSetup => {
                 self.settings.onboarded = true;
-                self.save_settings();
-                self.settings_open = false;
+                if self.save_settings() {
+                    self.settings_open = false;
+                } else {
+                    self.settings.onboarded = false;
+                }
                 self.clear_focus();
             }
             Action::ToggleLocal => {
                 self.settings.local_only = !self.settings.local_only;
-                self.loader.set_local_only(self.settings.local_only);
-                if self.settings.local_only {
-                    for tab in &mut self.browser.tabs {
-                        if matches!(tab.state, PageState::Loading) {
-                            tab.state =
-                                PageState::Error("Loading cancelled by local-only mode.".into());
-                        }
-                    }
-                }
+                self.apply_local_only(self.settings.local_only);
                 self.save_settings();
             }
             Action::ResetSettings => {
@@ -367,7 +405,7 @@ impl Desktop {
                     }
                 }
                 self.settings = yami_browser::library::Settings::default();
-                self.loader.set_local_only(true);
+                self.apply_local_only(true);
                 self.loader.set_relay_enabled(false);
                 self.settings_open = true;
             }
@@ -491,7 +529,7 @@ impl Desktop {
             }
             Action::DiscoveryPanel => {}
             Action::Address => {
-                self.composing = false;
+                self.clear_focus();
                 self.editor.activate(&self.browser.active().address);
                 self.keyboard_focus = None;
             }
@@ -502,6 +540,7 @@ impl Desktop {
                 }
             }
             Action::Close(index) => {
+                self.record("tab-closed");
                 self.browser.close_tab_with_loader(index, &self.loader);
                 self.clear_focus();
             }
@@ -536,7 +575,17 @@ impl Desktop {
         }
         self.redraw();
     }
-    fn save_settings(&mut self) {
+    fn apply_local_only(&mut self, enabled: bool) {
+        self.loader.set_local_only(enabled);
+        if enabled {
+            for tab in &mut self.browser.tabs {
+                if matches!(tab.state, PageState::Loading) {
+                    tab.state = PageState::Error("Loading cancelled by local-only mode.".into());
+                }
+            }
+        }
+    }
+    fn save_settings(&mut self) -> bool {
         let result = self
             .browser
             .library
@@ -545,8 +594,16 @@ impl Desktop {
                 std::io::Error::other("Settings unavailable: browser library could not be opened")
             })
             .and_then(|library| library.set_settings(self.settings));
-        if let Err(error) = result {
-            self.browser.library_error = Some(error.to_string());
+        match result {
+            Ok(()) => {
+                self.record("settings-saved");
+                true
+            }
+            Err(error) => {
+                self.record("settings-failed");
+                self.browser.library_error = Some(error.to_string());
+                false
+            }
         }
     }
     fn scroll_to_match(&mut self) {
@@ -662,6 +719,7 @@ impl Desktop {
                 | u32::from(pixel.blue());
         }
         buffer.present()?;
+        self.frames += 1;
         self.frame = Some(pix);
         if let Some(window) = &self.window {
             window.set_title(&format!("{} — Yami Browser", self.browser.active().title()));
@@ -1160,16 +1218,29 @@ impl ApplicationHandler<()> for Desktop {
             event_loop.exit();
         }
     }
+    fn exiting(&mut self, _: &ActiveEventLoop) {
+        self.record("shutdown");
+    }
     fn user_event(&mut self, _: &ActiveEventLoop, _: ()) {
         let discovery_changed = self.discovery.poll();
         if self.browser.poll(&self.loader) || discovery_changed {
+            self.record(
+                if matches!(self.browser.active().state, PageState::Error(_)) {
+                    "navigation-failed"
+                } else {
+                    "navigation-ready"
+                },
+            );
             self.redraw();
         }
     }
     fn window_event(&mut self, event_loop: &ActiveEventLoop, _: WindowId, event: WindowEvent) {
         match event {
             WindowEvent::CloseRequested => event_loop.exit(),
-            WindowEvent::Resized(_) | WindowEvent::ScaleFactorChanged { .. } => self.redraw(),
+            WindowEvent::Resized(_) | WindowEvent::ScaleFactorChanged { .. } => {
+                self.record("window-resized");
+                self.redraw();
+            }
             WindowEvent::RedrawRequested => {
                 if let Err(error) = self.render() {
                     self.fatal = Some(error.to_string());
@@ -1278,6 +1349,21 @@ impl ApplicationHandler<()> for Desktop {
         }
     }
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
+        if let Some(mut smoke) = self.smoke.take() {
+            match smoke.tick(self, event_loop) {
+                Ok(false) => self.smoke = Some(smoke),
+                Ok(true) => {}
+                Err(error) => {
+                    let _ = smoke.write("FAIL", self.frames);
+                    self.fatal = Some(error);
+                    event_loop.exit();
+                }
+            }
+            event_loop.set_control_flow(ControlFlow::WaitUntil(
+                Instant::now() + Duration::from_millis(30),
+            ));
+            return;
+        }
         if self.animation {
             let deadline = self.last + Duration::from_millis(16);
             if Instant::now() >= deadline {
@@ -1370,6 +1456,30 @@ mod tests {
         app.act(Action::Close(0));
         frame(&mut app);
         assert!(app.native.is_none());
+    }
+
+    #[test]
+    fn switching_from_find_or_bootstrap_to_address_clears_editor_mode() {
+        let mut app = headless(1200.0, 800.0);
+        for previous in [Action::Find, Action::Bootstrap] {
+            app.act(previous);
+            app.act(Action::Address);
+            app.editor.replace("local:about");
+            app.commit();
+            settle(&mut app);
+            assert_eq!(app.browser.active().address, "local:about");
+            assert!(!app.find_edit && !app.bootstrap_edit);
+        }
+    }
+    #[test]
+    fn failed_first_run_save_stays_visible_and_reset_cancels_loading_state() {
+        let mut app = headless(1200.0, 800.0);
+        app.settings_open = true;
+        app.act(Action::FinishSetup);
+        assert!(app.settings_open, "failed save must remain visible");
+        app.browser.active_mut().state = PageState::Loading;
+        app.act(Action::ResetSettings);
+        assert!(matches!(app.browser.active().state, PageState::Error(_)));
     }
 
     fn headless(w: f32, h: f32) -> Desktop {

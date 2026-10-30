@@ -112,7 +112,14 @@ pub fn lookup_newer(
     seeds: &[Contact],
     after_sequence: u64,
 ) -> io::Result<Lookup> {
-    lookup_after(service, target, seeds, &PinnedTls, Some(after_sequence))
+    lookup_after(
+        service,
+        target,
+        seeds,
+        &PinnedTls,
+        Some(after_sequence),
+        true,
+    )
 }
 pub fn lookup_newer_with_connector(
     service: &Service,
@@ -121,7 +128,14 @@ pub fn lookup_newer_with_connector(
     after_sequence: u64,
     connector: &dyn RpcConnector,
 ) -> io::Result<Lookup> {
-    lookup_after(service, target, seeds, connector, Some(after_sequence))
+    lookup_after(
+        service,
+        target,
+        seeds,
+        connector,
+        Some(after_sequence),
+        true,
+    )
 }
 pub fn lookup_with_connector(
     service: &Service,
@@ -129,7 +143,13 @@ pub fn lookup_with_connector(
     seeds: &[Contact],
     connector: &dyn RpcConnector,
 ) -> io::Result<Lookup> {
-    lookup_after(service, target, seeds, connector, None)
+    lookup_after(service, target, seeds, connector, None, true)
+}
+/// Require a target record actually returned in an authenticated FIND response.
+/// Preserves the existing rollback/high-water validation and never treats a local
+/// cached record as evidence of current publication by an external peer.
+pub fn lookup_fresh(service: &Service, target: NodeId, seeds: &[Contact]) -> io::Result<Lookup> {
+    lookup_after(service, target, seeds, &PinnedTls, None, false)
 }
 fn lookup_after(
     service: &Service,
@@ -137,6 +157,7 @@ fn lookup_after(
     seeds: &[Contact],
     connector: &dyn RpcConnector,
     after_sequence: Option<u64>,
+    allow_cached_fallback: bool,
 ) -> io::Result<Lookup> {
     let initial = service.snapshot()?;
     let network = initial.network;
@@ -169,7 +190,7 @@ fn lookup_after(
         visited.insert(contact);
         result.queries += 1;
         let timeout = RPC_TIMEOUT.min(deadline.saturating_duration_since(Instant::now()));
-        let mut returned_target = false;
+        let mut returned_target = None;
         let response = query_with_connector(connector, contact, Message::Find(target), timeout);
         if matches!(&response, Err(error) if error.kind() == io::ErrorKind::InvalidData) {
             result.invalid_records += 1;
@@ -178,7 +199,10 @@ fn lookup_after(
             let Message::Peers(records) = response else {
                 return Err(invalid("expected DHT records"));
             };
-            returned_target = records.iter().any(|r| r.id() == target);
+            returned_target = records
+                .iter()
+                .find(|r| r.id() == target)
+                .map(|r| r.sequence());
             if let Err(error) = service.learn_many(records, service.now()?) {
                 result.invalid_records += 1;
                 return Err(error);
@@ -196,17 +220,18 @@ fn lookup_after(
             service.failed(contact)?;
         }
         let state = service.snapshot()?;
-        if attempt.is_ok() && returned_target {
+        if attempt.is_ok() && returned_target.is_some() {
             result.record = state
                 .get(target, service.now()?)
-                .filter(|r| after_sequence.is_none_or(|sequence| r.sequence() > sequence));
+                .filter(|r| after_sequence.is_none_or(|sequence| r.sequence() > sequence))
+                .filter(|r| allow_cached_fallback || Some(r.sequence()) == returned_target);
         }
         if result.record.is_some() {
             break;
         }
         candidates.extend(service.candidates(service.now()?)?);
     }
-    if result.record.is_none() {
+    if result.record.is_none() && allow_cached_fallback {
         result.record = service
             .snapshot()?
             .get(target, service.now()?)
@@ -273,6 +298,49 @@ mod tests {
     use yami_identity::NodeIdentity;
     use ynp::Incoming;
     use ynp_tls::TlsListener;
+    #[test]
+    fn fresh_lookup_never_reports_local_cache_when_peers_are_unavailable() {
+        struct Offline;
+        impl RpcConnector for Offline {
+            fn connect(&self, _: Contact, _: Duration) -> io::Result<Box<dyn Connection>> {
+                Err(io::Error::new(
+                    io::ErrorKind::ConnectionRefused,
+                    "offline fixture",
+                ))
+            }
+        }
+        let dir = std::env::temp_dir().join(format!("yami-fresh-lookup-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let service =
+            Service::open_lookup(dir.join("state.cache"), crate::Network::Loopback).unwrap();
+        let owner = NodeIdentity::generate().unwrap();
+        let now = service.now().unwrap();
+        let record = PeerRecord::sign(
+            &owner,
+            vec!["127.0.0.1:9".parse().unwrap()],
+            now + 120,
+            1,
+            crate::Network::Loopback,
+            now,
+        )
+        .unwrap();
+        service.accept(record, now).unwrap();
+        assert!(
+            lookup_after(&service, *owner.id(), &[], &Offline, None, true)
+                .unwrap()
+                .record
+                .is_some()
+        );
+        assert!(
+            lookup_after(&service, *owner.id(), &[], &Offline, None, false)
+                .unwrap()
+                .record
+                .is_none()
+        );
+        drop(service);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
     fn malicious(mode: u8) -> (Contact, thread::JoinHandle<()>) {
         let identity = Arc::new(NodeIdentity::generate().unwrap());
         let id = *identity.id();

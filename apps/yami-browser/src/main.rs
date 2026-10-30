@@ -16,6 +16,90 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         println!("Yami Browser {}", env!("CARGO_PKG_VERSION"));
         return Ok(());
     }
+    if let [command, action, dir] = args.as_slice() {
+        if command == "diagnostics" {
+            let log = yami_browser::diagnostics::Log::open(std::path::Path::new(dir))?;
+            match action.as_str() {
+                "report" => println!("{}", log.report()?),
+                "clear" => {
+                    log.clear()?;
+                    println!("Local diagnostic logs cleared");
+                }
+                _ => return Err("Use diagnostics report|clear ABSOLUTE-DIRECTORY".into()),
+            }
+            return Ok(());
+        }
+    }
+    if args.first().is_some_and(|arg| arg == "--network-trial") {
+        if args.len() < 6 || args[2] != "--config" || args[4] != "--asset" {
+            return Err("Usage: --network-trial yami://ID/KEY --config BROWSER-CONFIG --asset PNG-KEY [--host-config FILE] [--include-endpoints] [--operator-relay-cycle]".into());
+        }
+        let (mut host_path, mut endpoints, mut cycle) = (None, false, false);
+        let mut rest = args[6..].iter();
+        while let Some(flag) = rest.next() {
+            match flag.as_str() {
+                "--host-config" if host_path.is_none() => {
+                    host_path = Some(rest.next().ok_or("host config file required")?)
+                }
+                "--include-endpoints" if !endpoints => endpoints = true,
+                "--operator-relay-cycle" if !cycle => cycle = true,
+                _ => return Err("unknown or duplicate network trial option".into()),
+            }
+        }
+        let loaded = yami_config::Config::load(&args[3]).and_then(|config| {
+            host_path
+                .map(yami_config::Config::load)
+                .transpose()
+                .map(|host| (config, host))
+        });
+        let (config, host) = match loaded {
+            Ok(value) => value,
+            Err(_) => {
+                println!(
+                    "{}",
+                    serde_json::json!({"schema":"yaminet-network-trial-1","result":"FAIL","steps":[{"name":"configuration","status":"FAIL","evidence":"supplied configuration is missing or invalid; paths and raw errors omitted"}],"physical_topology":"NOT VERIFIED"})
+                );
+                return Err("network trial configuration failed".into());
+            }
+        };
+        let (report, success) = yami_browser::network_trial::run(
+            &config,
+            &args[1],
+            &args[5],
+            host.as_ref(),
+            endpoints,
+            cycle,
+        );
+        println!("{}", serde_json::to_string_pretty(&report)?);
+        if !success {
+            return Err("network trial failed; see structured report".into());
+        }
+        return Ok(());
+    }
+    let mut diagnostic_dir = None;
+    let mut smoke_output = None;
+    for flag in ["--diagnostic-log", "--desktop-smoke"] {
+        if let Some(index) = args.iter().position(|arg| arg == flag) {
+            args.remove(index);
+            if index >= args.len() {
+                return Err("diagnostic/smoke flag requires an absolute path".into());
+            }
+            let path = std::path::PathBuf::from(args.remove(index));
+            if !path.is_absolute() {
+                return Err("diagnostic/smoke path must be absolute".into());
+            }
+            if flag == "--diagnostic-log" {
+                diagnostic_dir = Some(path);
+            } else {
+                smoke_output = Some(path);
+            }
+        }
+    }
+    if smoke_output.is_some()
+        && (std::env::var_os("YAMINET_BROWSER_DATA_DIR").is_none() || !args.is_empty())
+    {
+        return Err("Desktop smoke requires an explicit isolated YAMINET_BROWSER_DATA_DIR and accepts no navigation/config arguments".into());
+    }
     let mut resolver = None;
     if let Some(index) = args.iter().position(|arg| arg == "--config") {
         args.remove(index);
@@ -81,13 +165,13 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         return Ok(());
     }
     if args.first().is_some_and(|s| s == "--help") {
-        println!("Yami Browser\n  --version | --probe URL [--asset KEY]  Explicit authenticated diagnostics\n  yami-browser                         Native desktop window\n  yami-browser --desktop [YNP URL]     Desktop with initial page\n  yami-browser --terminal [file]       Terminal viewer\n  yami-browser [file | YNP URL] [--style file] [--ppm image.ppm]\nConfiguration: --config FILE | check-config FILE | --network-status\nSettings: --enable-relays | --disable-relays; --bootstrap node-ID@IPv4:port\nSidebar: relay toggle and Add bootstrap peer (paste full ID@IPv4:port, Enter).\nYNP URLs: yami://node-id/key (DHT lookup, pinned TLS 1.3)\n          ynps://node-id@IP:port/key (TLS 1.3, loopback, LAN or public IPv4)\n          ynp://loopback-IP:port/key (plaintext, this computer only)\n{}\n{}", ynp::WARNING, ynp_tls::WARNING);
+        println!("Yami Browser\n  --network-trial URL --config FILE --asset KEY [--host-config FILE] [--include-endpoints] [--operator-relay-cycle]\n  --diagnostic-log ABS-DIR | diagnostics report|clear ABS-DIR\n  --desktop-smoke ABS-REPORT (isolated test profile required)\n  --version | --probe URL [--asset KEY]  Explicit authenticated diagnostics\n  yami-browser                         Native desktop window\n  yami-browser --desktop [YNP URL]     Desktop with initial page\n  yami-browser --terminal [file]       Terminal viewer\n  yami-browser [file | YNP URL] [--style file] [--ppm image.ppm]\nConfiguration: --config FILE | check-config FILE | --network-status\nSettings: --enable-relays | --disable-relays; --bootstrap node-ID@IPv4:port\nSidebar: relay toggle and Add bootstrap peer (paste full ID@IPv4:port, Enter).\nYNP URLs: yami://node-id/key (DHT lookup, pinned TLS 1.3)\n          ynps://node-id@IP:port/key (TLS 1.3, loopback, LAN or public IPv4)\n          ynp://loopback-IP:port/key (plaintext, this computer only)\n{}\n{}", ynp::WARNING, ynp_tls::WARNING);
         Ok(())
     } else if args.is_empty() || args[0] == "--desktop" {
         if !args.is_empty() {
             args.remove(0);
         }
-        desktop::run(args, relay_enabled, resolver)
+        desktop::run(args, relay_enabled, resolver, diagnostic_dir, smoke_output)
     } else {
         if args[0] == "--terminal" {
             args.remove(0);

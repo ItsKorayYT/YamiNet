@@ -13,3 +13,7 @@ pub mod find;
 pub mod validation;
 
 pub mod image_cache;
+
+pub mod diagnostics;
+
+pub mod network_trial;
