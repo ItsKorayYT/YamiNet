@@ -440,3 +440,92 @@ fn lookup_refreshes_an_unavailable_cached_endpoint_from_a_newer_record() {
     assert!(found.failures >= 1);
     task.join().unwrap();
 }
+
+#[test]
+fn relay_v2_binds_owner_relay_endpoint_and_preserves_v1() {
+    let owner = identity();
+    let relay = identity();
+    let route = RelayRoute {
+        relay: *relay.id(),
+        endpoint: "127.0.0.1:7444".parse().unwrap(),
+    };
+    let signed = PeerRecord::sign_routes(
+        &owner,
+        vec![],
+        vec![route],
+        1060,
+        2,
+        Network::Loopback,
+        1000,
+    )
+    .unwrap();
+    assert!(signed.endpoints().is_empty());
+    assert_eq!(signed.relay_routes(), &[route]);
+    assert_eq!(PeerRecord::decode(&signed.encode()).unwrap(), signed);
+    assert!(signed.verify(Network::Public, 1000).is_err());
+    assert!(signed.verify(Network::Loopback, 1060).is_err());
+    for offset in 0..signed.encode().len() {
+        let mut bytes = signed.encode();
+        bytes[offset] ^= 1;
+        if let Ok(changed) = PeerRecord::decode(&bytes) {
+            assert!(changed.verify(Network::Loopback, 1000).is_err(), "{offset}");
+        }
+    }
+    for end in 0..signed.encode().len() {
+        assert!(PeerRecord::decode(&signed.encode()[..end]).is_err());
+    }
+    let legacy = record(&owner, 1, 1060, 1000);
+    assert_eq!(PeerRecord::decode(&legacy.encode()).unwrap(), legacy);
+    let mut state = State::new(*owner.id(), Network::Loopback);
+    state.accept(legacy.clone(), 1000).unwrap();
+    state.accept(signed, 1000).unwrap();
+    assert!(state.accept(legacy, 1000).is_err());
+    let withdrawn =
+        PeerRecord::sign_routes(&owner, vec![], vec![], 1060, 3, Network::Loopback, 1000).unwrap();
+    state.accept(withdrawn, 1000).unwrap();
+    assert!(state
+        .get(*owner.id(), 1000)
+        .unwrap()
+        .relay_routes()
+        .is_empty());
+}
+
+#[test]
+fn maximal_relay_records_fit_existing_frame_and_snapshot_budgets() {
+    let relay = identity();
+    let routes = vec![
+        RelayRoute {
+            relay: *relay.id(),
+            endpoint: "127.0.0.1:3".parse().unwrap(),
+        },
+        RelayRoute {
+            relay: *relay.id(),
+            endpoint: "127.0.0.1:4".parse().unwrap(),
+        },
+    ];
+    let mut records = Vec::new();
+    for _ in 0..MAX_REPLY_RECORDS {
+        let owner = identity();
+        records.push(
+            PeerRecord::sign_routes(
+                &owner,
+                (5..9)
+                    .map(|p| SocketAddrV4::new(std::net::Ipv4Addr::LOCALHOST, p))
+                    .collect(),
+                routes.clone(),
+                1060,
+                1,
+                Network::Loopback,
+                1000,
+            )
+            .unwrap(),
+        );
+    }
+    assert_eq!(records[0].encode().len(), MAX_RECORD_BYTES);
+    assert_eq!(
+        PeerRecord::decode(&records[0].encode()).unwrap(),
+        records[0]
+    );
+    wire::encode([0; 16], &wire::Message::Peers(records)).unwrap();
+    assert!(39 + MAX_CACHE * (2 + MAX_RECORD_BYTES) < 64 * 1024);
+}

@@ -21,13 +21,15 @@ pub enum Purpose {
     DocumentMetadata,
     SiteManifest,
     PeerRecord,
+    RoutedPeerRecord,
     RelayRegistration,
 }
 impl Purpose {
-    pub const ALL: [Self; 4] = [
+    pub const ALL: [Self; 5] = [
         Self::DocumentMetadata,
         Self::SiteManifest,
         Self::PeerRecord,
+        Self::RoutedPeerRecord,
         Self::RelayRegistration,
     ];
     /// The domain separation prefix of every message signed for this purpose.
@@ -36,6 +38,7 @@ impl Purpose {
             Self::DocumentMetadata => b"yaminet.document-metadata.v1\0",
             Self::SiteManifest => b"yaminet.site-manifest.v1\0",
             Self::PeerRecord => b"yaminet.peer-record.v1\0",
+            Self::RoutedPeerRecord => b"yaminet.peer-record.v2\0",
             Self::RelayRegistration => b"yaminet.relay-registration.v1\0",
         }
     }
@@ -234,6 +237,91 @@ impl Signable for PeerRecordMetadata {
         bytes
     }
 }
+/// Destination-signed relay location. The destination is the enclosing record's ID.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RelayRoute {
+    pub relay: NodeId,
+    pub endpoint: SocketAddrV4,
+}
+impl Ord for RelayRoute {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        (self.relay.public_key(), self.endpoint).cmp(&(other.relay.public_key(), other.endpoint))
+    }
+}
+impl PartialOrd for RelayRoute {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+/// Version 2 extends the sealed signing domain without changing v1 signatures.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RoutedPeerRecordMetadata {
+    pub(crate) direct: PeerRecordMetadata,
+    routes: Vec<RelayRoute>,
+}
+impl RoutedPeerRecordMetadata {
+    pub fn new(
+        id: NodeId,
+        endpoints: Vec<SocketAddrV4>,
+        routes: Vec<RelayRoute>,
+        expires: u64,
+        sequence: u64,
+    ) -> Result<Self> {
+        // An empty v2 record withdraws all locations while retaining sequence history.
+        if endpoints.len() > 4
+            || routes.len() > 2
+            || expires == 0
+            || sequence == 0
+            || endpoints.windows(2).any(|p| p[0] >= p[1])
+            || routes.windows(2).any(|p| p[0] >= p[1])
+            || endpoints
+                .iter()
+                .chain(routes.iter().map(|r| &r.endpoint))
+                .any(|e| {
+                    e.port() == 0
+                        || e.ip().is_unspecified()
+                        || e.ip().is_multicast()
+                        || e.ip().is_broadcast()
+                })
+            || routes.iter().any(|r| r.relay == id)
+        {
+            return Err(Error::Malformed(
+                "invalid v2 peer locations, ordering, expiry or sequence",
+            ));
+        }
+        Ok(Self {
+            direct: PeerRecordMetadata {
+                id,
+                endpoints,
+                expires,
+                sequence,
+            },
+            routes,
+        })
+    }
+    pub fn direct(&self) -> &PeerRecordMetadata {
+        &self.direct
+    }
+    pub fn routes(&self) -> &[RelayRoute] {
+        &self.routes
+    }
+}
+impl sealed::Sealed for RoutedPeerRecordMetadata {}
+impl Signable for RoutedPeerRecordMetadata {
+    const PURPOSE: Purpose = Purpose::RoutedPeerRecord;
+    fn canonical_bytes(&self) -> Vec<u8> {
+        let mut bytes = b"YPR\x02".to_vec();
+        bytes.extend(self.direct.canonical_bytes());
+        bytes.push(self.routes.len() as u8);
+        for route in &self.routes {
+            bytes.extend(route.relay.public_key());
+            bytes.extend(route.endpoint.ip().octets());
+            bytes.extend(route.endpoint.port().to_be_bytes());
+        }
+        bytes
+    }
+}
+
 impl Signable for SiteManifest {
     const PURPOSE: Purpose = Purpose::SiteManifest;
     /// `SHA-256(style) || u32 page count || (u16 key length || key || SHA-256(page))*`

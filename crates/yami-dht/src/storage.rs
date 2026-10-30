@@ -143,6 +143,15 @@ impl Service {
         endpoints: Vec<SocketAddrV4>,
         now: u64,
     ) -> io::Result<PeerRecord> {
+        self.prepare_self_routes(identity, endpoints, Vec::new(), now)
+    }
+    pub fn prepare_self_routes(
+        &self,
+        identity: &NodeIdentity,
+        endpoints: Vec<SocketAddrV4>,
+        routes: Vec<crate::RelayRoute>,
+        now: u64,
+    ) -> io::Result<PeerRecord> {
         let mut disk = self.guard()?;
         if disk.state.local != *identity.id() {
             return Err(invalid("DHT signer is not this node"));
@@ -156,9 +165,10 @@ impl Service {
         let sequence = previous
             .checked_add(1)
             .ok_or_else(|| invalid("peer sequence exhausted"))?;
-        let record = PeerRecord::sign(
+        let record = PeerRecord::sign_routes(
             identity,
             endpoints,
+            routes,
             now.checked_add(MAX_RECORD_TTL)
                 .ok_or_else(|| invalid("clock overflow"))?,
             sequence,

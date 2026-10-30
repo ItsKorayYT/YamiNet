@@ -79,3 +79,5 @@ impl Network {
         }
     }
 }
+
+pub use yami_identity::RelayRoute;

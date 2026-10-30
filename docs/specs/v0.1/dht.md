@@ -257,3 +257,24 @@ metadata collection. Public deployments need a separate security review.
 
 See [reproducible testing](../../dht-testing.md) for the three-process simulation
 and a clear distinction from unperformed real internet tests.
+
+### Relay-aware record version 2
+
+Version 1 records remain decodable and retain their original signing domain.
+Version 2 uses `yaminet.peer-record.v2\0` and canonical bytes:
+`YPR 02 || owner-key[32] || expiry-u64 || sequence-u64 || direct-count-u8 ||
+IPv4:port[6]* || relay-count-u8 || (relay-key[32] || IPv4:port[6])*` followed by
+an Ed25519 signature[64]. Integers use network byte order. The owner key is the
+destination of every route. Direct endpoints (0..4) and relay routes (0..2) are
+strictly sorted and unique; relay routes sort by raw relay key then endpoint.
+An owner cannot advertise itself as relay. An empty v2 record withdraws all
+locations. Only the destination signs; a relay advertisement is never liveness
+or a replacement for either TLS identity check.
+
+V1 lengths are odd, v2 lengths even, so legacy keys cannot collide with the
+version marker. Maximum v2 size is 218 bytes: eight records still fit the 2048
+byte frame and 256 records fit the existing 64 KiB snapshot. TTL, persistent
+sequence high-water checks, atomic batch validation and public/isolated-loopback
+endpoint policies apply to both versions. Relay-only records do not become
+routing-table contacts: DHT RPC contacts still require direct endpoints.
+Older software rejects v2 safely; use upgraded DHT peers for relay publication.
