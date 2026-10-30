@@ -107,6 +107,39 @@ fn provider() -> Arc<CryptoProvider> {
     Arc::new(rustls::crypto::ring::default_provider())
 }
 
+/// A bounded bidirectional byte stream. Adapters MUST apply timeouts to the
+/// underlying blocking I/O; checking a deadline only before a read is insufficient.
+pub trait ByteStream: Read + Write + Send {
+    fn read_timeout(&mut self, timeout: Duration) -> io::Result<()>;
+    fn write_timeout(&mut self, timeout: Duration) -> io::Result<()>;
+    fn close(&mut self) -> io::Result<()>;
+    /// Only shorten an absolute lifetime. Layered TLS must propagate this
+    /// below its own read loop, including non-application TLS traffic.
+    fn limit_deadline(&mut self, deadline: Instant) -> io::Result<()>;
+}
+impl ByteStream for TcpStream {
+    fn read_timeout(&mut self, timeout: Duration) -> io::Result<()> {
+        self.set_read_timeout(Some(timeout))
+    }
+    fn write_timeout(&mut self, timeout: Duration) -> io::Result<()> {
+        self.set_write_timeout(Some(timeout))
+    }
+    fn close(&mut self) -> io::Result<()> {
+        self.shutdown(std::net::Shutdown::Both)
+    }
+    // A raw TCP read/write is bounded by Socket::prepare immediately above it.
+    fn limit_deadline(&mut self, _deadline: Instant) -> io::Result<()> {
+        Ok(())
+    }
+}
+/// Authenticated TLS session for bounded relay control/outer transport. The
+/// exporter is channel binding, never a node private key or destination proof.
+pub trait SecureStream: Connection + ByteStream {
+    fn complete_handshake(&mut self) -> io::Result<()>;
+    fn channel_binding(&self) -> io::Result<[u8; 32]>;
+}
+pub const MAX_SESSION: Duration = Duration::from_secs(60);
+
 /// Connects only to the node whose ID it was created with.
 #[derive(Debug, Clone)]
 pub struct TlsTransport {
@@ -147,6 +180,59 @@ impl TlsTransport {
             return Err(invalid("TLS caller budget must be >0 and <=10 seconds"));
         }
         self.connect_inner(address, Some(Instant::now() + timeout))
+    }
+    /// Pin the exact same identity verifier over an already established tunnel.
+    pub fn connect_over(
+        &self,
+        stream: Box<dyn ByteStream>,
+        budget: Duration,
+    ) -> io::Result<Box<dyn Connection>> {
+        if budget.is_zero() || budget > DEADLINE {
+            return Err(invalid("invalid tunneled TLS budget"));
+        }
+        Ok(self.session_over(stream, budget)?)
+    }
+    /// Explicitly bounded outer relay session; not used by ordinary YNP fetch.
+    pub fn connect_session(
+        &self,
+        address: SocketAddr,
+        lifetime: Duration,
+    ) -> io::Result<Box<dyn SecureStream>> {
+        if lifetime.is_zero() || lifetime > MAX_SESSION {
+            return Err(invalid("invalid TLS session lifetime"));
+        }
+        Scope::Internet.check(address)?;
+        if address.port() == 0 {
+            return Err(invalid("zero destination port"));
+        }
+        let started = Instant::now();
+        let stream = TcpStream::connect_timeout(&address, ynp::TIMEOUT.min(lifetime))?;
+        ynp::configure_stream(&stream)?;
+        self.session_over(Box::new(stream), lifetime.saturating_sub(started.elapsed()))
+    }
+    fn session_over(
+        &self,
+        mut stream: Box<dyn ByteStream>,
+        budget: Duration,
+    ) -> io::Result<Box<dyn SecureStream>> {
+        if budget.is_zero() {
+            return Err(io::Error::new(
+                io::ErrorKind::TimedOut,
+                "TLS session deadline exceeded",
+            ));
+        }
+        stream.limit_deadline(Instant::now() + budget)?;
+        let name = ServerName::try_from(self.trusted.to_string()).map_err(other)?;
+        let mut tls = ClientConnection::new(self.config.clone(), name).map_err(other)?;
+        tls.set_buffer_limit(Some(TLS_BUFFER_LIMIT));
+        let mut connection = TlsConnection::from_stream(tls, stream, budget);
+        connection
+            .handshake()
+            .map_err(|error| match mismatch(&error) {
+                Some(mismatch) => io::Error::new(io::ErrorKind::PermissionDenied, mismatch),
+                None => error,
+            })?;
+        Ok(Box::new(connection))
     }
     fn connect_inner(
         &self,
@@ -261,17 +347,16 @@ impl TlsListener {
         id: NodeId,
     ) -> io::Result<Self> {
         scope.check(address)?;
-        let mut config = ServerConfig::builder_with_provider(provider())
-            .with_protocol_versions(&[&rustls::version::TLS13])
-            .map_err(other)?
-            .with_no_client_auth()
-            .with_cert_resolver(Arc::new(resolver));
-        config.alpn_protocols = vec![ALPN.to_vec()];
-        config.session_storage = Arc::new(NoServerSessionStorage {});
-        config.send_tls13_tickets = 0;
-        let listener = if scope == Scope::Internet {
+        let config = server_config(resolver)?;
+        // Reusable Unix listeners allow bounded relay sessions to drain and
+        // immediately restart on the same explicitly configured loopback port.
+        let listener = if scope == Scope::Internet || cfg!(unix) {
             let socket = socket2::Socket::new(
-                socket2::Domain::IPV4,
+                if address.is_ipv4() {
+                    socket2::Domain::IPV4
+                } else {
+                    socket2::Domain::IPV6
+                },
                 socket2::Type::STREAM,
                 Some(socket2::Protocol::TCP),
             )?;
@@ -285,7 +370,7 @@ impl TlsListener {
         };
         Ok(Self {
             listener,
-            config: Arc::new(config),
+            config,
             id,
             scope,
             admission: (scope == Scope::Internet)
@@ -304,6 +389,74 @@ impl TlsListener {
     }
     pub fn scope(&self) -> Scope {
         self.scope
+    }
+}
+fn server_config(resolver: credential::Resolver) -> io::Result<Arc<ServerConfig>> {
+    let mut config = ServerConfig::builder_with_provider(provider())
+        .with_protocol_versions(&[&rustls::version::TLS13])
+        .map_err(other)?
+        .with_no_client_auth()
+        .with_cert_resolver(Arc::new(resolver));
+    config.alpn_protocols = vec![ALPN.to_vec()];
+    config.session_storage = Arc::new(NoServerSessionStorage {});
+    config.send_tls13_tickets = 0;
+    Ok(Arc::new(config))
+}
+/// The node's existing TLS credentials on a stream, without opening a listener.
+pub struct TlsAcceptor {
+    config: Arc<ServerConfig>,
+}
+impl TlsAcceptor {
+    pub fn new(identity: Arc<NodeIdentity>) -> io::Result<Self> {
+        Ok(Self {
+            config: server_config(credential::Resolver::renewing(identity)?)?,
+        })
+    }
+    pub fn accept_over(
+        &self,
+        mut stream: Box<dyn ByteStream>,
+        budget: Duration,
+    ) -> io::Result<Box<dyn Connection>> {
+        if budget.is_zero() || budget > DEADLINE {
+            return Err(invalid("invalid tunneled TLS budget"));
+        }
+        stream.limit_deadline(Instant::now() + budget)?;
+        let mut tls = ServerConnection::new(self.config.clone()).map_err(other)?;
+        tls.set_buffer_limit(Some(TLS_BUFFER_LIMIT));
+        let mut connection = TlsConnection::from_stream(tls, stream, budget);
+        connection.handshake()?;
+        Ok(Box::new(connection))
+    }
+}
+impl TlsListener {
+    /// Separate relay control sessions may live at most 60 seconds. The direct
+    /// Incoming implementation below retains its original ten-second lifetime.
+    pub fn accept_session(&self, lifetime: Duration) -> io::Result<Box<dyn SecureStream>> {
+        self.accept_session_from(lifetime).map(|(_, stream)| stream)
+    }
+    pub fn accept_session_from(
+        &self,
+        lifetime: Duration,
+    ) -> io::Result<(SocketAddr, Box<dyn SecureStream>)> {
+        if lifetime.is_zero() || lifetime > MAX_SESSION {
+            return Err(invalid("invalid TLS session lifetime"));
+        }
+        let (stream, peer) = self.listener.accept()?;
+        stream.set_nonblocking(false)?;
+        self.scope.check(peer)?;
+        let lease = self
+            .admission
+            .as_ref()
+            .map(|limits| admission::Lease::acquire(limits.clone(), peer.ip()))
+            .transpose()?;
+        ynp::configure_stream(&stream)?;
+        let mut tls = ServerConnection::new(self.config.clone()).map_err(other)?;
+        tls.set_buffer_limit(Some(TLS_BUFFER_LIMIT));
+        // Handshake is deferred until read, keeping a slow client off accept.
+        stream.set_nodelay(true)?;
+        let mut connection = TlsConnection::from_stream(tls, Box::new(stream), lifetime);
+        connection._lease = lease;
+        Ok((peer, Box::new(connection)))
     }
 }
 impl Incoming for TlsListener {
@@ -332,8 +485,10 @@ impl Incoming for TlsListener {
 
 /// A TCP stream that fails every operation once its deadline has passed.
 struct Socket {
-    stream: TcpStream,
+    stream: Box<dyn ByteStream>,
     until: Instant,
+    read_poll: Duration,
+    write_poll: Duration,
 }
 impl Socket {
     fn check(&self) -> io::Result<()> {
@@ -345,7 +500,7 @@ impl Socket {
         }
         Ok(())
     }
-    fn prepare(&self, reading: bool) -> io::Result<()> {
+    fn prepare(&mut self, reading: bool) -> io::Result<()> {
         self.check()?;
         let remaining = self.until.saturating_duration_since(Instant::now());
         if remaining.is_zero() {
@@ -354,11 +509,10 @@ impl Socket {
                 "TLS deadline exceeded",
             ));
         }
-        let timeout = Some(remaining.min(ynp::TIMEOUT));
         if reading {
-            self.stream.set_read_timeout(timeout)
+            self.stream.read_timeout(remaining.min(self.read_poll))
         } else {
-            self.stream.set_write_timeout(timeout)
+            self.stream.write_timeout(remaining.min(self.write_poll))
         }
     }
 }
@@ -393,14 +547,19 @@ where
     S: SideData,
 {
     fn new(tls: C, stream: TcpStream) -> Self {
+        Self::from_stream(tls, Box::new(stream), DEADLINE)
+    }
+    fn from_stream(tls: C, stream: Box<dyn ByteStream>, lifetime: Duration) -> Self {
         let socket = Socket {
             stream,
-            until: Instant::now() + HANDSHAKE_TIMEOUT,
+            until: Instant::now() + HANDSHAKE_TIMEOUT.min(lifetime),
+            read_poll: ynp::TIMEOUT,
+            write_poll: ynp::TIMEOUT,
         };
         Self {
             tls: StreamOwned::new(tls, socket),
             ready: false,
-            until: Instant::now() + DEADLINE,
+            until: Instant::now() + lifetime,
             _lease: None,
         }
     }
@@ -429,7 +588,13 @@ where
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
         self.handshake()?;
         self.tls.sock.check()?;
-        self.tls.read(buf)
+        // Bound the complete TLS read, not each underlying TCP read alone:
+        // trickled TLS fragments/control traffic must not reset the budget.
+        let until = self.tls.sock.until;
+        self.tls.sock.until = until.min(Instant::now() + self.tls.sock.read_poll);
+        let result = self.tls.read(buf);
+        self.tls.sock.until = until;
+        result
     }
 }
 impl<C, S> Write for TlsConnection<C>
@@ -440,12 +605,20 @@ where
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
         self.handshake()?;
         self.tls.sock.check()?;
-        self.tls.write(buf)
+        let until = self.tls.sock.until;
+        self.tls.sock.until = until.min(Instant::now() + self.tls.sock.write_poll);
+        let result = self.tls.write(buf);
+        self.tls.sock.until = until;
+        result
     }
     fn flush(&mut self) -> io::Result<()> {
         self.handshake()?;
         self.tls.sock.check()?;
-        self.tls.flush()
+        let until = self.tls.sock.until;
+        self.tls.sock.until = until.min(Instant::now() + self.tls.sock.write_poll);
+        let result = self.tls.flush();
+        self.tls.sock.until = until;
+        result
     }
 }
 impl<C, S> Connection for TlsConnection<C>
@@ -455,6 +628,50 @@ where
 {
     fn protection(&self) -> Protection {
         Protection::Tls13PinnedServer
+    }
+}
+
+impl<C, S> ByteStream for TlsConnection<C>
+where
+    C: DerefMut + Deref<Target = ConnectionCommon<S>> + Send,
+    S: SideData,
+{
+    fn read_timeout(&mut self, timeout: Duration) -> io::Result<()> {
+        if timeout.is_zero() {
+            return Err(invalid("zero TLS read timeout"));
+        }
+        self.tls.sock.read_poll = timeout;
+        Ok(())
+    }
+    fn write_timeout(&mut self, timeout: Duration) -> io::Result<()> {
+        if timeout.is_zero() {
+            return Err(invalid("zero TLS write timeout"));
+        }
+        self.tls.sock.write_poll = timeout;
+        Ok(())
+    }
+    fn close(&mut self) -> io::Result<()> {
+        self.tls.sock.stream.close()
+    }
+    fn limit_deadline(&mut self, deadline: Instant) -> io::Result<()> {
+        self.until = self.until.min(deadline);
+        self.tls.sock.until = self.tls.sock.until.min(deadline);
+        self.tls.sock.stream.limit_deadline(deadline)
+    }
+}
+impl<C, S> SecureStream for TlsConnection<C>
+where
+    C: DerefMut + Deref<Target = ConnectionCommon<S>> + Send,
+    S: SideData,
+{
+    fn complete_handshake(&mut self) -> io::Result<()> {
+        self.handshake()
+    }
+    fn channel_binding(&self) -> io::Result<[u8; 32]> {
+        self.tls
+            .conn
+            .export_keying_material([0; 32], b"EXPORTER-YamiRelay-v1", None)
+            .map_err(other)
     }
 }
 
@@ -567,8 +784,10 @@ mod tests {
         let (stream, _) = listener.accept().unwrap();
         let started = Instant::now();
         let mut socket = Socket {
-            stream,
+            stream: Box::new(stream),
             until: started + Duration::from_millis(40),
+            read_poll: ynp::TIMEOUT,
+            write_poll: ynp::TIMEOUT,
         };
         assert!(socket.read(&mut [0; 1]).is_err());
         assert!(started.elapsed() < Duration::from_millis(500));

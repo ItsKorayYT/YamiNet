@@ -219,3 +219,13 @@ in `.gitignore`. Nothing in YamiNet sends `node.key` over the network: YNP has
 no message that carries it, and only node IDs, public keys and signatures are
 ever printed. If a key is exposed, stop using that identity and create a new
 one; the old node ID cannot be revoked.
+
+## Reverse relay registration signing domain
+
+The sealed signing API also defines `yaminet.relay-registration.v1\0` over
+`relay public key || host public key || random nonce || TLS channel binding ||
+challenge expiration`, respectively 32, 32, 32, 32 and 8 bytes. This uses the
+same Ed25519 key and verifier, with a purpose distinct from document/site,
+DHT records and TLS messages. Freshness and one-session acceptance belong to
+the relay protocol. No private key is transmitted. See [reverse relay v1](relay.md)
+for the exact exporter label, proof lifecycle and replay checks.

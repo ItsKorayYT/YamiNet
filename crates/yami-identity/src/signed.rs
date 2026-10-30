@@ -21,15 +21,22 @@ pub enum Purpose {
     DocumentMetadata,
     SiteManifest,
     PeerRecord,
+    RelayRegistration,
 }
 impl Purpose {
-    pub const ALL: [Self; 3] = [Self::DocumentMetadata, Self::SiteManifest, Self::PeerRecord];
+    pub const ALL: [Self; 4] = [
+        Self::DocumentMetadata,
+        Self::SiteManifest,
+        Self::PeerRecord,
+        Self::RelayRegistration,
+    ];
     /// The domain separation prefix of every message signed for this purpose.
     pub fn tag(self) -> &'static [u8] {
         match self {
             Self::DocumentMetadata => b"yaminet.document-metadata.v1\0",
             Self::SiteManifest => b"yaminet.site-manifest.v1\0",
             Self::PeerRecord => b"yaminet.peer-record.v1\0",
+            Self::RelayRegistration => b"yaminet.relay-registration.v1\0",
         }
     }
     pub fn name(self) -> &'static str {
@@ -188,6 +195,30 @@ impl PeerRecordMetadata {
     }
 }
 impl sealed::Sealed for PeerRecordMetadata {}
+
+/// One fresh reverse-relay challenge, bound to both identities and the exact
+/// outer TLS session's exporter. This cannot sign document/DHT/TLS messages.
+#[derive(Debug, Clone)]
+pub struct RelayRegistration {
+    pub relay: NodeId,
+    pub host: NodeId,
+    pub nonce: [u8; 32],
+    pub channel: [u8; 32],
+    pub expires: u64,
+}
+impl sealed::Sealed for RelayRegistration {}
+impl Signable for RelayRegistration {
+    const PURPOSE: Purpose = Purpose::RelayRegistration;
+    fn canonical_bytes(&self) -> Vec<u8> {
+        let mut bytes = Vec::with_capacity(136);
+        bytes.extend_from_slice(&self.relay.public_key());
+        bytes.extend_from_slice(&self.host.public_key());
+        bytes.extend_from_slice(&self.nonce);
+        bytes.extend_from_slice(&self.channel);
+        bytes.extend_from_slice(&self.expires.to_be_bytes());
+        bytes
+    }
+}
 impl Signable for PeerRecordMetadata {
     const PURPOSE: Purpose = Purpose::PeerRecord;
     fn canonical_bytes(&self) -> Vec<u8> {

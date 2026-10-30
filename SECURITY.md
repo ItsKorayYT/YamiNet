@@ -172,3 +172,29 @@ use the original inert YLang/YSL parser and YNP bounds. No embedded web engine,
 script runtime, remote font fetch, account or cloud service is introduced.
 Bundled homepage bookmarks are explicit localhost targets, and unavailable nodes
 produce an error rather than falling back to HTTP or a public service.
+
+## Reverse relay MVP
+
+The separate loopback-only reverse relay authenticates the relay using its
+pinned Ed25519 TLS identity and the host using a fresh signed challenge bound
+to both IDs, expiry and a TLS exporter. Proofs cannot be replayed on a different
+session, and a conflicting registration cannot replace a live one. A relay
+registration is not a substitute for destination authentication: the client
+must establish a second pinned TLS 1.3 session to the host through the tunnel
+before sending YNP. The relay terminates only the outer sessions and forwards
+inner TLS records without the host private key or plaintext YNP contents.
+
+A malicious relay can still deny service, drop traffic, correlate identities
+and endpoints, and observe timing/volume. End-to-end TLS rejects substituted
+node identities; it does not confer anonymity, content safety or availability.
+Connections, registrations, tasks, per-IP admissions, per-host tunnels,
+forwarding bytes, buffers and lifetimes are bounded. A registered host or
+unauthenticated client can still occupy bounded capacity. This is not public
+relay abuse protection or an independent security review.
+
+Direct TLS behavior and DHT wire records are preserved. The relay has no
+arbitrary endpoint-dialing request, public-listen mode, DHT advertisements,
+browser integration, discovery, multi-relay failover, NAT hole punching, Tor or
+I2P. Only the local connection direction is simulated; no public NAT/provider
+or internet validation is claimed. Read the [relay specification](docs/specs/v0.1/relay.md)
+and [test/operation guide](docs/relay-testing.md) for authentication and limits.

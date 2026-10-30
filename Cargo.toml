@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/ylang", "crates/ysl", "crates/ynp", "crates/yami-render", "crates/yami-identity", "crates/ynp-tls", "crates/ynp-discovery", "crates/yami-dht", "apps/yami-browser", "apps/yami-node"]
+members = ["crates/ylang", "crates/ysl", "crates/ynp", "crates/yami-render", "crates/yami-identity", "crates/ynp-tls", "crates/ynp-discovery", "crates/yami-dht", "crates/yami-relay", "apps/yami-relay", "apps/yami-browser", "apps/yami-node"]
 resolver = "2"
 
 [workspace.package]

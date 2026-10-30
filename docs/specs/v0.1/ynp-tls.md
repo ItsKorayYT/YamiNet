@@ -409,3 +409,20 @@ NotFound over TLS (on the LAN address when one exists), authentication
 failures followed by normal use, a plaintext node behind a `ynps://` address,
 the sidebar indicator and scrolling of a verified page, and the terminal viewer
 refusing the wrong node ID.
+
+## Bounded byte streams and reverse relay sessions
+
+The same pinned TLS 1.3 configuration can now run over `ByteStream` through
+`TlsTransport::connect_over` and `TlsAcceptor::accept_over`. Adapters must
+propagate deadlines to underlying blocking reads/writes. These entry points
+retain the existing ten-second TLS/YNP budget and exact-key verifier; the
+acceptor opens no network listener. Direct TCP APIs, scope checks, ALPN,
+certificate renewal and identity verification remain unchanged.
+
+`SecureStream` exposes bounded timeout controls and a TLS-exporter channel
+binding for the separate relay protocol. Explicit outer control sessions may
+last at most 60 seconds; this does not extend ordinary direct fetch lifetimes.
+The relay's raw tunnel is a byte stream, not authenticated destination proof.
+Only the subsequent inner pinned handshake authenticates the destination.
+See [reverse relay v1](relay.md) for channel-bound registration, session limits
+and the distinction between outer relay TLS and inner YNP TLS.

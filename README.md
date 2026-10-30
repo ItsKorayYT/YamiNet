@@ -271,6 +271,23 @@ See [operations, bounds and controlled-clock tests](docs/dht-maintenance.md).
 This is experimental loopback-tested maintenance, not a guarantee of internet
 availability, production security or anonymity.
 
+### Reverse relay transport (local MVP)
+
+The `yami-relay` crate and `yami-relay` executable (`yami-relay-cli` package)
+provide an outbound host registration and opaque tunnel. Hosts prove a fresh,
+channel-bound challenge using their existing Ed25519 identity. Clients pin the
+relay, then independently authenticate the destination over end-to-end TLS 1.3
+inside the tunnel before fetching YNP. The host opens no incoming listener.
+
+Use `yami-relay serve`, `yami-relay host` and `yami-relay fetch` with explicit
+loopback endpoints and existing identity directories. See the
+[three-process demonstration](docs/relay-testing.md) and
+[versioned protocol/security bounds](docs/specs/v0.1/relay.md).
+This milestone adds no DHT relay routes, browser relay selection, public relay
+deployment, automatic discovery or NAT hole punching. It makes no anonymity or
+production-security claim. Native browser addressing continues to use direct
+DHT endpoints until the separate relay-integration milestone.
+
 ## Workspace
 
 | Package | Responsibility |

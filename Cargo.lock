@@ -2363,6 +2363,29 @@ dependencies = [
 ]
 
 [[package]]
+name = "yami-relay"
+version = "0.1.0"
+dependencies = [
+ "getrandom 0.4.3",
+ "yami-identity",
+ "ynp",
+ "ynp-tls",
+]
+
+[[package]]
+name = "yami-relay-cli"
+version = "0.1.0"
+dependencies = [
+ "ctrlc",
+ "yami-identity",
+ "yami-node",
+ "yami-relay",
+ "ylang",
+ "ynp",
+ "ynp-tls",
+]
+
+[[package]]
 name = "yami-render"
 version = "0.1.0"
 dependencies = [
