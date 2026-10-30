@@ -161,6 +161,29 @@ impl Service {
         }
         Ok(changed)
     }
+    /// Valid learned replies may contain more new owners than can be admitted.
+    /// Keep known/reserved owner updates without acknowledging discarded STOREs.
+    /// Any cryptographic, policy, expiry or rollback error still rejects the
+    /// entire batch atomically; only local capacity rejection can be skipped.
+    pub(crate) fn learn_many(&self, records: Vec<PeerRecord>, now: u64) -> io::Result<bool> {
+        if records.len() > crate::MAX_REPLY_RECORDS {
+            return Err(invalid("learned record batch exceeds reply bound"));
+        }
+        let mut disk = self.guard()?;
+        let mut next = disk.state.clone();
+        let mut changed = false;
+        for record in records {
+            match next.accept(record, now) {
+                Ok(accepted) => changed |= accepted,
+                Err(error) if error.kind() == io::ErrorKind::StorageFull => {}
+                Err(error) => return Err(error),
+            }
+        }
+        if changed {
+            disk.commit(next)?;
+        }
+        Ok(changed)
+    }
     /// The next sequence is persisted atomically BEFORE this record is returned
     /// for publication. Expired self records retain the high-water mark.
     pub fn prepare_self(

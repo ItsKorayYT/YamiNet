@@ -79,7 +79,7 @@ pub fn exchange(
     };
     let attempt = query_with_connector(connector, contact, request, budget).and_then(|reply| {
         if let Message::Peers(records) = reply {
-            service.accept_many(records, service.now()?)?;
+            service.learn_many(records, service.now()?)?;
         }
         service.observed(contact, service.now()?)
     });
@@ -179,7 +179,7 @@ fn lookup_after(
                 return Err(invalid("expected DHT records"));
             };
             returned_target = records.iter().any(|r| r.id() == target);
-            if let Err(error) = service.accept_many(records, service.now()?) {
+            if let Err(error) = service.learn_many(records, service.now()?) {
                 result.invalid_records += 1;
                 return Err(error);
             }
@@ -256,7 +256,7 @@ pub fn publish_with_connector(
                 ) {
                     // Failure to learn neighbors does not undo an acknowledged
                     // publication. All learned records still pass full checks.
-                    let _ = service.accept_many(records, service.now()?);
+                    let _ = service.learn_many(records, service.now()?);
                 }
             }
         } else {

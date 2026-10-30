@@ -72,7 +72,7 @@ impl State {
                         .count()
                         >= MAX_UNTRUSTED_OWNERS)
             {
-                return Err(invalid("peer cache admission full; signed rollback history retained, reserved local/bootstrap capacity protected"));
+                return Err(io::Error::new(io::ErrorKind::StorageFull, "peer cache admission full; signed rollback history retained, reserved local/bootstrap capacity protected"));
             }
             self.records.push(record);
         }

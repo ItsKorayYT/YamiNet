@@ -568,3 +568,62 @@ fn owner_flood_cannot_consume_local_and_explicit_bootstrap_reservations() {
     assert!(state.accept(record(&identity(), 1, 400, 300), 300).is_err());
     assert_eq!(state.records().len(), MAX_UNTRUSTED_OWNERS + 2);
 }
+
+#[test]
+fn full_untrusted_history_does_not_block_reserved_updates_in_learned_batches() {
+    let scratch = Scratch::new("mixed-full");
+    let local = identity();
+    let bootstrap = identity();
+    let service = Service::open(
+        scratch.0.join("state.cache"),
+        *local.id(),
+        Network::Loopback,
+    )
+    .unwrap();
+    service.protect(&[*bootstrap.id()]).unwrap();
+    service
+        .accept_records(
+            (0..MAX_UNTRUSTED_OWNERS)
+                .map(|_| record(&identity(), 1, 200, 100))
+                .collect(),
+            100,
+        )
+        .unwrap();
+    let unknown = identity();
+    let unknown_record = record(&unknown, 1, 200, 100);
+    service
+        .learn_many(
+            vec![unknown_record.clone(), record(&bootstrap, 1, 200, 100)],
+            100,
+        )
+        .unwrap();
+    let state = service.snapshot().unwrap();
+    assert!(state.get(*unknown.id(), 100).is_none());
+    assert_eq!(state.get(*bootstrap.id(), 100).unwrap().sequence(), 1);
+    assert_eq!(
+        service.accept(unknown_record, 100).unwrap_err().kind(),
+        io::ErrorKind::StorageFull
+    );
+    let mut forged = record(&identity(), 1, 200, 100).encode();
+    let last = forged.len() - 1;
+    forged[last] ^= 1;
+    assert!(service
+        .learn_many(
+            vec![
+                record(&bootstrap, 2, 200, 100),
+                PeerRecord::decode(&forged).unwrap()
+            ],
+            100
+        )
+        .is_err());
+    assert_eq!(
+        service
+            .snapshot()
+            .unwrap()
+            .get(*bootstrap.id(), 100)
+            .unwrap()
+            .sequence(),
+        1,
+        "invalid batch must remain atomic"
+    );
+}

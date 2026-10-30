@@ -269,3 +269,10 @@ open-network operation. DHT node IDs are cheap to generate; routing buckets and
 bootstrap diversity do not eliminate Sybil, eclipse, withholding or partition
 attacks. Use independently operated bootstrap peers and compare identities out
 of band. This is reliability hardening, not a complete DHT security solution.
+
+Learned FIND replies that exceed new-owner admission capacity can still advance
+valid known/reserved owners. Only capacity-rejected new owners are skipped;
+any invalid signature, expiry, policy or rollback still rejects the whole batch
+atomically. Direct STORE admission remains strict and never acknowledges a
+record it could not retain. This avoids an unrelated new owner in a reply
+blocking a bootstrap's signed update when the untrusted history partition is full.
