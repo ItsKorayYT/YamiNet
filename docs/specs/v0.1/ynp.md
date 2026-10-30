@@ -1,5 +1,8 @@
 # YNP 0.1 draft (wire version 1)
 
+This remains the unchanged 0.1 specification. See the explicit [0.2 extension](../v0.2/ynp-assets.md) for rich documents/styles or PNG asset frames; old documents and wire-v1 document messages remain supported.
+
+
 **EXPERIMENTAL: plaintext, unauthenticated, not secure for sensitive use.**
 The same frames can be carried over authenticated TLS 1.3; see
 [ynp-tls.md](ynp-tls.md).

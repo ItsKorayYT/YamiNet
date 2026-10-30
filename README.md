@@ -1,6 +1,6 @@
-# YamiNet 0.1.0
+# YamiNet 0.2.0
 
-An experimental Rust MVP for an independent document web. YLang is content,
+An experimental Rust platform for an independent document web. YLang is content,
 YSL is presentation, YNP carries documents, and Yami Render performs native
 layout and software rasterization. Yami Browser now includes a native desktop
 interface with antialiased typography, tabs and an aqua glass theme.
@@ -15,6 +15,37 @@ site metadata. An experimental TLS 1.3 transport encrypts YNP and
 authenticates a node against a node ID the client trusts in advance; the
 browser uses it for `ynps://` and native `yami://` addresses. The original
 `ynp://` transport remains plaintext, unauthenticated and loopback-only. There is no anonymity.
+
+## Native websites in 0.2
+
+YLang/YSL 0.2 add rich text, nested lists, sections/cards, responsive rows,
+modern typography and native PNGs. Original 0.1 documents keep their existing
+syntax and behavior. PNGs use an explicitly versioned YNP extension and the
+parent's exact authenticated node identity over TLS, directly or through a
+relay. Missing images retain alternative text; resource loading runs off the UI
+thread with strict budgets and cancellation. There are no third-party assets.
+
+Create and preview a complete site with the existing node:
+
+```sh
+cargo run -p yami-node -- site new my-site portfolio
+cargo run -p yami-node -- site check my-site
+cargo run -p yami-node -- site preview my-site --identity ./my-identity
+# Open the full ynps:// URL printed by preview in Yami Browser.
+cargo run -p yami-node -- site build my-site published-site
+```
+
+Templates: `personal`, `blog`, `portfolio`.
+[Complete example site](sites/showcase) · [Publishing and Windows walkthrough](docs/publishing-sites.md) ·
+[0.2 grammar, properties, asset protocol and exact limits](docs/websites-0.2.md).
+Publish the validated directory with the same existing direct/relay hosting
+commands and persistent identity/state. Preview never exposes a public listener.
+
+The native browser adds a small **Bookmarks & history** panel: custom bookmark
+titles/folders, saved Home, and optional bounded history (off by default).
+Identity addresses stay canonical when bookmarked; saved names confer no trust.
+Every new connection is still authenticated. Local history can be disabled and
+cleared; its on-disk privacy limits are documented in [browser controls](docs/desktop-browser.md).
 
 ## Reliability and deployment milestone
 
@@ -73,8 +104,8 @@ The terminal and PPM paths remain available: use `--terminal` for the built-in
 sample, or retain the original positional file/URL commands. `--desktop` opens
 a supplied YNP URL in the window. `--ppm` writes the original P6 bitmap output.
 No HTML, CSS, JavaScript, Chromium, WebView or web rendering engine is used.
-The viewer does not execute content or automatically fetch links, fonts, images
-or other assets. A fetched YNP document includes its style as inert text in
+The viewer does not execute content or automatically follow links or download fonts.
+The native browser loads only bounded, same-identity PNG references on authenticated pages. A fetched YNP document includes its style as inert text in
 the same frame; the terminal viewer supports a local `--style` override.
 
 `demo` starts two loopback nodes on OS-assigned ports. Each node serves one
@@ -341,20 +372,25 @@ bounds. Original isolated [relay commands/tests](docs/relay-testing.md) still wo
 | `ynp-discovery` | Opt-in IPv4 LAN multicast queries, bounded untrusted advertisements and rate-limited responses |
 | `yami-config` | Bounded versioned local profiles, explicit listener/pin policy and read-only relay status |
 | `yami-dht` | Bounded XOR routing, signed expiring peer records, iterative pinned-TLS lookup and persistent sequence history |
-| `yami-render` | Original terminal/bitmap renderer plus shaped native document layout and antialiased text |
-| `yami-browser` | Native desktop tabs/navigation and preserved terminal/PPM document tools |
+| `yami-render` | Original terminal/bitmap renderer plus rich native layout, PNG decoding and antialiased text |
+| `yami-browser` | Native tabs/navigation, bookmarks, optional local history and bounded authenticated assets |
 | `yami-identity` | Persistent Ed25519 node identities, node IDs, domain-separated metadata signatures |
 | `yami-relay` / `yami-relay-cli` | Explicit local/public reverse relays with signed host registration, opaque bounded tunnels and independently pinned end-to-end TLS |
-| `yami-node` | Directory-backed multi-page sites, in-memory document server, fetch client, identity CLI and two-node demos |
+| `yami-node` | Validated site templates/check/build/preview, directory-backed documents/PNGs, existing host and identity CLI |
 
-Versioned normative drafts: [YLang](docs/specs/v0.1/ylang.md),
-[YSL](docs/specs/v0.1/ysl.md), [YNP](docs/specs/v0.1/ynp.md),
+Versioned normative drafts: [YLang 0.2](docs/specs/v0.2/ylang.md),
+[YSL 0.2](docs/specs/v0.2/ysl.md), [YNP PNG extension](docs/specs/v0.2/ynp-assets.md),
+[legacy YLang](docs/specs/v0.1/ylang.md), [legacy YSL](docs/specs/v0.1/ysl.md), [YNP v1 documents](docs/specs/v0.1/ynp.md),
 [node identity](docs/specs/v0.1/identity.md),
 [YNP over TLS](docs/specs/v0.1/ynp-tls.md), [DHT lookup](docs/specs/v0.1/dht.md)
 and [rendering and architecture](docs/specs/v0.1/architecture.md).
 See [SECURITY.md](SECURITY.md) for the experimental trust boundary.
 
 ## Validate
+
+[0.2 validation record](docs/validation-0.2.md): 225 automated tests passed;
+eight manual/environment-dependent tests remain ignored. Windows interactive
+runtime and physical cross-network 0.2 validation remain unexecuted.
 
 ```sh
 cargo fmt --all -- --check
@@ -396,8 +432,10 @@ navigation, shaped text and vertical scrolling. Its glass effect is drawn
 inside the window; it does not blur other applications behind it. Linux uses
 X11/XWayland. Windows build instructions are documented separately.
 
-There is no image embedding, full accessibility tree or document editing.
-Sites are plain directories; there is no cache, index or upload mechanism. The debugging terminal/PPM backend still counts
+Static PNG images are supported in the native renderer; a full accessibility
+tree and document editing remain out of scope.
+Sites are validated plain directories with native authoring/export tools; there is
+no persistent document cache or upload service. The debugging terminal/PPM backend still counts
 Unicode scalars as fixed-width cells. Its original 5x7 bitmap font maps lowercase
 to uppercase and unsupported characters to a box; this limitation does not
 describe the desktop font renderer. Oversized layouts and bitmaps fail with

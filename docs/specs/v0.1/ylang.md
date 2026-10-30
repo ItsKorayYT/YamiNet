@@ -1,5 +1,8 @@
 # YLang 0.1 draft
 
+This remains the unchanged 0.1 specification. See the explicit [0.2 extension](../v0.2/ylang.md) for rich documents/styles or PNG asset frames; old documents and wire-v1 document messages remain supported.
+
+
 Status: experimental. Normative for the `ylang` parser in YamiNet 0.1.0.
 YLang is an original inert text language; it has no embedded execution or asset
 loading. Syntax and byte limits are independent of the transport.

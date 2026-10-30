@@ -1,6 +1,6 @@
 # Experimental security status
 
-YamiNet 0.1 is **not secure for sensitive use**. It has no anonymity and no
+YamiNet 0.2 is **not secure for sensitive use**. It has no anonymity and no
 protection against a malicious local user. The default `ynp://` transport is
 plaintext, unauthenticated and loopback-only. Nodes can have persistent signing
 identities (below), and an experimental TLS 1.3 transport (below), used by the
@@ -17,7 +17,7 @@ The concrete restrictions are numeric loopback-only TCP for plaintext YNP,
 numeric loopback/private/public IPv4 endpoints for pinned TLS, strict binary field
 and frame bounds, UTF-8 validation, a bounded document/style parser, rejection
 of control characters in parsed content, no executable content, no automatic
-network requests and no DNS resolution. These reduce accidental exposure but
+link navigation or third-party asset requests and no DNS resolution. These reduce accidental exposure but
 are not a security audit. A modified caller can implement a different transport;
 the loopback policy is enforced by `LoopbackTcp` and `LocalListener`, not by
 the transport trait itself. CLI and desktop address parsing never select another transport.
@@ -33,8 +33,8 @@ robust denial-of-service protection.
 The frame codec bounds allocation before reading payloads but this is not a
 claim of comprehensive resistance to resource exhaustion.
 
-Directory sites (`serve-dir`) read only `<root>/<key>.ylang` and
-`<root>/default.ysl`. Keys are restricted by the YNP decoder before any file
+Directory sites (`serve-dir`) read only `<root>/<key>.ylang`,
+`<root>/default.ysl` and safe `<root>/assets/<key>.png` image keys. Keys are restricted by the YNP decoder before any file
 access; the canonical path of each file must be directly inside the canonical
 site root under its exact name, which rejects traversal, symlink escapes, case
 aliases, subdirectories and non-regular files. Windows device names are never
@@ -274,3 +274,59 @@ TLS pin check, not registration, document retrieval or a DHT-advertisement probe
 See [deployment profiles](docs/configuration.md) and [the unexecuted physical
 network plan](docs/cross-network-validation.md). No live firewall or external
 infrastructure changes were made as part of this development work.
+
+
+## Rich documents, PNGs and local browser data (0.2)
+
+Explicit language headers retain 0.1 semantics; the 0.2 AST stays inert and
+bounded. Native layout limits nodes, shaped lines, total text and flow height;
+YSL has only documented bounded integers/colors/alignments, no arbitrary
+expressions, selectors, positioning, scripts or downloaded fonts. Text shaping,
+bundled font parsing, PNG decoding and native drawing remain attack surfaces;
+this work is developer regression testing, **not an independent security audit**.
+
+PNG requests use wire version 2 while v1 document frames remain unchanged.
+Only the authenticated parent destination and its selected direct/relay policy
+may serve an asset. Each new connection proves that exact node, plus the relay
+pin when relayed. A wrong identity yields a missing-image fallback; it cannot
+replace the verified parent or authorize another host. Plaintext assets are
+refused before requests, even on loopback. Explicit image keys cannot contain
+URLs, paths, extensions or Windows device names. Asset directories/files must
+be regular and non-symlink, canonical paths must match exactly, and bytes are
+bounded before decoding. Hard links and hostile local filesystem races are not
+sandboxed: the site directory must be controlled by its owner.
+
+Per PNG: 256 KiB compressed, at most 2048 in either dimension and 1048576 pixels,
+at most 4 MiB retained premultiplied RGBA. Decoding has an 8 MiB internal limit;
+output dimensions/allocation are checked independently. Text/ICC metadata is
+ignored; APNG and non-PNG formats are rejected. Per page: eight distinct image
+keys, 1 MiB total incoming asset bytes including invalid frames, 16 MiB retained
+decoded pixels. The two existing loader workers fetch sequentially per page;
+there are no unlimited resource threads. Image connection attempts are capped
+at two and share three seconds per key and the original navigation deadline.
+Navigation/tab-close cancels queued work; an in-flight image socket can remain
+until its bounded timeout. No persistent image/document cache is introduced.
+PNG requests reveal which keys the browser uses to the destination; the
+existing relay/IP/timing and DHT privacy limits continue to apply.
+
+Bookmarks, Home and optional history are **local plaintext data**, not trust
+certificates or encrypted storage. History defaults off; disabling stops future
+recording, while Clear history removes retained entries from the current file.
+Deletion does not erase backups, filesystem journals or SSD remnants. Library
+files are bounded to 256 KiB, 256 bookmarks and 512 visits, protected against
+simultaneous writers by an OS lock and updated with a flushed temporary file and
+atomic rename. New Unix directories/files are 0700/0600; Windows inherits ACLs.
+Existing directory ownership/ACLs and local backups remain the user's
+responsibility. Malformed/unsupported files fail closed without automatic
+replacement; browsing continues with a visible storage error. Saved titles,
+folders and addresses never create a verified indicator: only the live TLS
+connection does. No library data is sent to a server.
+
+The native authoring commands validate parser/link/image budgets and export
+only site content. They never export keys/state, overwrite an existing template
+or build destination, publish content to a central service, or enable public
+listeners. Validation is a snapshot; protect the source/output against local
+concurrent mutation. Keep persistent identities and DHT sequence state outside
+site directories. Preview reuses existing identity loading and loopback TLS.
+See [the exact 0.2 limits and tests](docs/websites-0.2.md). Linux local TLS/relay
+simulations do not establish Windows-runtime, real NAT or Internet behavior.

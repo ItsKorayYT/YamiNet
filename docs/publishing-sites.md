@@ -1,10 +1,137 @@
 # Creating and publishing a YamiNet site
 
-**EXPERIMENTAL. Not secure for sensitive use.** "Publishing" here means
-serving a directory from a node on your own machine. Plaintext nodes are
-reachable from this computer only. A TLS node started with `--lan` is
-reachable from other computers on your private network (see below); nothing
-is reachable from the internet.
+**EXPERIMENTAL. Not secure for sensitive use.** Publishing means serving your
+own directory through a node whose persistent identity you control. Preview
+is loopback-only. LAN, public listeners and outbound relay hosting are separate
+explicit choices; there is no YamiNet-operated upload service.
+
+## Create, validate, preview and build a 0.2 site
+
+After building once with `cargo build --release --workspace --locked`, use
+`target/release/yami-node` directly. No Rust knowledge is needed to edit the
+plain text files. On Windows use the `.exe` names in the walkthrough below.
+
+```sh
+target/release/yami-node site new my-site personal
+target/release/yami-node site check my-site
+target/release/yami-node site info my-site
+target/release/yami-node site preview my-site --identity ./my-node-identity
+```
+
+`new DIRECTORY [personal|blog|portfolio]` defaults to `personal` and refuses an
+existing destination. Each template creates `home.ylang`, `about.ylang`,
+`default.ysl` and `assets/cover.png`, with real 0.2 syntax, rich text, lists,
+cards and responsive rows. No identity is created in the generated site.
+
+`check` validates every page and shared style with the production parsers,
+checks local page links, full external identity IDs, PNG references, decoder
+limits and per-page resource budgets. It performs no network requests. `info`
+validates too and displays page keys, PNG keys and total bytes. Both accept
+0.1 sites subject to the browser's existing link policies. Symlink assets,
+special filesystem names, unsafe keys and inventories over 256 pages/assets
+are refused. Unknown unrelated files are omitted from export.
+
+`preview` validates before binding a random loopback TCP port with TLS 1.3. Copy
+its complete `ynps://FULL-ID@127.0.0.1:PORT/home` line into Yami Browser, or run:
+
+```sh
+target/release/yami-browser --desktop 'ynps://FULL-ID@127.0.0.1:PORT/home'
+```
+
+Use the actual output, including the full ID and chosen port. Preview never
+opens a browser automatically, enables discovery/DHT, listens publicly or
+reconfigures a router. Omit `--identity` to use the existing default identity
+location documented in [configuration](configuration.md); an explicit directory
+is easier to back up. Existing keys are loaded, never overwritten. Protect this
+directory and keep it **outside the site**. Ctrl+C stops the preview and drains
+the bounded workers. Edit the site, run `check`, and reload; the existing node
+reads files on each request. The checker is a snapshot, not a filesystem watcher.
+
+```sh
+target/release/yami-node site build my-site published-site
+```
+
+`build` requires a new output directory outside the source. It exports only
+validated `.ylang` files, `default.ysl` and PNG assets, then validates the export.
+It omits private keys, DHT state, manifests and unrelated files. It never changes
+the source identity. The site directory must be locally trusted: do not allow
+untrusted local users to mutate it during validation/export/serving.
+
+## Publish through your existing node
+
+Validate/build first, then use the existing commands. For loopback TLS:
+
+```sh
+target/release/yami-node serve-dir 127.0.0.1:7443 published-site --tls --identity ./my-node-identity
+```
+
+For a home host behind NAT, load the same identity and explicitly trust your
+independently operated relay and DHT bootstrap peers:
+
+```sh
+target/release/yami-node host-relay published-site --identity ./my-node-identity --relay RELAY-ID@PUBLIC-IPv4:7444 --dht-dir ./my-node-state
+```
+
+Configure bootstrap peers and the browser's relay opt-in as described in the
+[public relay guide](public-relay.md) and [configuration guide](configuration.md).
+The stable address is `yami://YOUR-FULL-NODE-ID/home`. `/about` links keep that
+identity automatically. Assets use that same destination pin, including through
+the reverse relay; there is no HTTP asset server or additional exposed port.
+Public direct serving still requires `--tls --public` and a deliberately
+selected address. No command changes firewall rules or router configuration.
+
+Preserve the identity and DHT state directories during upgrades and updates;
+never replace them with template/build output. Back them up privately and stop
+all processes using them before copying. Replacing the node key changes every
+identity address/bookmark. Restoring old sequence state can cause DHT rollback
+rejections: follow [safe restart/upgrade guidance](configuration.md). Replace
+published content from a validated export while the node is stopped, then
+restart with the same identity/state and options. Private keys never belong in
+a public site directory. Site signature manifests retain their original scope
+(page/style metadata); TLS authenticates each asset connection, not a new
+per-asset signing scheme.
+
+## Windows walkthrough (PowerShell)
+
+Install/build as described in [desktop-browser.md](desktop-browser.md). From
+an extracted checkout, build once, then run the native executable commands:
+
+```powershell
+cargo build --release --workspace --locked
+$node = ".\target\release\yami-node.exe"
+$browser = ".\target\release\yami-browser.exe"
+& $node site new "$HOME\YamiSite" portfolio
+& $node site check "$HOME\YamiSite"
+& $node site preview "$HOME\YamiSite" --identity "$HOME\YamiIdentity"
+# In a second PowerShell window, paste the actual preview URL:
+& $browser --desktop 'ynps://FULL-ID@127.0.0.1:PORT/home'
+```
+
+Edit `.ylang` / `.ysl` files using a UTF-8 text editor; keep the exact two-space
+indentation. Copy PNGs to `assets` with safe names such as `portrait.png`, then
+reference `! portrait | A portrait of the author`. Re-run `site check`. The
+preview is local and needs no inbound firewall exception. Keep the identity
+folder private using Windows account ACLs; Unix permission checks do not apply.
+Stop preview with Ctrl+C, export to a new directory, then use the same relay
+or deliberately selected LAN/public TLS hosting options on the exported site.
+Windows runtime and real home-router validation remain unverified; see the
+[executable cross-network plan](cross-network-validation.md).
+
+## Troubleshooting
+
+- Parser errors name the file and line/column: check the version header,
+  two-space indentation and the [0.2 examples/property limits](websites-0.2.md).
+- A missing local link/image fails `site check`. Image keys omit `.png`, paths
+  and URLs; PNGs must satisfy compressed, dimension, pixel and page budgets.
+- Images need an authenticated parent. A legacy `ynp://` preview shows alternative
+  text; restart with `site preview` or `--tls` and open the printed pinned URL.
+- Old nodes/browsers can refuse 0.2 documents/assets. Upgrade both; no plaintext
+  downgrade is attempted. APNG, JPEG, GIF, SVG and remote image URLs are unsupported.
+- For failed `yami://` lookup or relays, inspect the node/relay status and bootstrap
+  settings using [network diagnostics](cross-network-validation.md). A familiar
+  title or saved bookmark is never proof of identity.
+
+## Legacy 0.1 directory workflow
 
 A YamiNet site is a directory of YLang pages plus one shared YSL stylesheet.
 `yami-node serve-dir` serves every page in that directory over YNP.
@@ -33,7 +160,7 @@ Without `default.ysl` the browser uses its built-in default style.
 
 ## 2. Write pages
 
-Pages use the unchanged [YLang 0.1](specs/v0.1/ylang.md) syntax:
+Legacy pages use the unchanged [YLang 0.1](specs/v0.1/ylang.md) syntax:
 
 ```text
 @page 0.1

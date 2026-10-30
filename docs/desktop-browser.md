@@ -23,6 +23,57 @@ opens sites automatically or saves trust. There is no anonymity, HTTP support
 or DNS resolution. See [the security notes](../SECURITY.md) and
 [Windows discovery/firewall testing](discovery-testing.md).
 
+## Rich sites, bookmarks and local history
+
+Open a YLang 0.2 site using its canonical `yami://FULL-NODE-ID/home` or its
+explicit pinned `ynps://` URL. The original native renderer now lays out rich
+inline text, lists, cards, responsive rows and PNGs. Images appear in document
+flow, wrap/scale within the viewport, preserve aspect ratio and scroll with the
+page. Their same-node requests/decoding run on the existing loader workers;
+the document becomes readable before slow images complete. Missing, invalid,
+unsupported or oversized images show alternative text. Plaintext `ynp://` pages
+never load assets. See [website limits](websites-0.2.md) and [site creation](publishing-sites.md).
+
+Use **Bookmarks & history** in the existing sidebar. **Save current page** (or
+Ctrl+D) edits a custom title in the address field; press Enter to save. Bookmark
+rows open explicitly; **Title**, **Folder** and **Remove** organize entries.
+Previous/Next pages through bookmarks. Folders are plain local labels sorted
+with title/address. A `yami://` page retains its complete canonical identity;
+an explicitly entered `ynps://` page retains its full identity and endpoint.
+Saved titles never confer verification; every reopened page must prove its key.
+**Use current address as Home** sets the existing Home shortcut (also Alt+Home).
+Use a new tab and that button to restore the blank default Home.
+
+History is **off by default**. Toggle it in the same panel to retain up to 512
+successful network-page visits locally; the panel offers the last three visits.
+Disabling stops recording, and **Clear history** removes all retained entries.
+Back/Forward's existing per-tab in-memory navigation remains available whether
+persistent history is enabled or not. History and bookmarks are never uploaded.
+The full library is capped at 256 bookmarks and 256 KiB. It stores plaintext
+addresses, titles, folder labels, visit times and preferences; anyone with access
+to your account/backups can read them. Clearing is not secure disk erasure.
+
+Default library location is `<peer-directory>/browser-library/library.tsv`;
+`YAMINET_PEER_DIR` selects the usual peer root. For separate browser profiles,
+set `YAMINET_BROWSER_DATA_DIR` to an **absolute** directory before launch. On
+Windows, the default identity/peer roots follow the existing LOCALAPPDATA-based
+locations; on Linux they follow XDG_DATA_HOME/HOME (see [identity storage](specs/v0.1/identity.md)).
+Only one browser may write a given library at a time. Writes use a flushed
+private temporary file and atomic rename; new Unix directories/files use
+0700/0600, Windows inherits ACLs. A malformed/locked library is reported and
+left intact while browsing remains available. Correct the file/path or restore
+a trusted backup with the browser closed. Configuration-file DHT state paths
+remain independent from this local library; use the environment override to
+choose its directory explicitly.
+
+Address editing supports Unicode-safe selection, Shift+arrows/Home/End,
+Ctrl+A/C/X/V and horizontal caret scrolling. Internal `/about` links preserve
+the current identity/transport. Explicit `yami://` links trigger a fresh bounded
+lookup and exact identity authentication. Hover and pressed link colors use the
+same shaped glyph rectangles as hit testing. Security indicators still come
+only from the successful document connection, displaying direct or relayed TLS
+with destination and relay identities separately.
+
 ## Launch on Windows
 
 Use Windows 10 or Windows 11 with a native desktop session. These are build
@@ -146,7 +197,10 @@ the framebuffer and text rendering for high-DPI displays.
 
 | Shortcut | Action |
 | --- | --- |
-| Ctrl+L | Focus the address bar |
+| Ctrl+L | Focus/select the address bar |
+| Ctrl+D | Save current page with a custom bookmark title |
+| Alt+Home | Open saved Home or the blank start page |
+| Shift+arrows / Home / End | Extend selection in an editing field |
 | Enter | Open the entered address |
 | Ctrl+T | Open a new tab |
 | Ctrl+W | Close the active tab |
@@ -160,8 +214,9 @@ Loading and failure states are visible in the active tab. Network access and
 source parsing run on two background workers with bounded pending work.
 Completions carry the stable tab ID and navigation generation; a completion
 from an older navigation or a closed tab cannot overwrite the current page.
-Discarding a stale result does not guarantee that the underlying socket request
-was cancelled. Existing YNP per-operation timeouts still apply.
+Cancellation removes queued work and stops subsequent image requests; an
+in-flight socket may finish or reach its strict deadline before releasing its
+worker. Generation checks discard all obsolete results.
 
 ## Linux and headless tools
 

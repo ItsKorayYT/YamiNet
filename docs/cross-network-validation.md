@@ -210,3 +210,30 @@ Complete [the report](validation-report-template.md) with observed success,
 failure, timings and limits; include public IDs and revision, no secrets.
 Mark unexecuted cases NOT RUN. Do not call automated loopback tests physical
 cross-network validation or claim production security from this procedure.
+
+
+## Additional 0.2 website checks
+
+Before the host starts, run `yami-node site check SITE` on a generated
+`portfolio` site (or `sites/showcase`) using the 0.2 executable. Keep the same
+host identity and DHT sequence state. Use the existing pinned relay/DHT commands
+above with this directory; assets need no extra listener or firewall port.
+From the independent client connection, open the full `yami://HOST-ID/home`:
+
+1. Confirm the destination/relay IDs match the recorded pins and the indicator
+   reads verified TLS, with “Relayed” only when the connection actually is relayed.
+2. Confirm the PNG, rich text, lists and styled cards render. Resize and scroll;
+   activate `/about`, then Back/Reload, keeping the original `yami://` identity.
+3. Save a custom bookmark/folder, close the browser, reopen it and open the
+   bookmark. Require fresh TLS verification; a saved name is not evidence.
+4. Temporarily rename the PNG on the host and reload. Expect alternative text
+   while the rest of the page remains usable. Restore it and reload again.
+5. Enable local history if desired, visit both pages, disable it and clear it.
+   Confirm no history remains in the local panel; do not upload library files
+   with reports. Record any Windows ACL or atomic-write problems separately.
+
+Record software versions, sanitized status output, test times and results in the
+validation report. Current automated document/PNG/relay tests use local sockets;
+these physical cross-network/Windows checks remain **unexecuted** here. Stop
+processes with Ctrl+C and follow the existing firewall cleanup instructions;
+never delete identity/state directories as part of shutdown.

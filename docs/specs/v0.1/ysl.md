@@ -1,5 +1,8 @@
 # YSL 0.1 draft
 
+This remains the unchanged 0.1 specification. See the explicit [0.2 extension](../v0.2/ysl.md) for rich documents/styles or PNG asset frames; old documents and wire-v1 document messages remain supported.
+
+
 Status: experimental. YSL is an original line-oriented presentation language,
 separate from YLang. It has no cascading selectors, imports, expressions,
 executable code or external resources.
