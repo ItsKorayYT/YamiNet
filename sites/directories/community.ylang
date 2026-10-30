@@ -1,0 +1,24 @@
+@page 0.2
+  title YamiNet Community Directory
+  language en
+
+:: directory 1
+  :: card Alice's Notebook
+    > yami://yn1-tiqub4vxm4zslzlrhlfhc5k6b7vvkealot25nodtcixooe6xfzmxfsm6re/home | Open Alice's Notebook
+    Field notes on local-first software, identity and small YamiNet networks.
+    :: category Personal
+
+  :: card Studio Portfolio
+    > yami://yn1-w5uofwvedyaibfcncwb62phd7zqngz2pumqmen6goe6jvsqrfdehcnhh6u/home | Open Studio Portfolio
+    Independent design and code projects, rendered as native YLang documents.
+    :: category Design
+
+  :: card The Quiet Corner
+    > yami://yn1-dv4d5rcuzifvcbdskq5azddfzq6ebx3qhouj52qfx5rhcl4p2qlai7tjxu/home | Open The Quiet Corner
+    A slow journal about books, tea and unplugged weekends.
+    :: category Journal
+
+  :: card Café & Code
+    > yami://yn1-dtnmjyzoppvnoj36ian36hwgrlwhauto4xjxrvm5hfscarrh6fczwbtfz4/home | Open Café & Code
+    Small essays on Rust, Unicode and building a calmer web. 日本語のメモも少し。
+    :: category Technology

@@ -1,0 +1,21 @@
+[package]
+name = "yami-discover"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
+
+[[bin]]
+name = "yami-discover"
+path = "src/main.rs"
+
+[dependencies]
+yami-dht = { path = "../yami-dht" }
+yami-identity = { path = "../yami-identity" }
+yami-relay = { path = "../yami-relay" }
+ylang = { path = "../ylang" }
+ynp = { path = "../ynp" }
+ynp-tls = { path = "../ynp-tls" }

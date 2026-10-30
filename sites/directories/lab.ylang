@@ -1,0 +1,23 @@
+@page 0.2
+  title YamiNet Lab Index
+  language en
+
+:: directory 1
+  :: card Protocol Notes
+    > yami://yn1-tudfqqquad3s5ei7c4y6gnb2gde3irucygzgisxeccvpna2bxocvnoeuie/home | Open Protocol Notes
+    Unofficial notes on YamiNet's YNP, TLS and DHT experiments.
+    :: category Technology
+
+  :: card Local-First Kitchen
+    > yami://yn1-hdpxkijnvifufkt7zyiyrcmpsfovaepmp5krffey5hjovaofwjrv3g224q/home | Open Local-First Kitchen
+    Recipes stored as plain YLang documents, served from a kitchen laptop.
+    :: category Food
+
+  :: card The Reading Room
+    > yami://yn1-7pvo542ancz3rqqp5mo23cg3wdk36blk36wlosf3qnc3pej6guc7sf46xy/home | Open The Reading Room
+    A hand-curated shelf of public-domain texts, readable offline.
+
+  :: card The Quiet Corner
+    > yami://yn1-dv4d5rcuzifvcbdskq5azddfzq6ebx3qhouj52qfx5rhcl4p2qlai7tjxu/home | Open The Quiet Corner
+    Books, tea and quiet weekends, indexed by another operator.
+    :: category Reading

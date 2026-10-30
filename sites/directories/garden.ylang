@@ -1,0 +1,22 @@
+@page 0.2
+  title Indie Web Garden
+  language en
+
+:: directory 1
+  :: card Alice's Field Notes
+    > yami://yn1-tiqub4vxm4zslzlrhlfhc5k6b7vvkealot25nodtcixooe6xfzmxfsm6re/home | Open Alice's Field Notes
+    An independently maintained listing for Alice's writing and notes.
+
+  :: card Nightly Builds
+    > yami://yn1-pbf3ogxyp3fivgd64pu26tgszeonaukfktx4vhwpevgujwasc4pqcwj7mq/home | Open Nightly Builds
+    Release notes and experiments from a small YamiNet node.
+    :: category Technology
+
+  :: card 日本語の手帖
+    > yami://yn1-bu3vi6tk5mcjbcerkppo3kc4pdj3yr4jbcrfwl3gyxl546nibbttlir6ui/home | 日本語の手帖を開く
+    YamiNet で公開している日本語のページ。短い日記と写真のメモ。
+    :: category 日記
+
+  :: card Moss & Stone
+    > yami://yn1-z4u6ewvg5tsdfadv7izm4jmu3qponm6c6csm5gsjgikuzkfc262apuuov4/home | Open Moss & Stone
+    A garden journal with native illustrations, updated through the seasons.
