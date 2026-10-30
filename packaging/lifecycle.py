@@ -147,6 +147,12 @@ if __name__ == '__main__':
     try:
         report = lifecycle(args)
     except Exception as error:
+        if isinstance(error, subprocess.CalledProcessError):
+            # Only synthetic lifecycle fixtures run here; never dump process environments.
+            stdout = error.stdout or ''
+            stderr = error.stderr or ''
+            args.report.with_name(args.report.stem + '-failure.log').write_text(
+                'Synthetic package smoke subprocess failed\nstdout:\n' + str(stdout)[-32768:] + '\nstderr:\n' + str(stderr)[-32768:], encoding='utf-8')
         report = {'schema': 'yaminet-package-lifecycle-1', 'result': 'FAIL', 'error_class': type(error).__name__, 'gui': 'NOT VERIFIED'}
         args.report.write_text(json.dumps(report, indent=2), encoding='utf-8')
         raise

@@ -180,6 +180,25 @@ fn client(base: &Path) {
             relay
         })
     );
+    let config = yami_config::Config::parse(&format!("yaminet-config 1\nrole browser\nnetwork loopback\nstate {}\nrelay-fallback yes\nbootstrap {}@{}\n", base.join(format!("trial-C-{}",std::process::id())).display(),id(base,"B").id(),endpoint(base,"B"))).unwrap();
+    let (report, success) = yami_browser::network_trial::run(
+        &config,
+        &format!("yami://{host}/home"),
+        "cover",
+        None,
+        false,
+        false,
+    );
+    assert!(success, "{report}");
+    assert!(report
+        .to_string()
+        .contains("authenticated-relay-registration"));
+    assert!(report["steps"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|step| step["name"] == "document-and-png" && step["observation"]["route"] == "relay"));
+    fs::write(base.join("network-trial.json"), report.to_string()).unwrap();
     fs::write(
         base.join("C.done"),
         "rendered and navigated with verified destination and relay",
@@ -335,6 +354,12 @@ fn four_process_outbound_host_dht_browser_render_navigation_and_reconnect() {
     fs::write(
         base.join("site/about.ylang"),
         "@page 0.1\n  title NAT second page\n= Reached by stable identity\n",
+    )
+    .unwrap();
+    fs::create_dir_all(base.join("site/assets")).unwrap();
+    fs::write(
+        base.join("site/assets/cover.png"),
+        yami_render::assets::encode_png(1, 1, &[20, 180, 70, 255]).unwrap(),
     )
     .unwrap();
     let mut relay = Process::spawn(base, "R");

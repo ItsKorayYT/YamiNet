@@ -31,7 +31,7 @@ pub fn inspect(url: &str, asset: Option<&str>, resolver: &Resolver) -> Result<Ob
         }
         _ => return Err("Probe requires yami:// or ynps:// with an exact node identity; plaintext and built-in pages are not cross-network checks".into()),
     };
-    let document = ylang::parse(&data.source)
+    let document = crate::native::parse_document(&data.source)
         .map_err(|e| format!("Authenticated document syntax failed: {e}"))?;
     let style = if data.style.is_empty() {
         ysl::Stylesheet::default()

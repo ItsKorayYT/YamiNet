@@ -341,6 +341,60 @@ mod tests {
         std::fs::remove_dir_all(dir).unwrap();
     }
 
+    #[test]
+    fn fresh_lookup_rejects_older_wire_record_instead_of_reporting_newer_cache() {
+        let dir = std::env::temp_dir().join(format!("yami-fresh-rollback-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let service =
+            Service::open_lookup(dir.join("state.cache"), crate::Network::Loopback).unwrap();
+        let owner = NodeIdentity::generate().unwrap();
+        let now = service.now().unwrap();
+        let old = PeerRecord::sign(
+            &owner,
+            vec!["127.0.0.1:9".parse().unwrap()],
+            now + 120,
+            1,
+            crate::Network::Loopback,
+            now,
+        )
+        .unwrap();
+        let newer = PeerRecord::sign(
+            &owner,
+            vec!["127.0.0.1:9".parse().unwrap()],
+            now + 120,
+            2,
+            crate::Network::Loopback,
+            now,
+        )
+        .unwrap();
+        service.accept(newer, now).unwrap();
+        let key = Arc::new(NodeIdentity::generate().unwrap());
+        let listener = TlsListener::bind("127.0.0.1:0".parse().unwrap(), key.clone()).unwrap();
+        let std::net::SocketAddr::V4(endpoint) = listener.local_addr().unwrap() else {
+            unreachable!()
+        };
+        let peer = Contact::new(*key.id(), endpoint, crate::Network::Loopback).unwrap();
+        let server = thread::spawn(move || {
+            let mut connection = listener.accept().unwrap();
+            let (nonce, _) = wire::read(&mut *connection).unwrap();
+            wire::write(&mut *connection, nonce, &Message::Peers(vec![old])).unwrap();
+        });
+        let result = lookup_fresh(&service, *owner.id(), &[peer]).unwrap();
+        assert!(result.record.is_none());
+        assert_eq!(
+            service
+                .snapshot()
+                .unwrap()
+                .get(*owner.id(), now)
+                .unwrap()
+                .sequence(),
+            2
+        );
+        server.join().unwrap();
+        drop(service);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
     fn malicious(mode: u8) -> (Contact, thread::JoinHandle<()>) {
         let identity = Arc::new(NodeIdentity::generate().unwrap());
         let id = *identity.id();

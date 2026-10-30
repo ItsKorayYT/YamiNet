@@ -41,24 +41,31 @@ pub fn run(
         if config.bootstrap.is_empty() || config.bootstrap.len() > 8 {
             return Err("trial requires one to eight explicitly pinned bootstrap peers".into());
         }
+        phase = "bootstrap-dht";
+        let resolver = Resolver::from_config(config)?;
+        let service = yami_dht::Service::open_lookup(resolver.state_path(), config.network)
+            .map_err(|_| "DHT state unavailable or locked")?;
         let deadline = Instant::now() + Duration::from_secs(15);
         for contact in &config.bootstrap {
             let budget =
                 Duration::from_secs(3).min(deadline.saturating_duration_since(Instant::now()));
             let passed = !budget.is_zero()
-                && ynp_tls::TlsTransport::new(contact.id)
-                    .and_then(|t| t.connect_with_timeout(contact.endpoint.into(), budget))
-                    .is_ok();
-            let mut record = json!({"name":"bootstrap-pin", "status":if passed {"PASS"} else {"FAIL"}, "id":contact.id.to_string(), "evidence":"bounded exact-identity TLS handshake; no plaintext fallback"});
+                && yami_dht::exchange(
+                    &service,
+                    *contact,
+                    None,
+                    address.id,
+                    budget,
+                    &yami_dht::PinnedTls,
+                )
+                .is_ok();
+            let mut record = json!({"name":"bootstrap-pin", "status":if passed {"PASS"} else {"FAIL"}, "id":contact.id.to_string(), "evidence":"bounded exact-identity TLS plus existing DHT FIND response; no plaintext fallback"});
             if include_endpoints {
                 record["endpoint"] = json!(contact.endpoint.to_string());
             }
             steps.push(record);
         }
         phase = "signed-publication-resolution";
-        let resolver = Resolver::from_config(config)?;
-        let service = yami_dht::Service::open_lookup(resolver.state_path(), config.network)
-            .map_err(|_| "DHT state unavailable or locked")?;
         let lookup = yami_dht::lookup_fresh(&service, address.id, &config.bootstrap)
             .map_err(|_| "fresh authenticated DHT lookup failed")?;
         let record = lookup.record.ok_or("no currently returned valid signed publication (cached records do not pass this check)")?;

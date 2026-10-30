@@ -39,3 +39,22 @@ fn explicit_probe_checks_document_png_and_rejects_wrong_tls_identity() {
     server.join().unwrap();
     fs::remove_dir_all(dir).unwrap();
 }
+
+#[test]
+fn malformed_trial_configuration_returns_redacted_structured_failure() {
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_yami-browser"))
+        .args([
+            "--network-trial",
+            "yami://not-a-valid-id/home",
+            "--config",
+            "missing-private-path.conf",
+            "--asset",
+            "cover",
+        ])
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(report["result"], "FAIL");
+    assert!(!String::from_utf8_lossy(&output.stdout).contains("missing-private-path"));
+}
