@@ -10,6 +10,8 @@ PACK = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(PACK)
 
 
+from verify import verify
+
 class BundleTests(unittest.TestCase):
     def test_layout_manifest_and_upgrade_leave_identity_untouched(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -68,6 +70,31 @@ class BundleTests(unittest.TestCase):
             subprocess.run(['sh', str(root / 'uninstall-desktop.sh')], env=env, check=True, capture_output=True)
             self.assertFalse(launcher.exists())
             self.assertEqual(private.read_bytes(), b'identity fixture')
+
+    def test_completeness_rejects_deleted_required_file_even_with_new_manifest(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp); binaries = root / 'bin'; binaries.mkdir()
+            for name in PACK.BINS: (binaries / name).write_bytes(b'fixture executable')
+            stage = PACK.package('linux', binaries, root / 'output')
+            verify(stage, execute=False)
+            missing = 'fonts/OpenSans-Regular.ttf'
+            (stage / missing).unlink()
+            manifest = stage / 'MANIFEST.sha256'
+            manifest.write_text(''.join(line+'\n' for line in manifest.read_text().splitlines() if not line.endswith('  '+missing)))
+            with self.assertRaisesRegex(ValueError, 'missing required resources'):
+                verify(stage, execute=False)
+
+    def test_extra_and_unsafe_manifest_entries_are_rejected(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp); binaries = root / 'bin'; binaries.mkdir()
+            for name in PACK.BINS: (binaries / name).write_bytes(b'fixture executable')
+            stage = PACK.package('linux', binaries, root / 'output')
+            (stage / 'unexpected.txt').write_text('not manifested')
+            with self.assertRaisesRegex(ValueError, 'exactly cover'):
+                verify(stage, execute=False)
+            (stage / 'MANIFEST.sha256').write_text('0'*64+'  ../outside\n')
+            with self.assertRaisesRegex(ValueError, 'unsafe'):
+                verify(stage, execute=False)
 
     def test_missing_binary_fails(self):
         with tempfile.TemporaryDirectory() as tmp:
