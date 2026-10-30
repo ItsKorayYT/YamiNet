@@ -89,6 +89,20 @@ impl NodeIdentity {
     pub fn load(dir: impl AsRef<Path>) -> Result<Self> {
         let dir = dir.as_ref();
         let key_path = dir.join(KEY_FILE);
+        // Refuse symlinks/special files before opening (not a substitute for
+        // private directory ownership against a hostile local filesystem).
+        match fs::symlink_metadata(&key_path) {
+            Ok(metadata) if !metadata.file_type().is_file() => {
+                return Err(Error::CorruptKey(
+                    "key path is not a regular non-symlink file",
+                ))
+            }
+            Ok(_) => {}
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                return Err(Error::MissingKey(key_path))
+            }
+            Err(error) => return Err(error.into()),
+        }
         let file = match File::open(&key_path) {
             Ok(file) => file,
             Err(error) if error.kind() == io::ErrorKind::NotFound => {
@@ -160,15 +174,28 @@ fn parse_key(bytes: &[u8]) -> Result<NodeIdentity> {
 }
 
 fn read_id(path: &Path) -> Result<Option<NodeId>> {
+    match fs::symlink_metadata(path) {
+        Ok(metadata) if !metadata.file_type().is_file() => {
+            return Err(Error::InvalidNodeId(
+                "node.id must be a regular non-symlink file",
+            ))
+        }
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(error.into()),
+        _ => {}
+    }
     let file = match File::open(path) {
         Ok(file) => file,
         Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
         Err(error) => return Err(error.into()),
     };
     let mut text = String::new();
-    file.take(MAX_ID_FILE as u64)
+    file.take(MAX_ID_FILE as u64 + 1)
         .read_to_string(&mut text)
         .map_err(|_| Error::InvalidNodeId("node.id is not UTF-8 text"))?;
+    if text.len() > MAX_ID_FILE {
+        return Err(Error::InvalidNodeId("node.id exceeds size limit"));
+    }
     Ok(Some(text.trim_end_matches(['\r', '\n']).parse()?))
 }
 
@@ -219,7 +246,12 @@ fn write_new(path: &Path, bytes: &[u8]) -> Result<()> {
 
 #[cfg(unix)]
 fn check_private(path: &Path, metadata: &fs::Metadata) -> Result<()> {
-    use std::os::unix::fs::PermissionsExt;
+    use std::os::unix::fs::{MetadataExt, PermissionsExt};
+    if metadata.nlink() != 1 {
+        return Err(Error::CorruptKey(
+            "key file must have exactly one hard link",
+        ));
+    }
     if metadata.permissions().mode() & 0o077 != 0 {
         return Err(Error::InsecurePermissions(path.into()));
     }

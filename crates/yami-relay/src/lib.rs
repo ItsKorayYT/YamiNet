@@ -240,7 +240,14 @@ impl Registration {
                 }
                 Ok(_) => {
                     self.outer.read_timeout(ynp::TIMEOUT)?;
-                    let frame = wire::expect(wire::read_prefixed(&mut *self.outer, first[0])?)?;
+                    let until = Instant::now() + Duration::from_secs(CHALLENGE_TTL);
+                    let frame = wire::expect(wire::read_prefixed(
+                        &mut Control {
+                            stream: &mut *self.outer,
+                            until,
+                        },
+                        first[0],
+                    )?)?;
                     if frame != wire::Frame::Go(self.host.public_key()) {
                         return Err(invalid("unexpected relay tunnel destination"));
                     }

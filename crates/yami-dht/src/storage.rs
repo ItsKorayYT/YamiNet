@@ -4,15 +4,36 @@ use crate::{
     Clock, Contact, Network, PeerRecord, State, SystemClock, MAX_CACHE, MAX_RECORD_TTL,
 };
 use std::{
+    collections::VecDeque,
     fs::{self, File, OpenOptions},
     io::{self, Read, Write},
     net::SocketAddrV4,
     path::{Path, PathBuf},
     sync::{Arc, Mutex, MutexGuard},
+    time::{Duration, Instant},
 };
 use yami_identity::{NodeId, NodeIdentity};
 use ynp::{Connection, Protection};
 const MAX_SNAPSHOT: usize = 64 * 1024;
+const STORE_STARTS_PER_SECOND: usize = 16;
+#[derive(Default)]
+struct StoreBudget(VecDeque<Instant>);
+impl StoreBudget {
+    fn admit(&mut self, at: Instant) -> bool {
+        while self
+            .0
+            .front()
+            .is_some_and(|t| at.duration_since(*t) >= Duration::from_secs(1))
+        {
+            self.0.pop_front();
+        }
+        if self.0.len() >= STORE_STARTS_PER_SECOND {
+            return false;
+        }
+        self.0.push_back(at);
+        true
+    }
+}
 struct Disk {
     state: State,
     path: PathBuf,
@@ -21,6 +42,7 @@ struct Disk {
 }
 #[derive(Clone)]
 pub struct Service {
+    stores: Arc<Mutex<StoreBudget>>,
     disk: Arc<Mutex<Disk>>,
     clock: Arc<dyn Clock>,
 }
@@ -78,6 +100,7 @@ impl Service {
             Err(e) => return Err(e),
         };
         Ok(Self {
+            stores: Arc::new(Mutex::new(StoreBudget::default())),
             clock,
             disk: Arc::new(Mutex::new(Disk {
                 state,
@@ -208,6 +231,17 @@ impl Service {
         let response = match request {
             Message::Find(target) => Message::Peers(self.snapshot()?.closest(target, now)),
             Message::Store(record) => {
+                if !self
+                    .stores
+                    .lock()
+                    .map_err(|_| invalid("DHT store budget poisoned"))?
+                    .admit(Instant::now())
+                {
+                    return Err(io::Error::new(
+                        io::ErrorKind::WouldBlock,
+                        "DHT STORE rate limit; retry with backoff",
+                    ));
+                }
                 self.accept(record, now)?;
                 Message::Stored
             }
@@ -320,4 +354,23 @@ fn read_snapshot(path: &Path, network: Network) -> io::Result<State> {
         return Err(invalid("trailing DHT cache data"));
     }
     Ok(state)
+}
+
+#[cfg(test)]
+mod admission_tests {
+    use super::*;
+    #[test]
+    fn store_budget_bounds_validation_persistence_work_and_recovers() {
+        let at = Instant::now();
+        let mut budget = StoreBudget::default();
+        for _ in 0..STORE_STARTS_PER_SECOND {
+            assert!(budget.admit(at));
+        }
+        for _ in 0..1000 {
+            assert!(!budget.admit(at));
+        }
+        assert_eq!(budget.0.len(), STORE_STARTS_PER_SECOND);
+        assert!(budget.admit(at + Duration::from_secs(1)));
+        assert_eq!(budget.0.len(), 1);
+    }
 }

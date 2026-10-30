@@ -235,3 +235,30 @@ including a public-mode listener locally; no real public VPS/home-router or
 Windows runtime test has been completed. Read [protocol limits](docs/specs/v0.1/relay.md),
 [test coverage](docs/relay-integration-testing.md) and the
 [actionable deployment procedure](docs/public-relay.md).
+
+## Reliability and defensive review milestone
+
+This developer review is **not an independent security audit**. New regression
+coverage addresses three concrete issues: oversized `node.id` files could hide
+trailing bytes after a bounded read; identity loading could follow linked key
+paths; and a trusted but malicious relay could drip-feed a GO frame using the
+long outer-session budget. Identity loading now rejects oversized IDs, symlink
+and special-file paths, and Unix multiply hard-linked key files. GO control
+frames have a separate five-second total deadline, including partial reads.
+Directory ownership/ACLs remain required: path prechecks are not a race-proof
+sandbox against a hostile local filesystem.
+
+A shared per-Service DHT STORE budget caps signature/persistence work at sixteen
+admitted STORE requests per second, alongside existing fixed frame, TLS admission
+and record bounds. Rejected/slow requests do not allocate an unbounded queue.
+Reserved owner slots protect local/configured bootstrap history from new-owner
+floods. Exact rollback history remains finite and is never evicted on expiry;
+Sybil owners can still exhaust untrusted admissions. Neither these limits nor
+bootstrap diversity prevents eclipse, distributed exhaustion, withholding or
+traffic correlation. See [maintenance policy](docs/dht-maintenance.md).
+
+The [NAT assessment](docs/nat-traversal.md) adds only socket-free, mutually signed
+consent/replay prerequisites. It does not enable UDP, QUIC, endpoint discovery,
+punching or any new document transport. Raw UDP cannot carry the existing TCP
+TLS stream safely; a reviewed transport adapter and physical-NAT validation are
+still required. Existing exact identity pinning and relay operation are unchanged.

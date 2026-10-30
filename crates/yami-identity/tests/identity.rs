@@ -366,3 +366,37 @@ fn key_files_are_owner_only_and_lax_permissions_are_refused() {
         Err(Error::InsecurePermissions(_))
     ));
 }
+
+#[test]
+fn oversized_public_id_cannot_hide_trailing_content() {
+    let dir = std::env::temp_dir().join(format!("yami-id-oversize-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let identity = NodeIdentity::create(&dir).unwrap();
+    std::fs::write(
+        dir.join("node.id"),
+        format!("{}{}secret", identity.id(), "\n".repeat(200)),
+    )
+    .unwrap();
+    assert!(NodeIdentity::load(&dir).is_err());
+    let _ = std::fs::remove_dir_all(dir);
+}
+#[cfg(unix)]
+#[test]
+fn identity_rejects_linked_key_paths_and_never_formats_key_bytes() {
+    let dir = std::env::temp_dir().join(format!("yami-id-linked-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    NodeIdentity::create(&dir).unwrap();
+    std::fs::rename(dir.join("node.key"), dir.join("private.key")).unwrap();
+    std::os::unix::fs::symlink(dir.join("private.key"), dir.join("node.key")).unwrap();
+    assert!(NodeIdentity::load(&dir)
+        .unwrap_err()
+        .to_string()
+        .contains("non-symlink"));
+    std::fs::remove_file(dir.join("node.key")).unwrap();
+    std::fs::hard_link(dir.join("private.key"), dir.join("node.key")).unwrap();
+    assert!(NodeIdentity::load(&dir)
+        .unwrap_err()
+        .to_string()
+        .contains("hard link"));
+    let _ = std::fs::remove_dir_all(dir);
+}
