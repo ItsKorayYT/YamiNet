@@ -527,5 +527,20 @@ fn maximal_relay_records_fit_existing_frame_and_snapshot_budgets() {
         records[0]
     );
     wire::encode([0; 16], &wire::Message::Peers(records)).unwrap();
-    assert!(39 + MAX_CACHE * (2 + MAX_RECORD_BYTES) < 64 * 1024);
+    assert!(
+        39 + MAX_CACHE
+            * (2 + PeerRecord::sign_routes(
+                &identity(),
+                vec![],
+                routes,
+                1060,
+                1,
+                Network::Loopback,
+                1000
+            )
+            .unwrap()
+            .encode()
+            .len())
+            < 64 * 1024
+    );
 }

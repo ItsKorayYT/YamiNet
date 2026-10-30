@@ -286,47 +286,57 @@ impl Resolver {
                         yami_dht::now().map_err(|_| FetchError::Record)?,
                     )
                     .map_err(|_| FetchError::Record)?;
-                let budget =
-                    yami_dht::RPC_TIMEOUT.min(deadline.saturating_duration_since(Instant::now()));
-                if budget.is_zero() {
-                    break;
-                }
-                let route = yami_relay::Route {
-                    relay: advertised.relay,
-                    endpoint: advertised.endpoint.into(),
-                    destination: address.id,
-                };
-                match route.connect_with_timeout(self.network == Network::Public, budget) {
-                    Ok(mut connection) => {
-                        if connection.protection() != Protection::Tls13PinnedServer {
-                            return Err(FetchError::Identity);
-                        }
-                        record
-                            .verify(
-                                self.network,
-                                yami_dht::now().map_err(|_| FetchError::Record)?,
-                            )
-                            .map_err(|_| FetchError::Record)?;
-                        let data = ynp::request(&mut *connection, &address.key).map_err(|e| {
-                            FetchError::Document(format!(
-                                "Verified node could not return this document: {e}"
-                            ))
-                        })?;
-                        return Ok((
-                            data,
-                            ConnectionInfo {
-                                endpoint: advertised.endpoint.into(),
-                                relay: Some(advertised.relay),
-                            },
-                        ));
+                let route_deadline = deadline.min(Instant::now() + yami_dht::RPC_TIMEOUT);
+                for attempt in 0..2 {
+                    if attempt > 0 {
+                        std::thread::sleep(
+                            Duration::from_millis(400)
+                                .min(route_deadline.saturating_duration_since(Instant::now())),
+                        );
                     }
-                    Err(error) => {
-                        if error
-                            .get_ref()
-                            .and_then(|e| e.downcast_ref::<IdentityMismatch>())
-                            .is_some()
-                        {
-                            failure = FetchError::Identity;
+                    let budget = route_deadline.saturating_duration_since(Instant::now());
+                    if budget.is_zero() {
+                        break;
+                    }
+                    let route = yami_relay::Route {
+                        relay: advertised.relay,
+                        endpoint: advertised.endpoint.into(),
+                        destination: address.id,
+                    };
+                    match route.connect_with_timeout(self.network == Network::Public, budget) {
+                        Ok(mut connection) => {
+                            if connection.protection() != Protection::Tls13PinnedServer {
+                                return Err(FetchError::Identity);
+                            }
+                            record
+                                .verify(
+                                    self.network,
+                                    yami_dht::now().map_err(|_| FetchError::Record)?,
+                                )
+                                .map_err(|_| FetchError::Record)?;
+                            let data =
+                                ynp::request(&mut *connection, &address.key).map_err(|e| {
+                                    FetchError::Document(format!(
+                                        "Verified node could not return this document: {e}"
+                                    ))
+                                })?;
+                            return Ok((
+                                data,
+                                ConnectionInfo {
+                                    endpoint: advertised.endpoint.into(),
+                                    relay: Some(advertised.relay),
+                                },
+                            ));
+                        }
+                        Err(error) => {
+                            if error
+                                .get_ref()
+                                .and_then(|e| e.downcast_ref::<IdentityMismatch>())
+                                .is_some()
+                            {
+                                failure = FetchError::Identity;
+                                break;
+                            }
                         }
                     }
                 }
