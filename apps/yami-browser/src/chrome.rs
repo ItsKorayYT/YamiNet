@@ -38,6 +38,16 @@ impl Rect {
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Action {
+    Library,
+    SaveBookmark,
+    OpenBookmark(usize),
+    RemoveBookmark(usize),
+    EditBookmark(usize, bool),
+    SetHomepage,
+    ToggleHistory,
+    ClearHistory,
+    OpenVisit(usize),
+    LibraryPage(bool),
     FindLocal,
     ToggleRelay,
     Bootstrap,
@@ -446,6 +456,7 @@ pub struct ChromeState<'a> {
     pub editing: bool,
     pub value: &'a str,
     pub selection: bool,
+    pub selection_range: Option<std::ops::Range<usize>>,
     pub caret: usize,
     pub focus: Option<&'a Action>,
 }
@@ -690,6 +701,16 @@ pub fn relay_setting(c: &mut Canvas<'_>, scene: &mut Scene, ui: &ChromeState<'_>
         false,
     );
     scene.add(r, Action::Bootstrap);
+    let r = Rect::new(r.x, r.y - 28.0, r.w, r.h);
+    panel_button(
+        c,
+        scene,
+        ui,
+        r,
+        "Bookmarks & history",
+        Action::Library,
+        true,
+    );
 }
 
 /// A small flyout anchored beside the existing sidebar. It never navigates on
@@ -995,17 +1016,6 @@ fn address_field(
     let y = text_y(r, size);
     let text_width = r.w - 34.0;
 
-    if focused && ui.selection && !ui.value.is_empty() {
-        let tw = (c.text.measure(ui.value, size * c.scale, false) / c.scale).min(text_width);
-        c.round(
-            Rect::new(x - 1.0, r.y + 7.0, tw + 2.0, r.h - 14.0),
-            3.0,
-            PLUM_GLOW,
-            PLUM_GLOW,
-            None,
-        );
-    }
-
     let mut visible = label;
     let mut start = 0;
     if focused && !ui.value.is_empty() {
@@ -1029,6 +1039,24 @@ fn address_field(
         visible = &label[start..];
     }
 
+    if focused {
+        if let Some(range) = &ui.selection_range {
+            let a = range.start.max(start).min(ui.value.len());
+            let b = range.end.max(start).min(ui.value.len());
+            if a < b {
+                let left = c.text.measure(&ui.value[start..a], size * c.scale, false) / c.scale;
+                let right = (c.text.measure(&ui.value[start..b], size * c.scale, false) / c.scale)
+                    .min(text_width);
+                c.round(
+                    Rect::new(x + left, y - 1.0, (right - left).max(0.0), r.h - 14.0),
+                    3.0,
+                    PLUM_GLOW,
+                    PLUM_GLOW,
+                    None,
+                );
+            }
+        }
+    }
     c.text(
         visible,
         x,
@@ -1095,6 +1123,159 @@ pub fn round_viewport(c: &mut Canvas<'_>, ui: &ChromeState<'_>) {
     c.mask_corners(viewport(ui.width, ui.height), RADIUS, SIDEBAR_BG);
 }
 
+/// Local library flyout. Stored titles never carry a connection indicator.
+pub fn library_panel(
+    c: &mut Canvas<'_>,
+    scene: &mut Scene,
+    ui: &ChromeState<'_>,
+    browser: &Browser,
+    page: usize,
+) {
+    let panel = Rect::new(
+        SIDEBAR_WIDTH + MARGIN + 8.0,
+        MARGIN + 8.0,
+        (ui.width - SIDEBAR_WIDTH - 40.0).clamp(200.0, 520.0),
+        (ui.height - 32.0).clamp(200.0, 550.0),
+    );
+    scene.add(panel, Action::DiscoveryPanel);
+    c.round(panel, 10.0, SIDEBAR_BG, SIDEBAR_BG, Some(ACTIVE_TAB));
+    let x = panel.x + 12.0;
+    let w = panel.w - 24.0;
+    let mut y = panel.y + 12.0;
+    c.text("Bookmarks & local history", x, y, w, 15.0, INK, true);
+    y += 28.0;
+    panel_button(
+        c,
+        scene,
+        ui,
+        Rect::new(x, y, w, 26.0),
+        "Save current page (Ctrl+D)",
+        Action::SaveBookmark,
+        true,
+    );
+    y += 32.0;
+    if let Some(error) = &browser.library_error {
+        c.text(error, x, y, w, 11.0, PLAINTEXT, false);
+        y += 26.0;
+    }
+    let Some(library) = &browser.library else {
+        c.text("Local storage unavailable", x, y, w, 12.0, MUTED, false);
+        return;
+    };
+    // Two bookmarks per page keeps this usable in compact windows.
+    for (index, b) in library
+        .bookmarks()
+        .iter()
+        .enumerate()
+        .skip(page * 2)
+        .take(2)
+    {
+        let label = format!("{} / {}", b.folder, b.title);
+        panel_button(
+            c,
+            scene,
+            ui,
+            Rect::new(x, y, w, 25.0),
+            &label,
+            Action::OpenBookmark(index),
+            true,
+        );
+        y += 27.0;
+        for (offset, label, action) in [
+            (0.0, "Title", Action::EditBookmark(index, false)),
+            (0.34, "Folder", Action::EditBookmark(index, true)),
+            (0.68, "Remove", Action::RemoveBookmark(index)),
+        ] {
+            panel_button(
+                c,
+                scene,
+                ui,
+                Rect::new(x + w * offset, y, w * 0.32, 23.0),
+                label,
+                action,
+                true,
+            );
+        }
+        y += 29.0;
+    }
+    panel_button(
+        c,
+        scene,
+        ui,
+        Rect::new(x, y, w * 0.48, 24.0),
+        "Previous",
+        Action::LibraryPage(false),
+        page > 0,
+    );
+    panel_button(
+        c,
+        scene,
+        ui,
+        Rect::new(x + w * 0.52, y, w * 0.48, 24.0),
+        "Next",
+        Action::LibraryPage(true),
+        (page + 1) * 2 < library.bookmarks().len(),
+    );
+    y += 30.0;
+    panel_button(
+        c,
+        scene,
+        ui,
+        Rect::new(x, y, w, 24.0),
+        "Use current address as Home",
+        Action::SetHomepage,
+        true,
+    );
+    y += 30.0;
+    panel_button(
+        c,
+        scene,
+        ui,
+        Rect::new(x, y, w * 0.64, 24.0),
+        if library.history_enabled() {
+            "History: On (local only)"
+        } else {
+            "History: Off"
+        },
+        Action::ToggleHistory,
+        true,
+    );
+    panel_button(
+        c,
+        scene,
+        ui,
+        Rect::new(x + w * 0.67, y, w * 0.33, 24.0),
+        "Clear history",
+        Action::ClearHistory,
+        true,
+    );
+    y += 30.0;
+    for (i, v) in library.visits().iter().enumerate().rev().take(3) {
+        if y + 25.0 > panel.y + panel.h - 30.0 {
+            break;
+        }
+        panel_button(
+            c,
+            scene,
+            ui,
+            Rect::new(x, y, w, 24.0),
+            &format!("Recent: {}", v.title),
+            Action::OpenVisit(i),
+            true,
+        );
+        y += 28.0;
+    }
+    panel_button(
+        c,
+        scene,
+        ui,
+        Rect::new(x, panel.y + panel.h - 28.0, w, 22.0),
+        "Close",
+        Action::Library,
+        true,
+    );
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1111,6 +1292,7 @@ mod tests {
                 editing: false,
                 value: "",
                 selection: false,
+                selection_range: None,
                 caret: 0,
                 focus: None,
             };

@@ -43,6 +43,15 @@ pub fn run(
         loader.set_relay_enabled(enabled);
     }
     let mut app = Desktop::new(loader);
+    match yami_browser::library::Library::default_directory()
+        .and_then(yami_browser::library::Library::open)
+    {
+        Ok(library) => app.browser.library = Some(library),
+        Err(error) => {
+            eprintln!("Browser library unavailable: {error}");
+            app.browser.library_error = Some(error.to_string());
+        }
+    }
     app.discovery = crate::discovery::Discovery::new(wake);
     if let Some(address) = args.first() {
         let _ = app.browser.navigate(address, &app.loader);
@@ -61,6 +70,7 @@ struct Editor {
     value: String,
     caret: usize,
     selected: bool,
+    anchor: Option<usize>,
     focus: Option<()>,
 }
 impl Editor {
@@ -68,21 +78,39 @@ impl Editor {
         self.value = value.into();
         self.caret = self.value.len();
         self.selected = true;
+        self.anchor = None;
         self.focus = Some(());
+    }
+    fn range(&self) -> Option<std::ops::Range<usize>> {
+        self.selected.then(|| {
+            self.anchor.map_or(0..self.value.len(), |a| {
+                a.min(self.caret)..a.max(self.caret)
+            })
+        })
+    }
+    fn move_caret(&mut self, to: usize, extend: bool) {
+        if extend {
+            if !self.selected {
+                self.anchor = Some(self.caret);
+            }
+            self.caret = to;
+            self.selected = self.anchor != Some(to);
+        } else {
+            self.caret = to;
+            self.selected = false;
+            self.anchor = None;
+        }
     }
     fn replace(&mut self, text: &str) {
         let text: String = text.chars().filter(|c| !c.is_control()).collect();
-        let base = if self.selected { 0 } else { self.value.len() };
-        if base + text.len() > 4096 {
+        let range = self.range().unwrap_or(self.caret..self.caret);
+        if self.value.len() - range.len() + text.len() > 4096 {
             return;
         }
-        if self.selected {
-            self.value.clear();
-            self.caret = 0;
-            self.selected = false;
-        }
-        self.value.insert_str(self.caret, &text);
-        self.caret += text.len();
+        self.value.replace_range(range.clone(), &text);
+        self.caret = range.start + text.len();
+        self.selected = false;
+        self.anchor = None;
     }
     fn previous(&self) -> usize {
         self.value[..self.caret]
@@ -98,10 +126,11 @@ impl Editor {
                 .map_or(0, char::len_utf8)
     }
     fn backspace(&mut self) {
-        if self.selected {
-            self.value.clear();
-            self.caret = 0;
+        if let Some(range) = self.range() {
+            self.value.replace_range(range.clone(), "");
+            self.caret = range.start;
             self.selected = false;
+            self.anchor = None;
         } else if self.caret > 0 {
             let p = self.previous();
             self.value.replace_range(p..self.caret, "");
@@ -147,6 +176,10 @@ struct Desktop {
     clipboard: Option<arboard::Clipboard>,
     composing: bool,
     bootstrap_edit: bool,
+    library_open: bool,
+    library_page: usize,
+    bookmark_edit: Option<(Option<usize>, bool)>,
+    pressed_link: Option<String>,
     /// Logical size and scale used when rendering without a window (tests).
     headless: Option<(f32, f32, f32)>,
 }
@@ -174,6 +207,10 @@ impl Desktop {
             clipboard: None,
             composing: false,
             bootstrap_edit: false,
+            library_open: false,
+            library_page: 0,
+            bookmark_edit: None,
+            pressed_link: None,
             headless: None,
         }
     }
@@ -197,6 +234,7 @@ impl Desktop {
     }
     fn clear_focus(&mut self) {
         self.bootstrap_edit = false;
+        self.bookmark_edit = None;
         self.composing = false;
         self.editor.focus = None;
         self.keyboard_focus = None;
@@ -207,7 +245,28 @@ impl Desktop {
         } else {
             self.browser.active().address.clone()
         };
-        if self.bootstrap_edit {
+        if let Some((index, folder)) = self.bookmark_edit {
+            let result = if let Some(index) = index {
+                if let Some(library) = &mut self.browser.library {
+                    if let Some(b) = library.bookmarks().get(index).cloned() {
+                        library.save_bookmark(
+                            &b.address,
+                            if folder { &b.title } else { &value },
+                            if folder { &value } else { &b.folder },
+                        )
+                    } else {
+                        Ok(())
+                    }
+                } else {
+                    Err(std::io::Error::other("Browser library unavailable"))
+                }
+            } else {
+                self.browser.bookmark_current(&value, "")
+            };
+            if let Err(e) = result {
+                self.browser.library_error = Some(e.to_string());
+            }
+        } else if self.bootstrap_edit {
             if let Err(error) = self.loader.add_bootstrap(&value) {
                 self.browser.active_mut().state = PageState::Error(error);
             }
@@ -219,6 +278,87 @@ impl Desktop {
     }
     fn act(&mut self, action: Action) {
         match action {
+            Action::Library => {
+                self.library_open = !self.library_open;
+                self.discovery.open = false;
+                self.clear_focus();
+            }
+            Action::SaveBookmark => {
+                let title: String = self
+                    .browser
+                    .active()
+                    .title()
+                    .chars()
+                    .filter(|c| !c.is_control())
+                    .take(40)
+                    .collect();
+                self.clear_focus();
+                self.bookmark_edit = Some((None, false));
+                self.editor.activate(&title);
+                self.library_open = true;
+            }
+            Action::EditBookmark(index, folder) => {
+                let value = self
+                    .browser
+                    .library
+                    .as_ref()
+                    .and_then(|l| l.bookmarks().get(index))
+                    .map(|b| {
+                        if folder {
+                            b.folder.clone()
+                        } else {
+                            b.title.clone()
+                        }
+                    });
+                if let Some(value) = value {
+                    self.clear_focus();
+                    self.bookmark_edit = Some((Some(index), folder));
+                    self.editor.activate(&value);
+                }
+            }
+            Action::OpenBookmark(index) | Action::OpenVisit(index) => {
+                let url = self.browser.library.as_ref().and_then(|l| {
+                    if matches!(action, Action::OpenBookmark(_)) {
+                        l.bookmarks().get(index).map(|b| b.address.clone())
+                    } else {
+                        l.visits().get(index).map(|v| v.address.clone())
+                    }
+                });
+                if let Some(url) = url {
+                    let _ = self.browser.navigate(&url, &self.loader);
+                    self.library_open = false;
+                    self.clear_focus();
+                }
+            }
+            Action::RemoveBookmark(index) => {
+                if let Some(l) = &mut self.browser.library {
+                    if let Some(b) = l.bookmarks().get(index).cloned() {
+                        if let Err(e) = l.remove_bookmark(&b.address) {
+                            self.browser.library_error = Some(e.to_string());
+                        }
+                    }
+                }
+            }
+            Action::SetHomepage | Action::ToggleHistory | Action::ClearHistory => {
+                let url = self.browser.active().location().address();
+                if let Some(l) = &mut self.browser.library {
+                    let r = match action {
+                        Action::SetHomepage => l.set_homepage(&url),
+                        Action::ToggleHistory => l.set_history(!l.history_enabled()),
+                        _ => l.clear_history(),
+                    };
+                    if let Err(e) = r {
+                        self.browser.library_error = Some(e.to_string());
+                    }
+                }
+            }
+            Action::LibraryPage(next) => {
+                self.library_page = if next {
+                    self.library_page.saturating_add(1)
+                } else {
+                    self.library_page.saturating_sub(1)
+                };
+            }
             Action::Bootstrap => {
                 self.clear_focus();
                 self.bootstrap_edit = true;
@@ -243,6 +383,7 @@ impl Desktop {
                 if let Some(url) = self.discovery.selected_url() {
                     let _ = self.browser.navigate(&url, &self.loader);
                     self.discovery.open = false;
+                    self.library_open = false;
                     self.clear_focus();
                 }
             }
@@ -286,7 +427,7 @@ impl Desktop {
                 self.clear_focus();
             }
             Action::Home => {
-                self.browser.navigate_location(Location::Home, &self.loader);
+                self.browser.home(&self.loader);
                 self.clear_focus();
             }
             Action::Navigate(address) => {
@@ -451,6 +592,7 @@ impl Desktop {
             editing: self.editor.focus.is_some(),
             value,
             selection: self.editor.selected,
+            selection_range: self.editor.range(),
             caret: self.editor.caret,
             focus: focus.as_ref(),
         };
@@ -506,13 +648,25 @@ impl Desktop {
                 // viewport, so layout width, drawing and link hit-tests agree.
                 match self.native.as_ref().map(|cache| &cache.document) {
                     Some(Ok(doc)) => {
-                        doc.draw(
+                        doc.draw_interactive(
                             c.pix,
                             viewport.x * scale,
                             viewport.y * scale,
                             tab.scroll as f32 * scale,
                             viewport.h * scale,
                             c.text,
+                            if !self.library_open
+                                && !self.discovery.open
+                                && viewport.contains(self.mouse.0, self.mouse.1)
+                            {
+                                Some((
+                                    (self.mouse.0 - viewport.x) * scale,
+                                    (self.mouse.1 - viewport.y + tab.scroll as f32) * scale,
+                                ))
+                            } else {
+                                None
+                            },
+                            self.pressed_link.is_some(),
                         );
                         if doc.height > viewport.h * scale {
                             let bar = Rect::new(
@@ -556,6 +710,9 @@ impl Desktop {
             }
         }
         chrome::discovery_panel(&mut c, &mut scene, &ui, &self.discovery);
+        if self.library_open {
+            chrome::library_panel(&mut c, &mut scene, &ui, &self.browser, self.library_page);
+        }
         self.scene = scene;
     }
     fn keyboard(&mut self, key: &Key, text: Option<&str>, event_loop: &ActiveEventLoop) {
@@ -566,6 +723,10 @@ impl Desktop {
         if command {
             if let Key::Character(ch) = key {
                 match ch.to_lowercase().as_str() {
+                    "d" => {
+                        self.act(Action::SaveBookmark);
+                        return;
+                    }
                     "l" => {
                         self.act(Action::Address);
                         return;
@@ -584,6 +745,8 @@ impl Desktop {
                     }
                     "a" if self.editor.focus.is_some() => {
                         self.editor.selected = true;
+                        self.editor.anchor = None;
+                        self.editor.caret = self.editor.value.len();
                         self.redraw();
                         return;
                     }
@@ -593,7 +756,9 @@ impl Desktop {
                                 self.clipboard = arboard::Clipboard::new().ok();
                             }
                             if let Some(clipboard) = &mut self.clipboard {
-                                let _ = clipboard.set_text(self.editor.value.clone());
+                                let _ = clipboard.set_text(
+                                    self.editor.value[self.editor.range().unwrap()].to_string(),
+                                );
                             }
                             if ch.eq_ignore_ascii_case("x") {
                                 self.editor.backspace();
@@ -620,6 +785,10 @@ impl Desktop {
         }
         if self.modifiers.alt_key() {
             match key {
+                Key::Named(NamedKey::Home) => {
+                    self.act(Action::Home);
+                    return;
+                }
                 Key::Named(NamedKey::ArrowLeft) => {
                     self.act(Action::Back);
                     return;
@@ -668,28 +837,27 @@ impl Desktop {
             }
             Key::Named(NamedKey::Delete) if self.editor.focus.is_some() => self.editor.delete(),
             Key::Named(NamedKey::ArrowLeft) if self.editor.focus.is_some() => {
-                self.editor.caret = if self.editor.selected {
-                    0
+                let to = if self.editor.selected && !self.modifiers.shift_key() {
+                    self.editor.range().unwrap().start
                 } else {
                     self.editor.previous()
                 };
-                self.editor.selected = false;
+                self.editor.move_caret(to, self.modifiers.shift_key());
             }
             Key::Named(NamedKey::ArrowRight) if self.editor.focus.is_some() => {
-                self.editor.caret = if self.editor.selected {
-                    self.editor.value.len()
+                let to = if self.editor.selected && !self.modifiers.shift_key() {
+                    self.editor.range().unwrap().end
                 } else {
                     self.editor.next()
                 };
-                self.editor.selected = false;
+                self.editor.move_caret(to, self.modifiers.shift_key());
             }
             Key::Named(NamedKey::Home) if self.editor.focus.is_some() => {
-                self.editor.caret = 0;
-                self.editor.selected = false;
+                self.editor.move_caret(0, self.modifiers.shift_key());
             }
             Key::Named(NamedKey::End) if self.editor.focus.is_some() => {
-                self.editor.caret = self.editor.value.len();
-                self.editor.selected = false;
+                self.editor
+                    .move_caret(self.editor.value.len(), self.modifiers.shift_key());
             }
             Key::Named(NamedKey::PageDown) | Key::Named(NamedKey::ArrowDown)
                 if self.editor.focus.is_none() =>
@@ -824,7 +992,7 @@ impl ApplicationHandler<()> for Desktop {
                 if let Some(action) = self.scene.hit(self.mouse.0, self.mouse.1) {
                     self.act(action);
                 } else if let Some(target) = self.link() {
-                    let _ = self.browser.follow(&target, &self.loader);
+                    self.pressed_link = Some(target);
                     self.clear_focus();
                     self.redraw();
                 } else {
@@ -836,7 +1004,17 @@ impl ApplicationHandler<()> for Desktop {
                 state: ElementState::Released,
                 button: MouseButton::Left,
                 ..
-            } => self.scroll_drag = false,
+            } => {
+                self.scroll_drag = false;
+                if let Some(target) = self.pressed_link.take() {
+                    if self.scene.hit(self.mouse.0, self.mouse.1).is_none()
+                        && self.link().as_ref() == Some(&target)
+                    {
+                        let _ = self.browser.follow(&target, &self.loader);
+                    }
+                }
+                self.redraw();
+            }
             WindowEvent::MouseWheel { delta, .. } => {
                 let amount = match delta {
                     MouseScrollDelta::LineDelta(_, y) => f64::from(y) * 54.0,

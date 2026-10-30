@@ -45,7 +45,7 @@ impl Location {
             "" => Ok(Self::Home),
             "local:welcome" => Ok(Self::Welcome),
             "local:about" => Ok(Self::About),
-            _ if address.starts_with(native::SCHEME) => Address::parse(input)
+            _ if address.starts_with(native::SCHEME) => Address::parse(address)
                 .map(Self::Yami)
                 .map_err(|error| format!("Cannot open this address: {error}")),
             _ if address.starts_with(ynp_tls::SCHEME) => {
@@ -263,6 +263,8 @@ pub struct Browser {
     pub tabs: Vec<Tab>,
     pub active: usize,
     next_id: u64,
+    pub library: Option<crate::library::Library>,
+    pub library_error: Option<String>,
 }
 impl Default for Browser {
     fn default() -> Self {
@@ -275,7 +277,27 @@ impl Browser {
             tabs: vec![Tab::new(1)],
             active: 0,
             next_id: 2,
+            library: None,
+            library_error: None,
         }
+    }
+    pub fn bookmark_current(&mut self, title: &str, folder: &str) -> io::Result<()> {
+        let address = self.active().location().address();
+        if !matches!(self.active().state, PageState::Ready(_)) {
+            return Err(io::Error::other("Open a page before bookmarking it"));
+        }
+        self.library
+            .as_mut()
+            .ok_or_else(|| io::Error::other("Browser library is unavailable"))?
+            .save_bookmark(&address, title, folder)
+    }
+    pub fn home(&mut self, loader: &Loader) {
+        let home = self
+            .library
+            .as_ref()
+            .map(|l| l.homepage().to_string())
+            .unwrap_or_default();
+        let _ = self.navigate(&home, loader);
     }
     pub fn active(&self) -> &Tab {
         &self.tabs[self.active]
@@ -433,6 +455,20 @@ impl Browser {
             Ok(page) => PageState::Ready(Box::new(page)),
             Err(error) => PageState::Error(error),
         };
+        if let (Some(library), PageState::Ready(page)) = (&mut self.library, &tab.state) {
+            // Titles are untrusted metadata, limited before optional disk storage.
+            let title: String = page
+                .document
+                .metadata
+                .title
+                .chars()
+                .filter(|c| !c.is_control())
+                .take(40)
+                .collect();
+            if let Err(error) = library.record(&tab.location().address(), &title) {
+                self.library_error = Some(error.to_string());
+            }
+        }
         true
     }
 }
