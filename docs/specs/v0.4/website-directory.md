@@ -193,7 +193,63 @@ Directories are a discovery aid, not a public-key infrastructure.
   metadata. That is a deterministic merge rule, not a claim that the first
   listing is more accurate.
 
-## 9. Compatibility and versioning
+## 9. Authoring and canonical rendering
+
+Version 1 defines a canonical rendering used by the authoring tools. A generated
+document is valid version-1 YLang and must parse back to the same directory
+values.
+
+Canonical layout:
+
+```ylang
+@page 0.2
+  title <directory title>
+  language <optional language>
+
+:: directory 1
+
+  :: card <entry title>
+    > <canonical yami:// address> | Open
+    \<description>
+    :: category <optional category>
+```
+
+Rules:
+
+- Entries are emitted in document order. Appending adds at the end; editing
+  replaces in place; removal deletes in place. A rewrite does not reorder
+  remaining entries.
+- The link label is the fixed string `Open`. Link labels are not part of the
+  directory data and are ignored when parsing.
+- Descriptions are always emitted as YLang literal lines: the line begins with
+  a single backslash followed by the exact plain-text description. This keeps
+  reserved prefixes (`::`, `=`, `>`, `-`, `+`, `!`, `@`, `:`, `---`, `\`) and
+  inline bracket characters as text instead of markup. The parser strips the
+  leading backslash and returns the exact description.
+- Titles, directory names and categories are single-line raw text. Control
+  characters (including tab, CR, LF and NUL) are rejected by the validating
+  constructors, so they cannot break the line-oriented format.
+- Leading and trailing whitespace in validated fields is trimmed before
+  storage; the trimmed value is what round-trips.
+- The optional `language` metadata is preserved when an existing document is
+  rewritten. Newly created documents omit it.
+- Rendering rejects a document whose UTF-8 source would exceed
+  [`MAX_DIRECTORY_BYTES`] (256 KiB), even if its entry count and individual
+  fields are within their limits.
+- `Directory::new`, `add_entry` and `replace_entry` reject attempts to
+  introduce a duplicate canonical address. Parsing intentionally remains
+  tolerant of duplicates because an independently authored source may contain
+  them; `Catalog` reports and deduplicates them at import time.
+- `save` requires an existing regular, non-symlink file and atomically replaces
+  it. `save_new` refuses any existing path and atomically creates a new file.
+  Both write a unique temporary file in the destination directory, flush it,
+  and then expose it with an atomic rename or a no-clobber hard link. A failed
+  operation removes its temporary file and leaves the previous contents intact.
+- Before writing, the canonical rendering is parsed again and compared with
+  the in-memory directory. A mismatch aborts the write rather than silently
+  losing information.
+
+## 10. Compatibility and versioning
 
 - Directory version 1 requires YLang 0.2. The existing YLang/YSL 0.1 and 0.2
   document formats are unchanged.

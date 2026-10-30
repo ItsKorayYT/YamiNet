@@ -21,11 +21,17 @@
 //!
 //! These types are independent of the browser UI so a later milestone can
 //! integrate discovery without changing the format or trust model.
+//!
+//! Directories can also be authored locally: [`Directory::render`] produces a
+//! canonical YLang 0.2 document, [`Directory::save`] and
+//! [`Directory::save_new`] write it atomically, and the entry mutation methods
+//! reject duplicate addresses and entry-count overflow.
 
 mod address;
 mod catalog;
 mod directory;
 mod normalize;
+mod store;
 
 pub use address::WebsiteAddress;
 pub use catalog::{Catalog, Entry, ImportReport, SearchHit, SourceInfo};
@@ -109,6 +115,8 @@ pub enum Error {
     },
     /// A bounded catalog resource would be exceeded.
     Limit { message: String },
+    /// Two directory entries or sources cannot coexist.
+    Conflict { message: String },
     /// A source label or source collection is invalid.
     Source { message: String },
     /// A local search query is invalid.
@@ -132,6 +140,12 @@ impl Error {
 
     pub(crate) fn limit(message: impl Into<String>) -> Self {
         Self::Limit {
+            message: message.into(),
+        }
+    }
+
+    pub(crate) fn conflict(message: impl Into<String>) -> Self {
+        Self::Conflict {
             message: message.into(),
         }
     }
@@ -168,6 +182,7 @@ impl fmt::Display for Error {
                 message,
             } => f.write_str(message),
             Self::Limit { message } => write!(f, "resource limit: {message}"),
+            Self::Conflict { message } => write!(f, "conflict: {message}"),
             Self::Source { message } => write!(f, "directory source: {message}"),
             Self::Query { message } => write!(f, "search query: {message}"),
         }

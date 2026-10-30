@@ -79,6 +79,73 @@ positional words with spaces, so `search --directory FILE local first` works.
 The CLI chooses a unique source label from each file name and reports how many
 entries were added or skipped as duplicates.
 
+## Authoring directories
+
+Build once with `cargo build -p yami-discover`; the examples below use the
+resulting `target/debug/yami-discover` binary. The CLI can create and maintain
+a directory without any network access:
+
+```sh
+# Create a new empty directory. Existing files are never overwritten.
+yami-discover create community.ylang --title "YamiNet Community Directory"
+
+# Append a listing. The address is canonicalized and must not be duplicated.
+yami-discover add community.ylang \
+  --title "Alice's Notebook" \
+  --description "Field notes on local-first software and small networks." \
+  --address "yami://yn1-tiqub4vxm4zslzlrhlfhc5k6b7vvkealot25nodtcixooe6xfzmxfsm6re/home" \
+  --category Personal
+
+# Change metadata; the entry keeps its position and canonical address.
+yami-discover edit community.ylang \
+  --address "yami://yn1-tiqub4vxm4zslzlrhlfhc5k6b7vvkealot25nodtcixooe6xfzmxfsm6re/home" \
+  --description "Updated field notes." \
+  --category Journal
+
+# Remove a category, or remove the listing entirely.
+yami-discover edit community.ylang --address "yami://yn1-tiqub4vxm4zslzlrhlfhc5k6b7vvkealot25nodtcixooe6xfzmxfsm6re/home" --clear-category
+yami-discover remove community.ylang --address "yami://yn1-tiqub4vxm4zslzlrhlfhc5k6b7vvkealot25nodtcixooe6xfzmxfsm6re/home"
+
+# Inspect and re-validate with the existing parser.
+yami-discover show community.ylang
+yami-discover validate --directory community.ylang
+
+# Import and search the generated directory.
+yami-discover search --directory community.ylang notes
+```
+
+`create` requires a title and refuses to replace anything. `add`, `edit` and
+`remove` require an existing directory document, so a mistyped path is an
+error rather than a new file. An omitted `yami://` key is canonicalized to
+`home`, the same rule as the native address parser.
+
+Authoring rules:
+
+1. **Valid output.** `Directory::render` emits a canonical YLang 0.2 document.
+   It is parsed again before writing; a round-trip mismatch aborts the write.
+2. **Escaping.** Descriptions are emitted as YLang literal lines (`\` prefix),
+   so text beginning with `::`, `=`, `>`, `-`, `+`, `!`, `@`, `:`, `---`, `\`
+   or containing `[` / `]` survives parsing exactly. Titles, directory names
+   and categories are single-line raw text; control characters are rejected.
+3. **Deterministic order.** `add` appends, `edit` replaces in place and
+   `remove` deletes in place. A rewrite never reorders remaining entries.
+4. **Duplicates rejected.** Add and edit operations reject an address already
+   in the directory. Import remains tolerant and reports duplicates, but
+   authoring never creates them.
+5. **Limits.** Entry count, field lengths and the 256 KiB rendered source limit
+   are checked before the file is changed. A failed change leaves the original
+   file untouched.
+6. **Atomic writes.** The new source is written to a unique temporary file in
+   the destination directory, flushed, and then exposed by an atomic rename
+   (or a no-clobber hard link for `create`). Existing unrelated files are not
+   touched, and temporary files are removed on failure.
+7. **Language preserved.** If an existing document has YLang `language`
+   metadata, `show`, `edit`, `add` and `remove` preserve it on rewrite. New
+   files omit language metadata.
+
+The full format and escaping rules are in the
+[format specification](specs/v0.4/website-directory.md#9-authoring-and-canonical-rendering).
+
 ## Importing and merging
 
 Import is explicit and local:
@@ -187,6 +254,11 @@ Public API surface:
 | `WebsiteAddress::parse(&str)` | Strict canonical `yami://` parsing and display |
 | `Directory::parse(&str)` | Parse and validate one version-1 document |
 | `Directory::load(path)` | Bounded local file loading |
+| `Directory::render()` | Canonical, escaped, bounded YLang 0.2 output |
+| `Directory::save(path)` / `save_new(path)` | Atomic replace / no-clobber create |
+| `Directory::add_entry` / `remove_entry` / `replace_entry` | Ordered mutation with duplicate and limit checks |
+| `Directory::entry(address)` | Look up one entry by canonical address |
+| `Directory::language()` | Optional YLang language metadata preserved on rewrite |
 | `DirectoryEntry` | Validated title, description, address, optional category |
 | `Catalog::new()` | Empty merged local catalog |
 | `Catalog::import_text(label, text)` | Parse and merge a document |
@@ -236,7 +308,8 @@ cargo run -p yami-discover -- demo
 The crate tests cover sample parsing, unexpected YLang versions, missing or
 duplicate fields, invalid schemes and checksums, oversized fields and
 documents, entry/source/catalog caps, duplicate handling, Unicode and partial
-search, query limits and the result cap.
+search, query limits, the result cap, authoring round-trips, reserved-text
+escaping, in-place edits/removals and atomic writes.
 
 ## Scope
 
@@ -246,6 +319,7 @@ In scope for this milestone:
 - the version-1 YLang directory format;
 - sample directories and synthetic identities;
 - local validation, merging and search;
+- local directory authoring, escaped rendering and atomic writes;
 - documentation and unit tests.
 
 Out of scope, deliberately:
