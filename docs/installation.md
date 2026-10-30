@@ -93,3 +93,13 @@ or startup task was installed automatically. User data remains; to remove it,
 first back up private identities and deliberately delete the separate per-user
 state directories. An explicitly configured scheduled hosting task must be
 removed separately by its owner. Uninstallation never changes firewall/router rules.
+
+For 0.3.1, follow [getting started](getting-started-0.3.1.md) and the
+[native release/rollback gate](release-candidate-0.3.1.md). Linux runtime loading
+also uses X11 extensions through dynamic loading; `ldd` alone is not sufficient.
+The Ubuntu 24.04 CI setup explicitly installs X11/XCB, XKB common + X11, XRandR,
+XCursor, XI, Xinerama, XRender, XFixes and XCB shape/xfixes support, then exercises
+an actual native window under Xvfb. Debian 13 is the local native environment.
+Other distributions and physical desktops require their own recorded validation.
+The diagnostic log is optional and disabled by default; see
+[local diagnostics](diagnostics-0.3.1.md) for enable/report/delete commands.

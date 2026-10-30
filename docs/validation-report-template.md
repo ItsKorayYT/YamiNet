@@ -53,3 +53,29 @@ PERFORMED. Do not attach private keys, credentials or raw environment dumps.
 Attach the versioned probe output, exit status, timestamp, public identities and
 observed topology. Record each stage independently; do not promote loopback or CI
 results to physical-network PASS. Exclude secret keys and redact private paths.
+
+## 0.3.1 stabilization record
+
+Record exact source SHA, workflow run/job IDs, artifact hashes, OS build, actual
+user privilege level, display session type and toolchain. Keep each status distinct:
+
+| Check | PASS / FAIL / NOT RUN | Evidence and remaining blocker |
+| --- | --- | --- |
+| Native Windows MSVC source checks and release build | NOT RUN | |
+| Windows portable runtime without Rust/Cargo | NOT RUN | |
+| Actual prior-version NSIS install/upgrade/uninstall in a space-containing path | NOT RUN | |
+| Exact identity/library/peer bytes after lifecycle | NOT RUN | |
+| Ordinary non-admin Windows 10/11 permissions and ACLs | NOT RUN | |
+| Native Windows window/clipboard test | NOT RUN | |
+| Linux native package, launcher, UID and libraries | NOT RUN | |
+| Virtual-X11 native-window test and restart | NOT RUN | |
+| Physical keyboard, IME, scaling/high-contrast interaction | NOT RUN | |
+| Fresh authenticated DHT response/publication | NOT RUN | |
+| Direct or nested-relay document and PNG fetch | NOT RUN | |
+| Operator-assisted relay cycle/recovery | NOT RUN | |
+| Independent VPS/home NAT/browser topology and manual rendering | NOT RUN | |
+| Opt-in log rotation/redaction/deletion | NOT RUN | |
+
+Include failed attempts and resolutions, not only passing reruns. JSON CLI reports
+never establish physical independence by themselves. Do not attach identities,
+raw environment dumps, document contents or personal filesystem paths.

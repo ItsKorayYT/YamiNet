@@ -359,3 +359,21 @@ TLS, advertisements or registrations never prove independent external delivery.
 Native accessibility APIs/screen-reader compatibility are not implemented.
 The software remains experimental, unaudited, not anonymous and unsuitable for
 sensitive activity. Strong anonymity routing is a future architectural option.
+
+## 0.3.1 stabilization checks
+
+Optional event logging is local-only, disabled by default, bounded to two 64 KiB
+files and restricted to known event codes. Redacted reports emit counts, not raw
+lines, timestamps, paths, content, addresses or keys. Logging errors disable the
+log rather than sending it anywhere. The user can clear owned logs explicitly.
+The network trial tool omits endpoints unless requested and always omits content,
+raw filesystem errors and full browsing URLs. Public identity pins remain visible
+for comparison. No report is uploaded automatically.
+
+A fresh diagnostic DHT lookup must receive the target's signed record from an
+authenticated response; a live local cache or a newer local sequence cannot make
+an unavailable peer or returned older record pass. This reuses existing signature,
+expiry, protocol bounds and rollback validation. These regressions and native
+smoke tests are engineering checks, not an independent security audit or
+production certification. Operator-assisted relay cycles change no infrastructure
+automatically. Independent VPS/home/NAT topology must still be validated physically.

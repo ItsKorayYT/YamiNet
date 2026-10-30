@@ -30,12 +30,13 @@ jobs:
           cache-on-failure: true
       - name: Linux native window dependencies
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y libx11-dev libxkbcommon-dev libxcb1-dev libx11-xcb1 libxkbcommon-x11-0 libxrandr2 libxcursor1 libxi6 libxinerama1 libxrender1 libxfixes3 libxcb-shape0 libxcb-xfixes0 xvfb xauth
+        run: sudo apt-get update && sudo apt-get install -y libx11-dev libxkbcommon-dev libxcb1-dev libx11-xcb1 libxkbcommon-x11-0 libxrandr2 libxcursor1 libxi6 libxinerama1 libxrender1 libxfixes3 libxcb-shape0 libxcb-xfixes0 xvfb xauth xdotool
       - name: Locked source verification
         shell: bash
         run: |
           set -o pipefail
           mkdir -p dist
+          git rev-parse HEAD | tee dist/source-revision.txt
           rustc -vV | tee dist/toolchain.txt
           cargo fmt --all -- --check 2>&1 | tee dist/fmt.log
           cargo clippy --workspace --all-targets --locked -- -D warnings 2>&1 | tee dist/clippy.log
@@ -57,6 +58,7 @@ jobs:
           python packaging/package.py --platform linux
           python packaging/verify.py "dist/YamiNet-$YAMINET_VERSION-linux-x86_64" --expected-version "$YAMINET_VERSION"
           xvfb-run -a -s '-screen 0 1600x1000x24 -nolisten tcp' python packaging/lifecycle.py --archive "dist/YamiNet-$YAMINET_VERSION-linux-x86_64.tar.gz" --report dist/linux-lifecycle.json --gui
+          xvfb-run -a -s '-screen 0 1600x1000x24 -nolisten tcp' python packaging/linux/input-smoke.py --browser "dist/YamiNet-$YAMINET_VERSION-linux-x86_64/yami-browser" --report dist/linux-input.json
       - name: Native Windows MSVC package and installer upgrade lifecycle
         if: runner.os == 'Windows'
         shell: pwsh

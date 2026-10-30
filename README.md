@@ -1,4 +1,18 @@
-# YamiNet 0.3.0-alpha.1
+# YamiNet 0.3.1-alpha.1
+
+## 0.3.1 stabilization
+
+[Getting started with actual native-window captures](docs/getting-started-0.3.1.md) ·
+[Local diagnostic logs](docs/diagnostics-0.3.1.md) ·
+[Structured real-network trial runner](docs/network-trials-0.3.1.md) ·
+[Release candidate and rollback gate](docs/release-candidate-0.3.1.md) ·
+[Validation evidence and remaining blockers](docs/validation-0.3.1.md)
+
+This alpha adds native package/installer lifecycle checks, fixes reproduced
+find/address focus and settings-save/reset bugs, and provides bounded opt-in
+local diagnostics. Native Windows MSVC CI and Linux virtual-X11 smoke tests are
+separate from physical keyboard/IME and VPS/home/independent-network validation.
+No release or tag is published automatically.
 
 ## Desktop alpha 0.3
 
