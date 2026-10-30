@@ -230,3 +230,42 @@ DHT maintenance TTL/renewal, per-peer backoff, RPC budgets and clean stop apply.
 Remote peers may retain a previously signed route until expiry; it is a location
 claim, never proof of availability. Disconnected hosts therefore fail closed at
 tunnel establishment and cannot acquire a verified browser indicator.
+
+## Failure recovery and cache admission
+
+The browser shares in-flight discovery for each owner/sequence across tabs,
+with at most 64 discovery slots and a one-second per-key query cooldown.
+Endpoint failure memory is bounded to 128 entries. Retries use OS-random jitter
+and exponential cooldowns (400 ms base, 30 seconds maximum). Eligible direct
+endpoints precede relay alternatives; each record gets at most two passes.
+The thirty-second native navigation budget starts when work is queued and
+includes waiting for discovery, retry delays, TCP/TLS and document transfer.
+A document/session is never shared as a substitute for reauthenticating a new
+connection. Cooldowns expire and a successful authenticated fetch clears them.
+
+Maintenance remembers up to 64 peer publication acknowledgements. A new peer or
+one that recovers after failure receives the current signed self-record during
+health maintenance, without waiting for the next global renewal. Live relay
+health is sampled by the existing worker; unchanged route lists no longer cause
+a new self-signature on every tick. `dht status` includes registration counts,
+failures, sample age, last successful registration and history-slot occupancy.
+Stale diagnostics are marked by age and are not reachability proofs.
+
+Of 256 persistent owner-history slots, at most 240 admit untrusted new owners;
+16 slots are reserved for the local ID and up to fifteen explicit bootstrap
+IDs. Existing records can always advance their signed sequence. Bootstrap
+reservations come only from local configuration, never an advertised record.
+No signed history is evicted, including across expiry or restart. Legacy full
+snapshots retain their history and may lack reservation headroom; no migration
+silently deletes records to manufacture room.
+
+There is an unavoidable remaining limit: finite exact rollback history cannot
+admit infinitely many distinct owners forever. Untrusted admissions can still
+fill under a Sybil attack, requiring operator selection of trusted peers and
+planned capacity. Reservations protect configured identities, not arbitrary new
+users. Never clear caches automatically to suppress a full-cache or rollback
+error. A future authenticated admission/history design is needed before broad
+open-network operation. DHT node IDs are cheap to generate; routing buckets and
+bootstrap diversity do not eliminate Sybil, eclipse, withholding or partition
+attacks. Use independently operated bootstrap peers and compare identities out
+of band. This is reliability hardening, not a complete DHT security solution.

@@ -682,6 +682,12 @@ fn dht_command(args: &[String]) -> Result<()> {
             )
             .ok()
             .filter(|s| s.id == state.local);
+            if let Ok(health) = yami_node::relay_host::read_health(&dir) {
+                if health.id == state.local {
+                    println!("Relay registrations: {}/{} (sample age {}s); connection failures: {}; last successful registration: {}", if at.saturating_sub(health.observed)<=10 {health.registered} else {0},health.configured,at.saturating_sub(health.observed),health.failures,health.last_success);
+                }
+            }
+            println!("DHT history slots: {}/{}; untrusted admissions limited to {}; rollback history is never evicted",state.records().len(),yami_dht::MAX_CACHE,yami_dht::MAX_UNTRUSTED_OWNERS);
             println!(
                 "Known peers: {}",
                 state

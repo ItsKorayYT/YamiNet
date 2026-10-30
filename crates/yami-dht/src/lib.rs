@@ -15,7 +15,7 @@ pub use client::{
 };
 pub use record::{PeerRecord, MAX_RECORD_BYTES, MAX_RECORD_TTL};
 pub use routing::{distance, Contact, RoutingTable, BUCKET_SIZE, MAX_ROUTES};
-pub use state::{State, MAX_CACHE};
+pub use state::{State, MAX_CACHE, MAX_UNTRUSTED_OWNERS, RESERVED_OWNERS};
 use std::{
     io,
     net::SocketAddrV4,

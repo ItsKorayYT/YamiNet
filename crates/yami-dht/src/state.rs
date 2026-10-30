@@ -2,6 +2,8 @@ use crate::{distance, invalid, Contact, Network, PeerRecord, RoutingTable, MAX_R
 use std::io;
 use yami_identity::NodeId;
 pub const MAX_CACHE: usize = 256;
+pub const RESERVED_OWNERS: usize = 16;
+pub const MAX_UNTRUSTED_OWNERS: usize = MAX_CACHE - RESERVED_OWNERS;
 /// Expired records are never used as locations. Their signed high-water marks
 /// remain bounded and persistent so expiry/churn cannot bypass rollback checks.
 /// At capacity, new IDs fail closed rather than evict anti-rollback history.
@@ -11,6 +13,7 @@ pub struct State {
     pub network: Network,
     pub routing: RoutingTable,
     pub(crate) records: Vec<PeerRecord>,
+    protected: Vec<NodeId>,
 }
 impl State {
     pub fn new(local: NodeId, network: Network) -> Self {
@@ -19,7 +22,24 @@ impl State {
             network,
             routing: RoutingTable::new(local),
             records: Vec::new(),
+            protected: vec![local],
         }
+    }
+    /// Only explicit local configuration may reserve owners. Never evict history.
+    pub fn protect(&mut self, ids: &[NodeId]) -> io::Result<()> {
+        let mut protected = vec![self.local];
+        for id in ids {
+            if !protected.contains(id) {
+                protected.push(*id);
+            }
+        }
+        if protected.len() > RESERVED_OWNERS {
+            return Err(invalid(
+                "at most fifteen bootstrap owners can reserve cache space",
+            ));
+        }
+        self.protected = protected;
+        Ok(())
     }
     pub fn records(&self) -> &[PeerRecord] {
         &self.records
@@ -43,8 +63,16 @@ impl State {
             }
             *old = record;
         } else {
-            if self.records.len() >= MAX_CACHE {
-                return Err(invalid("peer cache/high-water budget is full"));
+            if self.records.len() >= MAX_CACHE
+                || (!self.protected.contains(&record.id())
+                    && self
+                        .records
+                        .iter()
+                        .filter(|r| !self.protected.contains(&r.id()))
+                        .count()
+                        >= MAX_UNTRUSTED_OWNERS)
+            {
+                return Err(invalid("peer cache admission full; signed rollback history retained, reserved local/bootstrap capacity protected"));
             }
             self.records.push(record);
         }

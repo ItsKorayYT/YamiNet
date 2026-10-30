@@ -104,6 +104,9 @@ impl Service {
     }
     /// Bounded signed candidates plus recently authenticated routes. Unverified
     /// manual pins are supplied separately and must still pass pinned TLS.
+    pub fn protect(&self, ids: &[NodeId]) -> io::Result<()> {
+        self.guard()?.state.protect(ids)
+    }
     pub fn contacts(&self, at: u64) -> io::Result<Vec<Contact>> {
         self.candidates(at)
     }

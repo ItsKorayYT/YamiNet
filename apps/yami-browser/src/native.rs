@@ -183,6 +183,15 @@ impl Resolver {
             .iter()
             .any(|r| r.id() == address.id && r.verify(self.network, at).is_err());
         let seeds = self.seeds()?;
+        service
+            .protect(
+                &seeds
+                    .iter()
+                    .map(|s| s.id)
+                    .take(yami_dht::RESERVED_OWNERS - 1)
+                    .collect::<Vec<_>>(),
+            )
+            .map_err(|_| "Cannot reserve bootstrap cache capacity")?;
         let has_contacts = state
             .records()
             .iter()

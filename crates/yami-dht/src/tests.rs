@@ -142,10 +142,10 @@ fn rollback_and_equivocation_are_rejected_even_after_expiry() {
 fn cache_and_xor_buckets_stay_bounded_and_routes_expire() {
     let local = *identity().id();
     let mut state = State::new(local, Network::Loopback);
-    for _ in 0..MAX_CACHE {
+    for _ in 0..MAX_UNTRUSTED_OWNERS {
         state.accept(record(&identity(), 1, 200, 100), 100).unwrap();
     }
-    assert_eq!(state.records().len(), MAX_CACHE);
+    assert_eq!(state.records().len(), MAX_UNTRUSTED_OWNERS);
     assert!(state.accept(record(&identity(), 1, 200, 100), 100).is_err());
     let mut routing = RoutingTable::new(local);
     let mut accepted = 0;
@@ -543,4 +543,28 @@ fn maximal_relay_records_fit_existing_frame_and_snapshot_budgets() {
             .len())
             < 64 * 1024
     );
+}
+
+#[test]
+fn owner_flood_cannot_consume_local_and_explicit_bootstrap_reservations() {
+    let local = identity();
+    let bootstrap = identity();
+    let mut state = State::new(*local.id(), Network::Loopback);
+    state.protect(&[*bootstrap.id()]).unwrap();
+    let mut old = None;
+    for _ in 0..MAX_UNTRUSTED_OWNERS {
+        let owner = identity();
+        let rec = record(&owner, 2, 200, 100);
+        if old.is_none() {
+            old = Some(record(&owner, 1, 200, 100));
+        }
+        state.accept(rec, 100).unwrap();
+    }
+    assert!(state.accept(record(&identity(), 1, 200, 100), 100).is_err());
+    state.accept(record(&local, 1, 200, 100), 100).unwrap();
+    state.accept(record(&bootstrap, 1, 200, 100), 100).unwrap();
+    assert!(state.accept(old.unwrap(), 100).is_err());
+    // Expiry does not erase rollback history to manufacture room.
+    assert!(state.accept(record(&identity(), 1, 400, 300), 300).is_err());
+    assert_eq!(state.records().len(), MAX_UNTRUSTED_OWNERS + 2);
 }

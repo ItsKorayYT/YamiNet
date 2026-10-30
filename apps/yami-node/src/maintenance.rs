@@ -93,6 +93,7 @@ pub struct Maintainer {
     health_failures: u32,
     cursor: usize,
     retries: Vec<(Contact, u32, u64)>,
+    peer_publications: Vec<(Contact, u64)>,
     last_tick: u64,
     last_publication: Option<u64>,
     last_error: Option<Failure>,
@@ -125,6 +126,7 @@ impl Maintainer {
             health_failures: 0,
             cursor: 0,
             retries: Vec::new(),
+            peer_publications: Vec::new(),
             last_tick: at,
             last_publication: None,
             last_error: None,
@@ -165,6 +167,9 @@ impl Maintainer {
     pub fn set_routes(&mut self, mut routes: Vec<RelayRoute>) -> io::Result<()> {
         routes.sort();
         routes.dedup();
+        if routes == self.routes {
+            return Ok(());
+        }
         // Validate before replacing configuration, including the empty withdrawal.
         PeerRecord::sign_routes(
             &self.identity,
@@ -217,6 +222,13 @@ impl Maintainer {
         if seeds.len() > yami_dht::MAX_CACHE {
             return Err(io::Error::other("too many maintenance seeds"));
         }
+        self.service.protect(
+            &seeds
+                .iter()
+                .map(|s| s.id)
+                .take(yami_dht::RESERVED_OWNERS - 1)
+                .collect::<Vec<_>>(),
+        )?;
         let network = self.service.snapshot()?.network;
         for seed in seeds {
             seed.validate(network)?;
@@ -269,7 +281,11 @@ impl Maintainer {
             {
                 continue;
             }
-            if publish {
+            if publish
+                || !self
+                    .peer_publications
+                    .contains(&(contact, self.record.sequence()))
+            {
                 pass.queries += 1;
                 let budget =
                     yami_dht::RPC_TIMEOUT.min(deadline.saturating_duration_since(Instant::now()));
@@ -284,6 +300,12 @@ impl Maintainer {
                 .is_ok()
                 {
                     pass.published += 1;
+                    self.peer_publications.retain(|(peer, _)| *peer != contact);
+                    if self.peer_publications.len() == yami_dht::MAX_CANDIDATES {
+                        self.peer_publications.remove(0);
+                    }
+                    self.peer_publications
+                        .push((contact, self.record.sequence()));
                 } else {
                     pass.failures += 1;
                     self.peer_failed(contact, at, entropy);
@@ -315,6 +337,9 @@ impl Maintainer {
         }
         let finished = self.service.now()?;
         self.not_before = finished.saturating_add(5);
+        if pass.published > 0 {
+            self.last_publication = Some(finished);
+        }
         if publish {
             if pass.published > 0 {
                 self.last_publication = Some(finished);
@@ -352,6 +377,7 @@ impl Maintainer {
         Ok(pass)
     }
     fn peer_failed(&mut self, contact: Contact, at: u64, entropy: u64) {
+        self.peer_publications.retain(|(peer, _)| *peer != contact);
         if let Some((_, failures, until)) = self
             .retries
             .iter_mut()
@@ -568,6 +594,9 @@ impl Worker {
                             eprintln!("DHT maintenance diagnostics could not be saved");
                         }
                     }
+                    if let Some(routes) = &routes {
+                        let _ = routes.write_health(&directory, *engine.identity.id(), true);
+                    }
                     let delay = engine
                         .service
                         .now()
@@ -578,6 +607,9 @@ impl Worker {
                     } else {
                         delay
                     }));
+                }
+                if let Some(routes) = &routes {
+                    let _ = routes.write_health(&directory, *engine.identity.id(), false);
                 }
                 if let Ok(status) = engine.status(false) {
                     let _ = status::write_status(&path, &status);
