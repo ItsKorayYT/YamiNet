@@ -18,7 +18,8 @@ use std::{fmt, io, path::PathBuf};
 pub use node_id::{NodeId, NODE_ID_PREFIX};
 pub use signed::{
     sha256, Digest, DocumentMetadata, PeerRecordMetadata, Purpose, RelayRegistration, RelayRoute,
-    RoutedPeerRecordMetadata, Signable, Signature, SignatureFile, SiteManifest, TlsMessage,
+    RendezvousConsent, RoutedPeerRecordMetadata, Signable, Signature, SignatureFile, SiteManifest,
+    TlsMessage,
 };
 pub use store::{default_dir, NodeIdentity, ID_FILE, KEY_FILE};
 

@@ -404,3 +404,6 @@ mod public_tests {
             .is_err());
     }
 }
+
+/// Isolated, socket-free NAT research prerequisites. Not a NAT transport.
+pub mod rendezvous;

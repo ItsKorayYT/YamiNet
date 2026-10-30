@@ -23,14 +23,16 @@ pub enum Purpose {
     PeerRecord,
     RoutedPeerRecord,
     RelayRegistration,
+    RendezvousConsent,
 }
 impl Purpose {
-    pub const ALL: [Self; 5] = [
+    pub const ALL: [Self; 6] = [
         Self::DocumentMetadata,
         Self::SiteManifest,
         Self::PeerRecord,
         Self::RoutedPeerRecord,
         Self::RelayRegistration,
+        Self::RendezvousConsent,
     ];
     /// The domain separation prefix of every message signed for this purpose.
     pub fn tag(self) -> &'static [u8] {
@@ -40,6 +42,7 @@ impl Purpose {
             Self::PeerRecord => b"yaminet.peer-record.v1\0",
             Self::RoutedPeerRecord => b"yaminet.peer-record.v2\0",
             Self::RelayRegistration => b"yaminet.relay-registration.v1\0",
+            Self::RendezvousConsent => b"yaminet.rendezvous-consent.v1\0",
         }
     }
     pub fn name(self) -> &'static str {
@@ -322,6 +325,29 @@ impl Signable for RoutedPeerRecordMetadata {
     }
 }
 
+/// Research prerequisite only: both participants sign the exact same bounded
+/// rendezvous consent. This is not a document transport or endpoint proof.
+#[derive(Debug, Clone)]
+pub struct RendezvousConsent {
+    pub coordinator: NodeId,
+    pub initiator: NodeId,
+    pub responder: NodeId,
+    pub nonce: [u8; 32],
+    pub expires: u64,
+}
+impl sealed::Sealed for RendezvousConsent {}
+impl Signable for RendezvousConsent {
+    const PURPOSE: Purpose = Purpose::RendezvousConsent;
+    fn canonical_bytes(&self) -> Vec<u8> {
+        let mut bytes = Vec::with_capacity(136);
+        bytes.extend(self.coordinator.public_key());
+        bytes.extend(self.initiator.public_key());
+        bytes.extend(self.responder.public_key());
+        bytes.extend(self.nonce);
+        bytes.extend(self.expires.to_be_bytes());
+        bytes
+    }
+}
 impl Signable for SiteManifest {
     const PURPOSE: Purpose = Purpose::SiteManifest;
     /// `SHA-256(style) || u32 page count || (u16 key length || key || SHA-256(page))*`
