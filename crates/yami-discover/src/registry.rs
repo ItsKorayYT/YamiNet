@@ -1437,6 +1437,24 @@ mod tests {
         );
         assert_eq!(report.view.len(), 1);
 
+        let report = reopened
+            .refresh_source_with(
+                "remote",
+                &MockFetcher {
+                    result: Err(RemoteFetchError::relay("relay unavailable")),
+                },
+            )
+            .unwrap();
+        assert_eq!(
+            report.remote_error.as_ref().unwrap().kind,
+            RemoteFetchErrorKind::Relay
+        );
+        assert_eq!(report.view.len(), 1);
+        assert!(matches!(
+            report.view.status_for("remote").unwrap().state,
+            SourceState::Cached { .. }
+        ));
+
         let state_without_cache = root.join("state-no-cache");
         let mut empty = DiscoveryStore::open(&state_without_cache).unwrap();
         empty.register_remote("remote", remote_address).unwrap();

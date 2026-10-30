@@ -16,7 +16,7 @@ use std::{
     net::SocketAddr,
     path::Path,
 };
-use yami_dht::{Contact, Network, PeerRecord};
+use yami_dht::{Contact, Network, PeerRecord, RelayRoute};
 use yami_identity::NodeId;
 use ynp::Protection;
 use ynp_tls::{IdentityMismatch, TlsTransport};
@@ -37,6 +37,8 @@ pub enum RemoteFetchErrorKind {
     Unreachable,
     /// The endpoint did not prove the exact expected node identity.
     Identity,
+    /// A direct endpoint failed and the signed relay route could not complete.
+    Relay,
     /// Authenticated transport or document framing failed.
     Transport,
     /// The delivered document is not a valid version-1 directory.
@@ -50,6 +52,7 @@ impl RemoteFetchErrorKind {
             Self::Lookup => "DHT lookup failed",
             Self::Unreachable => "node unreachable",
             Self::Identity => "identity mismatch",
+            Self::Relay => "relay failure",
             Self::Transport => "transport error",
             Self::InvalidDirectory => "invalid directory",
         }
@@ -91,6 +94,10 @@ impl RemoteFetchError {
         Self::new(RemoteFetchErrorKind::Identity, message)
     }
 
+    pub fn relay(message: impl Into<String>) -> Self {
+        Self::new(RemoteFetchErrorKind::Relay, message)
+    }
+
     pub fn transport(message: impl Into<String>) -> Self {
         Self::new(RemoteFetchErrorKind::Transport, message)
     }
@@ -123,10 +130,12 @@ pub struct AuthenticatedFetcher {
     service: yami_dht::Service,
     bootstrap: Vec<Contact>,
     network: Network,
+    relays: bool,
 }
 
 impl AuthenticatedFetcher {
-    /// Opens the existing bounded DHT lookup cache under `state_directory`.
+    /// Opens the existing bounded DHT lookup cache under `state_directory`
+    /// with relay fallback disabled.
     ///
     /// `bootstrap` contacts are ordinary manually trusted peers. They are not
     /// discovered or modified here. No connection is opened until [`Self::fetch`].
@@ -134,6 +143,17 @@ impl AuthenticatedFetcher {
         state_directory: impl AsRef<Path>,
         network: Network,
         bootstrap: Vec<Contact>,
+    ) -> std::result::Result<Self, RemoteFetchError> {
+        Self::open_with_relays(state_directory, network, bootstrap, false)
+    }
+
+    /// Opens the fetcher and explicitly selects whether signed relay routes may
+    /// be attempted after every direct endpoint fails.
+    pub fn open_with_relays(
+        state_directory: impl AsRef<Path>,
+        network: Network,
+        bootstrap: Vec<Contact>,
+        relays: bool,
     ) -> std::result::Result<Self, RemoteFetchError> {
         let bootstrap = merge_bootstrap_peers(Vec::new(), bootstrap)?;
         let mode = if network == Network::Public {
@@ -163,12 +183,18 @@ impl AuthenticatedFetcher {
             service,
             bootstrap,
             network,
+            relays,
         })
     }
 
     /// The network policy used for signed records and endpoints.
     pub fn network(&self) -> Network {
         self.network
+    }
+
+    /// Whether signed relay routes are enabled as a fallback.
+    pub fn relays_enabled(&self) -> bool {
+        self.relays
     }
 
     /// Configured manual bootstrap contacts.
@@ -205,16 +231,13 @@ impl AuthenticatedFetcher {
         address: &WebsiteAddress,
         record: &PeerRecord,
     ) -> std::result::Result<Directory, RemoteFetchError> {
-        if record.endpoints().is_empty() {
-            return Err(if record.relay_routes().is_empty() {
-                RemoteFetchError::unreachable("signed record has no direct endpoint")
-            } else {
-                RemoteFetchError::transport(
-                    "node advertises only relay routes; this build does not fetch directories through relays",
-                )
-            });
-        }
-        let mut best: Option<RemoteFetchError> = None;
+        let now = yami_dht::now()
+            .map_err(|error| RemoteFetchError::lookup(format!("cannot read clock: {error}")))?;
+        record
+            .verify(self.network, now)
+            .map_err(|error| RemoteFetchError::lookup(format!("invalid signed record: {error}")))?;
+
+        let mut direct_best: Option<RemoteFetchError> = None;
         for endpoint in record.endpoints() {
             let now = yami_dht::now()
                 .map_err(|error| RemoteFetchError::lookup(format!("cannot read clock: {error}")))?;
@@ -224,16 +247,58 @@ impl AuthenticatedFetcher {
             match fetch_from_endpoint(address, (*endpoint).into()) {
                 Ok(directory) => return Ok(directory),
                 Err(error) => {
-                    if best
+                    if direct_best
                         .as_ref()
                         .is_none_or(|current| error_priority(&error) >= error_priority(current))
                     {
-                        best = Some(error);
+                        direct_best = Some(error);
                     }
                 }
             }
         }
-        Err(best.unwrap_or_else(|| RemoteFetchError::unreachable("no usable endpoint")))
+
+        if record.relay_routes().is_empty() {
+            return Err(direct_best.unwrap_or_else(|| {
+                RemoteFetchError::unreachable("signed record has no direct or relay endpoint")
+            }));
+        }
+        if !self.relays {
+            return Err(direct_best.unwrap_or_else(|| {
+                RemoteFetchError::relay(
+                    "signed record has only relay routes and relay fallback is disabled",
+                )
+            }));
+        }
+
+        let mut relay_best: Option<RemoteFetchError> = None;
+        for relay in record.relay_routes() {
+            let now = yami_dht::now()
+                .map_err(|error| RemoteFetchError::lookup(format!("cannot read clock: {error}")))?;
+            record.verify(self.network, now).map_err(|error| {
+                RemoteFetchError::lookup(format!("invalid signed record: {error}"))
+            })?;
+            match fetch_from_relay(address, *relay, self.network) {
+                Ok(directory) => return Ok(directory),
+                Err(error) => {
+                    if relay_best
+                        .as_ref()
+                        .is_none_or(|current| error_priority(&error) >= error_priority(current))
+                    {
+                        relay_best = Some(error);
+                    }
+                }
+            }
+        }
+        if let Some(relay) = relay_best {
+            if let Some(direct) = direct_best {
+                if error_priority(&direct) > error_priority(&relay) {
+                    return Err(direct);
+                }
+            }
+            return Err(relay);
+        }
+        Err(direct_best
+            .unwrap_or_else(|| RemoteFetchError::unreachable("no usable direct or relay endpoint")))
     }
 }
 
@@ -387,21 +452,78 @@ fn fetch_from_endpoint(
             "connection did not authenticate TLS 1.3 with the expected node identity",
         ));
     }
-    let document =
-        ynp::request(&mut *connection, address.key()).map_err(|error| match error.kind() {
-            io::ErrorKind::NotFound => RemoteFetchError::transport("document was not found"),
-            io::ErrorKind::TimedOut | io::ErrorKind::WouldBlock | io::ErrorKind::UnexpectedEof => {
-                RemoteFetchError::unreachable(
-                    "node stopped responding while returning the document",
-                )
-            }
-            _ => RemoteFetchError::transport(format!("document request failed: {error}")),
-        })?;
+    let document = ynp::request(&mut *connection, address.key())
+        .map_err(|error| classify_request_error(error, false))?;
     Directory::parse(&document.source).map_err(|error| {
         RemoteFetchError::invalid_directory(format!(
             "delivered document is not a valid version-1 directory: {error}"
         ))
     })
+}
+
+fn fetch_from_relay(
+    address: &WebsiteAddress,
+    relay: RelayRoute,
+    network: Network,
+) -> std::result::Result<Directory, RemoteFetchError> {
+    let route = yami_relay::Route {
+        relay: relay.relay,
+        endpoint: relay.endpoint.into(),
+        destination: address.node_id(),
+    };
+    let mut connection = route
+        .connect_with_timeout(network == Network::Public, yami_dht::RPC_TIMEOUT)
+        .map_err(classify_relay_error)?;
+    if connection.protection() != Protection::Tls13PinnedServer {
+        return Err(RemoteFetchError::identity(
+            "relay tunnel did not independently authenticate the destination over TLS 1.3",
+        ));
+    }
+    let document = ynp::request(&mut *connection, address.key())
+        .map_err(|error| classify_request_error(error, true))?;
+    Directory::parse(&document.source).map_err(|error| {
+        RemoteFetchError::invalid_directory(format!(
+            "delivered document is not a valid version-1 directory: {error}"
+        ))
+    })
+}
+
+fn classify_request_error(error: io::Error, relayed: bool) -> RemoteFetchError {
+    match error.kind() {
+        io::ErrorKind::NotFound => RemoteFetchError::transport("document was not found"),
+        io::ErrorKind::TimedOut | io::ErrorKind::WouldBlock | io::ErrorKind::UnexpectedEof => {
+            if relayed {
+                RemoteFetchError::relay(
+                    "relay tunnel stopped responding while returning the document",
+                )
+            } else {
+                RemoteFetchError::unreachable(
+                    "node stopped responding while returning the document",
+                )
+            }
+        }
+        _ => {
+            if relayed {
+                RemoteFetchError::relay(format!("relayed document request failed: {error}"))
+            } else {
+                RemoteFetchError::transport(format!("document request failed: {error}"))
+            }
+        }
+    }
+}
+
+fn classify_relay_error(error: io::Error) -> RemoteFetchError {
+    if error
+        .get_ref()
+        .and_then(|source| source.downcast_ref::<IdentityMismatch>())
+        .is_some()
+    {
+        RemoteFetchError::identity(
+            "relay or destination did not prove the exact expected node identity",
+        )
+    } else {
+        RemoteFetchError::relay(format!("signed relay route failed: {error}"))
+    }
 }
 
 fn classify_connect_error(error: io::Error) -> RemoteFetchError {
@@ -433,9 +555,10 @@ fn error_priority(error: &RemoteFetchError) -> u8 {
         RemoteFetchErrorKind::Configuration => 0,
         RemoteFetchErrorKind::Lookup => 1,
         RemoteFetchErrorKind::Unreachable => 2,
-        RemoteFetchErrorKind::Transport => 3,
-        RemoteFetchErrorKind::InvalidDirectory => 4,
-        RemoteFetchErrorKind::Identity => 5,
+        RemoteFetchErrorKind::Relay => 3,
+        RemoteFetchErrorKind::Transport => 4,
+        RemoteFetchErrorKind::InvalidDirectory => 5,
+        RemoteFetchErrorKind::Identity => 6,
     }
 }
 
@@ -443,20 +566,258 @@ fn error_priority(error: &RemoteFetchError) -> u8 {
 mod tests {
     use super::*;
     use std::{
-        net::SocketAddr,
-        sync::Arc,
+        io,
+        net::{SocketAddr, SocketAddrV4},
+        sync::{
+            atomic::{AtomicBool, Ordering},
+            Arc,
+        },
         thread::{self, JoinHandle},
+        time::{Duration, Instant},
     };
-    use yami_identity::NodeIdentity;
+    use yami_identity::{NodeIdentity, RelayRoute};
+    use yami_relay::{Limits, Registration, Relay, Route as RelayClientRoute};
     use ynp::{Frame, Incoming, Message};
-    use ynp_tls::TlsListener;
+    use ynp_tls::{TlsAcceptor, TlsListener};
 
     const ID: &str = "yn1-tiqub4vxm4zslzlrhlfhc5k6b7vvkealot25nodtcixooe6xfzmxfsm6re";
 
     fn directory_source() -> String {
+        directory_source_named("Remote Directory")
+    }
+
+    fn directory_source_named(title: &str) -> String {
         format!(
-            "@page 0.2\n  title Remote Directory\n:: directory 1\n  :: card Remote Site\n    > yami://{ID}/home | Open\n    A remote listing delivered over pinned TLS.\n"
+            "@page 0.2\n  title {title}\n:: directory 1\n  :: card Remote Site\n    > yami://{ID}/home | Open\n    A remote listing delivered over pinned TLS.\n"
         )
+    }
+
+    fn serve_document(connection: &mut dyn ynp::Connection, source: &str) -> io::Result<()> {
+        let request = ynp::read_frame(&mut *connection)?;
+        let Message::Get { key } = request.message else {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "expected a YNP Get request",
+            ));
+        };
+        ynp::write_frame(
+            &mut *connection,
+            &Frame {
+                request_id: request.request_id,
+                message: Message::Document(ynp::DocumentData {
+                    key,
+                    source: source.to_string(),
+                    style: String::new(),
+                }),
+            },
+        )
+    }
+
+    struct RelayHost {
+        stop: Arc<AtomicBool>,
+        relay: Arc<Relay>,
+        route: RelayRoute,
+        relay_thread: Option<JoinHandle<()>>,
+        host_thread: Option<JoinHandle<()>>,
+    }
+
+    impl RelayHost {
+        fn new(
+            source: String,
+            relay_identity: Arc<NodeIdentity>,
+            host_identity: Arc<NodeIdentity>,
+        ) -> Self {
+            let relay_id = *relay_identity.id();
+            let relay = Arc::new(
+                Relay::bind(
+                    "127.0.0.1:0".parse().unwrap(),
+                    relay_identity,
+                    Limits::default(),
+                )
+                .unwrap(),
+            );
+            let endpoint = match relay.local_addr().unwrap() {
+                SocketAddr::V4(endpoint) => endpoint,
+                SocketAddr::V6(_) => panic!("loopback relay must be IPv4"),
+            };
+            let route = RelayRoute {
+                relay: relay_id,
+                endpoint,
+            };
+            let stop = Arc::new(AtomicBool::new(false));
+            let relay_thread = {
+                let relay = Arc::clone(&relay);
+                let stop = Arc::clone(&stop);
+                thread::spawn(move || {
+                    let _ = relay.run(&stop);
+                })
+            };
+            let host_route = RelayClientRoute {
+                relay: relay_id,
+                endpoint: endpoint.into(),
+                destination: *host_identity.id(),
+            };
+            let host_stop = Arc::clone(&stop);
+            let host_thread = thread::spawn(move || {
+                let _ = yami_relay::run_host(
+                    host_route,
+                    host_identity,
+                    &host_stop,
+                    &|connection| serve_document(connection, &source),
+                    &|_| {},
+                );
+            });
+            let deadline = Instant::now() + Duration::from_secs(5);
+            while relay.statistics().registrations == 0 && Instant::now() < deadline {
+                thread::sleep(Duration::from_millis(10));
+            }
+            assert!(
+                relay.statistics().registrations > 0,
+                "relay host did not register"
+            );
+            Self {
+                stop,
+                relay,
+                route,
+                relay_thread: Some(relay_thread),
+                host_thread: Some(host_thread),
+            }
+        }
+
+        fn route(&self) -> RelayRoute {
+            self.route
+        }
+
+        fn forwarded_bytes(&self) -> u64 {
+            self.relay.statistics().forwarded_bytes
+        }
+    }
+
+    impl Drop for RelayHost {
+        fn drop(&mut self) {
+            self.stop.store(true, Ordering::SeqCst);
+            if let Some(thread) = self.host_thread.take() {
+                let _ = thread.join();
+            }
+            if let Some(thread) = self.relay_thread.take() {
+                let _ = thread.join();
+            }
+        }
+    }
+
+    struct MismatchedHost {
+        stop: Arc<AtomicBool>,
+        route: RelayRoute,
+        relay_thread: Option<JoinHandle<()>>,
+        host_thread: Option<JoinHandle<()>>,
+    }
+
+    impl MismatchedHost {
+        fn new(
+            relay_identity: Arc<NodeIdentity>,
+            registration_identity: Arc<NodeIdentity>,
+            inner_identity: Arc<NodeIdentity>,
+        ) -> Self {
+            let relay_id = *relay_identity.id();
+            let relay = Arc::new(
+                Relay::bind(
+                    "127.0.0.1:0".parse().unwrap(),
+                    relay_identity,
+                    Limits::default(),
+                )
+                .unwrap(),
+            );
+            let endpoint = match relay.local_addr().unwrap() {
+                SocketAddr::V4(endpoint) => endpoint,
+                SocketAddr::V6(_) => panic!("loopback relay must be IPv4"),
+            };
+            let route = RelayRoute {
+                relay: relay_id,
+                endpoint,
+            };
+            let stop = Arc::new(AtomicBool::new(false));
+            let relay_thread = {
+                let relay = Arc::clone(&relay);
+                let stop = Arc::clone(&stop);
+                thread::spawn(move || {
+                    let _ = relay.run(&stop);
+                })
+            };
+            let host_stop = Arc::clone(&stop);
+            let registration_id = *registration_identity.id();
+            let host_thread = thread::spawn(move || {
+                let Ok(registration) = Registration::connect(
+                    RelayClientRoute {
+                        relay: relay_id,
+                        endpoint: endpoint.into(),
+                        destination: registration_id,
+                    },
+                    &registration_identity,
+                ) else {
+                    return;
+                };
+                let Ok(acceptor) = TlsAcceptor::new(inner_identity) else {
+                    return;
+                };
+                let _ = registration.accept(&acceptor, &host_stop);
+            });
+            let deadline = Instant::now() + Duration::from_secs(5);
+            while relay.statistics().registrations == 0 && Instant::now() < deadline {
+                thread::sleep(Duration::from_millis(10));
+            }
+            assert!(
+                relay.statistics().registrations > 0,
+                "relay host did not register"
+            );
+            Self {
+                stop,
+                route,
+                relay_thread: Some(relay_thread),
+                host_thread: Some(host_thread),
+            }
+        }
+
+        fn route(&self) -> RelayRoute {
+            self.route
+        }
+    }
+
+    impl Drop for MismatchedHost {
+        fn drop(&mut self) {
+            self.stop.store(true, Ordering::SeqCst);
+            if let Some(thread) = self.host_thread.take() {
+                let _ = thread.join();
+            }
+            if let Some(thread) = self.relay_thread.take() {
+                let _ = thread.join();
+            }
+        }
+    }
+
+    fn record(
+        destination: &NodeIdentity,
+        endpoints: Vec<SocketAddrV4>,
+        routes: Vec<RelayRoute>,
+    ) -> PeerRecord {
+        let now = yami_dht::now().unwrap();
+        PeerRecord::sign_routes(
+            destination,
+            endpoints,
+            routes,
+            now + 120,
+            1,
+            Network::Loopback,
+            now,
+        )
+        .unwrap()
+    }
+
+    fn address(destination: &NodeIdentity) -> WebsiteAddress {
+        WebsiteAddress::parse(&format!("yami://{}/home", destination.id())).unwrap()
+    }
+
+    fn fetcher(root: &Path, relays: bool) -> AuthenticatedFetcher {
+        AuthenticatedFetcher::open_with_relays(root, Network::Loopback, Vec::new(), relays).unwrap()
     }
 
     fn serve_once(identity: Arc<NodeIdentity>, source: String) -> (SocketAddr, JoinHandle<()>) {
@@ -526,6 +887,187 @@ mod tests {
         let error = fetch_from_endpoint(&address, endpoint).unwrap_err();
         assert_eq!(error.kind, RemoteFetchErrorKind::InvalidDirectory);
         server.join().unwrap();
+    }
+
+    #[test]
+    fn relayed_fetch_authenticates_relay_and_destination() {
+        let destination = Arc::new(NodeIdentity::generate().unwrap());
+        let host = RelayHost::new(
+            directory_source(),
+            Arc::new(NodeIdentity::generate().unwrap()),
+            Arc::clone(&destination),
+        );
+        let record = record(&destination, Vec::new(), vec![host.route()]);
+        let root = scratch("relay-success");
+        let fetcher = fetcher(&root, true);
+        let directory = fetcher
+            .fetch_record(&address(&destination), &record)
+            .unwrap();
+        assert_eq!(directory.name(), "Remote Directory");
+        assert!(host.forwarded_bytes() > 0);
+        drop(fetcher);
+        drop(host);
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn direct_endpoint_wins_before_relay() {
+        let destination = Arc::new(NodeIdentity::generate().unwrap());
+        let (direct_endpoint, direct_server) = serve_once(
+            Arc::clone(&destination),
+            directory_source_named("Direct Directory"),
+        );
+        let SocketAddr::V4(direct_endpoint) = direct_endpoint else {
+            panic!("direct test endpoint must be IPv4");
+        };
+        let host = RelayHost::new(
+            directory_source_named("Relay Directory"),
+            Arc::new(NodeIdentity::generate().unwrap()),
+            Arc::clone(&destination),
+        );
+        let record = record(&destination, vec![direct_endpoint], vec![host.route()]);
+        let root = scratch("relay-direct-first");
+        let fetcher = fetcher(&root, true);
+        let directory = fetcher
+            .fetch_record(&address(&destination), &record)
+            .unwrap();
+        assert_eq!(directory.name(), "Direct Directory");
+        assert_eq!(host.forwarded_bytes(), 0);
+        direct_server.join().unwrap();
+        drop(fetcher);
+        drop(host);
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn relay_fallback_after_failed_direct_endpoint() {
+        let destination = Arc::new(NodeIdentity::generate().unwrap());
+        let host = RelayHost::new(
+            directory_source(),
+            Arc::new(NodeIdentity::generate().unwrap()),
+            Arc::clone(&destination),
+        );
+        let record = record(
+            &destination,
+            vec!["127.0.0.1:9".parse().unwrap()],
+            vec![host.route()],
+        );
+        let root = scratch("relay-fallback");
+        let fetcher = fetcher(&root, true);
+        let directory = fetcher
+            .fetch_record(&address(&destination), &record)
+            .unwrap();
+        assert_eq!(directory.name(), "Remote Directory");
+        assert!(host.forwarded_bytes() > 0);
+        drop(fetcher);
+        drop(host);
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn wrong_relay_identity_is_rejected() {
+        let destination = Arc::new(NodeIdentity::generate().unwrap());
+        let host = RelayHost::new(
+            directory_source(),
+            Arc::new(NodeIdentity::generate().unwrap()),
+            Arc::clone(&destination),
+        );
+        let wrong_relay = *NodeIdentity::generate().unwrap().id();
+        let route = RelayRoute {
+            relay: wrong_relay,
+            endpoint: host.route().endpoint,
+        };
+        let record = record(&destination, Vec::new(), vec![route]);
+        let root = scratch("relay-wrong-relay");
+        let fetcher = fetcher(&root, true);
+        let error = fetcher
+            .fetch_record(&address(&destination), &record)
+            .unwrap_err();
+        assert_eq!(error.kind, RemoteFetchErrorKind::Identity);
+        assert_eq!(host.forwarded_bytes(), 0);
+        drop(fetcher);
+        drop(host);
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn wrong_destination_identity_inside_relay_is_rejected() {
+        let destination = Arc::new(NodeIdentity::generate().unwrap());
+        let host = MismatchedHost::new(
+            Arc::new(NodeIdentity::generate().unwrap()),
+            Arc::clone(&destination),
+            Arc::new(NodeIdentity::generate().unwrap()),
+        );
+        let record = record(&destination, Vec::new(), vec![host.route()]);
+        let root = scratch("relay-wrong-destination");
+        let fetcher = fetcher(&root, true);
+        let error = fetcher
+            .fetch_record(&address(&destination), &record)
+            .unwrap_err();
+        assert_eq!(error.kind, RemoteFetchErrorKind::Identity);
+        drop(fetcher);
+        drop(host);
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn unavailable_relay_is_reported_without_plaintext_fallback() {
+        let destination = Arc::new(NodeIdentity::generate().unwrap());
+        let route = RelayRoute {
+            relay: *NodeIdentity::generate().unwrap().id(),
+            endpoint: "127.0.0.1:9".parse().unwrap(),
+        };
+        let record = record(&destination, Vec::new(), vec![route]);
+        let root = scratch("relay-unavailable");
+        let fetcher = fetcher(&root, true);
+        let error = fetcher
+            .fetch_record(&address(&destination), &record)
+            .unwrap_err();
+        assert_eq!(error.kind, RemoteFetchErrorKind::Relay);
+        drop(fetcher);
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn relay_fallback_disabled_by_default() {
+        let destination = Arc::new(NodeIdentity::generate().unwrap());
+        let host = RelayHost::new(
+            directory_source(),
+            Arc::new(NodeIdentity::generate().unwrap()),
+            Arc::clone(&destination),
+        );
+        let record = record(&destination, Vec::new(), vec![host.route()]);
+        let root = scratch("relay-disabled");
+        let fetcher = fetcher(&root, false);
+        let error = fetcher
+            .fetch_record(&address(&destination), &record)
+            .unwrap_err();
+        assert_eq!(error.kind, RemoteFetchErrorKind::Relay);
+        assert_eq!(host.forwarded_bytes(), 0);
+        drop(fetcher);
+        drop(host);
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn tampered_relay_route_is_rejected_before_connecting() {
+        let destination = Arc::new(NodeIdentity::generate().unwrap());
+        let route = RelayRoute {
+            relay: *NodeIdentity::generate().unwrap().id(),
+            endpoint: "127.0.0.1:9".parse().unwrap(),
+        };
+        let record = record(&destination, Vec::new(), vec![route]);
+        let mut bytes = record.encode();
+        *bytes.last_mut().unwrap() ^= 1;
+        let tampered = PeerRecord::decode(&bytes).unwrap();
+        let root = scratch("relay-tampered");
+        let fetcher = fetcher(&root, true);
+        let error = fetcher
+            .fetch_record(&address(&destination), &tampered)
+            .unwrap_err();
+        assert_eq!(error.kind, RemoteFetchErrorKind::Lookup);
+        drop(fetcher);
+        let _ = fs::remove_dir_all(root);
     }
 
     #[test]

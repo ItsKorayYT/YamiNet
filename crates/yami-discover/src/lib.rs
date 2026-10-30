@@ -33,8 +33,8 @@
 //! source file; only explicit rebuild or refresh calls read directories. Remote
 //! `yami://` subscriptions use [`AuthenticatedFetcher`] on an explicit
 //! [`DiscoveryStore::refresh_source_with`] call, reusing signed DHT lookup,
-//! pinned TLS 1.3 and YNP framing. No remote content is fetched in the
-//! background or during search.
+//! pinned TLS 1.3, optional signed relay routes and YNP framing. No remote
+//! content is fetched in the background or during search.
 
 mod address;
 mod catalog;

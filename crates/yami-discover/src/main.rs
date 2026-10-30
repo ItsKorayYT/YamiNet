@@ -51,7 +51,7 @@ Usage:
   yami-discover source add NAME --remote YAMI_URL [--state DIR]
   yami-discover source list [--state DIR]
   yami-discover source remove NAME [--state DIR]
-  yami-discover source refresh NAME [--state DIR] [--network public|local] [--bootstrap PIN]... [--peer-dir DIR]
+  yami-discover source refresh NAME [--state DIR] [--network public|local] [--bootstrap PIN]... [--peer-dir DIR] [--enable-relays]
   yami-discover catalog rebuild [--state DIR]
   yami-discover catalog search QUERY [--state DIR]
   yami-discover catalog list [--state DIR]
@@ -84,6 +84,7 @@ Options:
   --network MODE     Remote refresh DHT policy: public (default) or local
   --bootstrap PIN    Trusted bootstrap NODE_ID@IPv4:PORT (repeatable)
   --peer-dir DIR     Read existing manual peers.tsv pins for bootstrap
+  --enable-relays    Allow signed relay routes after direct endpoints fail
   -h, --help         Show this help
 
 Authoring writes atomically through a temporary file. Entries keep document
@@ -94,7 +95,8 @@ Persistent sources are read only by an explicit `catalog rebuild` or
 `source refresh`. `catalog search` uses the last validated snapshots, so a
 temporary source outage does not make previously imported listings disappear.
 `source refresh` on a remote source performs one explicitly requested signed
-DHT lookup and pinned TLS 1.3 fetch; it caches the validated directory and
+DHT lookup and pinned TLS 1.3 fetch (direct first, optional signed relays after
+direct failure with `--enable-relays`); it caches the validated directory and
 falls back to the last snapshot on failure. There is no automatic or background
 fetch. Opening a listed website still requires independent identity
 authentication, and directory content remains untrusted.";
@@ -572,7 +574,7 @@ fn source_refresh(args: &[String]) -> Result<(), String> {
     let options = parse_command_options(
         args,
         &["--state", "--network", "--peer-dir"],
-        &[],
+        &["--enable-relays"],
         &["--bootstrap"],
         "source refresh",
     )?;
@@ -609,8 +611,13 @@ fn source_refresh(args: &[String]) -> Result<(), String> {
                 .collect::<Result<Vec<_>, _>>()?;
             bootstrap =
                 merge_bootstrap_peers(bootstrap, explicit).map_err(|error| error.to_string())?;
-            let fetcher = AuthenticatedFetcher::open(&state, network, bootstrap)
-                .map_err(|error| error.to_string())?;
+            let fetcher = AuthenticatedFetcher::open_with_relays(
+                &state,
+                network,
+                bootstrap,
+                options.flag("--enable-relays"),
+            )
+            .map_err(|error| error.to_string())?;
             let report = store
                 .refresh_source_with(name, &fetcher)
                 .map_err(|error| error.to_string())?;
@@ -1202,17 +1209,19 @@ mod tests {
             "--bootstrap=two".to_string(),
             "--network".to_string(),
             "local".to_string(),
+            "--enable-relays".to_string(),
         ];
         let options = parse_command_options(
             &args,
             &["--network", "--bootstrap"],
-            &[],
+            &["--enable-relays"],
             &["--bootstrap"],
             "source refresh",
         )
         .unwrap();
         assert_eq!(options.values_for("--bootstrap").len(), 2);
         assert_eq!(options.values.get("--network").unwrap(), "local");
+        assert!(options.flag("--enable-relays"));
         assert_eq!(options.positionals, ["remote"]);
 
         assert_eq!(parse_network(None).unwrap(), Network::Public);

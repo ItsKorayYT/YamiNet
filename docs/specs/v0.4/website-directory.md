@@ -272,12 +272,16 @@ format, and it never contains keys or trust assertions.
   trust proof or a claim of current availability.
 - Remote subscriptions use `remote` registry lines. They are fetched only by an
   explicit `source refresh` through the existing signed DHT lookup and pinned
-  TLS 1.3 YNP transport. A successful authenticated fetch validates the
-  delivered bytes as a version-1 directory before writing a snapshot and
-  marking the source `fresh`. A failed fetch retains the last snapshot as
-  `cached`, or reports `unavailable` when none exists. Remote sources remain
-  `inactive-remote` until the first successful fetch; there is no background,
-  startup or search-time fetch and no plaintext fallback.
+  TLS 1.3 YNP transport. Direct signed endpoints are attempted first. Signed
+  relay routes are attempted only when relay fallback is explicitly enabled and
+  every direct endpoint fails; each relay route authenticates the relay over
+  outer TLS and then independently authenticates the destination over inner TLS.
+  A successful authenticated fetch validates the delivered bytes as a version-1
+  directory before writing a snapshot and marking the source `fresh`. A failed
+  fetch retains the last snapshot as `cached`, or reports `unavailable` when
+  none exists. Remote sources remain `inactive-remote` until the first
+  successful fetch; there is no background, startup or search-time fetch, no
+  plaintext fallback and no new relay protocol.
 - The state directory may also contain the existing bounded
   `dht-public-discover.cache` / `dht-local-discover.cache` lookup files and
   locks. They contain signed peer records, never directory trust assertions.

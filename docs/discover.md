@@ -1,8 +1,10 @@
 # Website discovery (YamiNet 0.4 preview)
 
-YamiNet 0.4 starts **decentralized website discovery**. The first milestone is a
-standalone, local-only directory engine in the new `yami-discover` crate. It is
-ready for browser integration but does not change the browser UI, networking,
+YamiNet 0.4 starts **decentralized website discovery**. The `yami-discover`
+crate provides a standalone local directory engine, authoring tools, persistent
+catalogs and explicitly requested authenticated remote fetching, including
+opt-in fallback through existing signed relay routes. It is ready for browser
+integration but does not change the browser UI, networking implementations,
 TLS, DHT, relays, installers or GitHub Actions.
 
 The normative format is
@@ -227,6 +229,11 @@ yami-discover source refresh future --peer-dir /path/to/peers --network public
 
 # Loopback/private test networks select the local DHT policy explicitly.
 yami-discover source refresh future --network local --peer-dir ./test-peers
+
+# Explicitly allow signed relay routes after all direct endpoints fail.
+yami-discover source refresh future \
+  --bootstrap yn1-BOOTSTRAP@198.51.100.10:7443 \
+  --network public --enable-relays
 ```
 
 The fetcher reuses, rather than reimplements:
@@ -238,27 +245,37 @@ The fetcher reuses, rather than reimplements:
 3. existing `ynp-tls` `TlsTransport`, which proves the exact node ID from the
    subscription before sending a request, with TLS 1.3 pinning and no plaintext
    fallback;
-4. existing YNP document framing and the existing `Directory::parse`
+4. existing signed `RelayRoute`s through `yami_relay::Route::connect_with_timeout`
+   when relay fallback is explicitly enabled. The outer TLS session pins the
+   relay identity; the inner TLS session independently pins the destination
+   identity. The relay is never treated as proof of the destination;
+5. existing YNP document framing and the existing `Directory::parse`
    validator, including size and version limits.
 
 A successful fetch writes the validated directory into the existing snapshot
-store and marks the source `fresh`. The document is accepted only after TLS
-authentication and full version-1 directory validation. A failure retains the
-last valid snapshot as `cached` with a bounded reason, or marks the source
-`unavailable` when no snapshot exists. Failure categories distinguish
-configuration, signed lookup, unreachable endpoint, identity mismatch,
-transport/document framing, and invalid directory errors.
+store and marks the source `fresh`. The document is accepted only after the
+source node's TLS authentication (directly or inside the relay tunnel) and full
+version-1 directory validation. A failure retains the last valid snapshot as
+`cached` with a bounded reason, or marks the source `unavailable` when no
+snapshot exists. Failure categories distinguish configuration, signed lookup,
+direct endpoint failure, relay failure, identity mismatch, transport/document
+framing, and invalid directory errors.
 
 `--network public` is the default and requires public IPv4 bootstrap endpoints.
-`--network local` uses the existing loopback DHT policy. This build tries
-direct signed endpoints only; a source advertising only relay routes fails with
-a clear transport error rather than silently using another path. There is no
-automatic refresh, startup fetch, search-time fetch, crawling, telemetry or
-query transmission. The DHT cache and snapshot files remain bounded by the
-existing count and byte limits.
+`--network local` uses the existing loopback DHT policy. Direct signed endpoints
+are always attempted first. Signed relay routes are attempted only when
+`--enable-relays` is present and every direct endpoint has failed; relay support
+is disabled by default. A source advertising only relay routes without the flag
+fails with a clear relay error rather than silently using another path. Each
+relay attempt uses the existing bounded relay budget and limits, never a
+plaintext fallback. There is no automatic refresh, startup fetch, search-time
+fetch, crawling, telemetry or query transmission. The DHT cache and snapshot
+files remain bounded by the existing count and byte limits.
 
-TLS authentication proves which node delivered the directory. It does **not**
-make the directory content, listed websites or their owners trustworthy.
+TLS authentication proves which node delivered the directory, and relay
+authentication proves the relay's own identity. Neither makes the directory
+content, listed websites or their owners trustworthy. The relay cannot decrypt
+the inner destination TLS session.
 
 Snapshot and status files are bounded and validated. A corrupt snapshot makes
 its source unavailable with a bounded reason; a corrupt status falls back to
@@ -397,9 +414,9 @@ Public API surface:
 | `DiscoveryStore::rebuild` / `refresh_source` | Explicit local rebuild or single-source refresh |
 | `DiscoveryStore::refresh_source_with(name, fetcher)` | Explicit authenticated remote refresh returning `RefreshReport` |
 | `DiscoveryStore::load_last` | Load the merged catalog from snapshots only |
-| `AuthenticatedFetcher` | Signed DHT lookup + pinned TLS 1.3 + YNP directory fetch |
+| `AuthenticatedFetcher` | Signed DHT lookup + pinned TLS 1.3 + optional signed relay routes + YNP directory fetch |
 | `RemoteDirectoryFetcher` | Transport adapter trait; must authenticate the exact identity |
-| `RemoteFetchError` / `RemoteFetchErrorKind` | Bounded diagnostic categories and messages |
+| `RemoteFetchError` / `RemoteFetchErrorKind` | Bounded diagnostic categories and messages, including direct vs relay failure |
 | `load_bootstrap_peers` / `merge_bootstrap_peers` | Read existing `peers.tsv` manual pins and merge conflicts |
 | `RefreshReport` | Post-refresh view plus optional remote fetch failure |
 | `CatalogView` | Merged `Catalog` plus per-source `SourceStatus` |
@@ -412,10 +429,11 @@ and use `load_last` + `CatalogView::search` for normal searches. Call `rebuild`,
 refresh action, since those are the only operations that read source files or
 perform network access. For a remote refresh, construct `AuthenticatedFetcher`
 with existing manually trusted bootstrap `Contact`s (or read them through
-`load_bootstrap_peers`), then pass it to `refresh_source_with`. Show
-`RefreshReport::remote_error` when present. The browser must still mark every
-result untrusted and authenticate the canonical destination over TLS 1.3 when
-it is opened.
+`load_bootstrap_peers`), then pass it to `refresh_source_with`. Relay fallback
+is disabled by `AuthenticatedFetcher::open`; use `open_with_relays(..., true)`
+only when the user explicitly enables it. Show `RefreshReport::remote_error`
+when present. The browser must still mark every result untrusted and
+authenticate the canonical destination over TLS 1.3 when it is opened.
 
 ```rust
 use yami_discover::{DiscoveryStore, Error};
@@ -459,6 +477,7 @@ activation of the canonical address.
 | Status reason | 240 characters |
 | Manual bootstrap peers read from `peers.tsv` | 256 (existing peer-store bound) |
 | Signed DHT lookup | Existing fixed query, record and timeout budgets |
+| Signed relay attempts | One pass over signed routes; existing relay lifetime/byte limits and bounded per-attempt budget |
 | Query | 128 characters, 8 terms |
 | Results | 100 |
 
@@ -482,7 +501,9 @@ search, query limits, the result cap, authoring round-trips, reserved-text
 escaping, in-place edits/removals, atomic writes, registry restarts, stable
 source ordering, cached fallback, corrupt state, source removal, individual
 refresh, inactive remote subscriptions, authenticated loopback TLS/YNP fetches,
-wrong identities, invalid delivered documents, mock transport failures and
+wrong identities, invalid delivered documents, mock transport failures,
+loopback relayed fetches, direct-first behavior, relay fallback, wrong relay and
+destination identities, unavailable/disabled relays, tampered relay routes and
 remote cache recovery.
 
 ## Scope
@@ -498,13 +519,14 @@ In scope for this milestone:
   refresh;
 - explicitly requested authenticated remote `yami://` directory fetching over
   the existing signed DHT lookup, pinned TLS 1.3 and YNP stack;
+- explicit, opt-in relay fallback over existing signed relay routes with
+  independent outer relay and inner destination authentication;
 - documentation and unit tests.
 
 Out of scope, deliberately:
 
 - browser UI integration;
 - automatic or background downloading/crawling of directory documents;
-- remote fetching through relay routes in this milestone;
 - directory signatures or reputation;
 - a central search server;
 - changes to TLS, DHT, relays, installers, CI or the existing browser model.

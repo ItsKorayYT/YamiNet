@@ -15,6 +15,7 @@ path = "src/main.rs"
 [dependencies]
 yami-dht = { path = "../yami-dht" }
 yami-identity = { path = "../yami-identity" }
+yami-relay = { path = "../yami-relay" }
 ylang = { path = "../ylang" }
 ynp = { path = "../ynp" }
 ynp-tls = { path = "../ynp-tls" }
