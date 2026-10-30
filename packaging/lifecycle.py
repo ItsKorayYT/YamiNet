@@ -36,8 +36,9 @@ def extract(archive, target):
     return dirs[0]
 
 
-def lifecycle(args):
-    report = {'schema': 'yaminet-package-lifecycle-1', 'platform': platform.platform(), 'checks': {}, 'gui': 'NOT RUN', 'cross_version_upgrade': 'NOT RUN'}
+def lifecycle(args, report=None):
+    if report is None: report = {}
+    report.update({'schema': 'yaminet-package-lifecycle-1', 'platform': platform.platform(), 'checks': {}, 'gui': 'NOT RUN', 'cross_version_upgrade': 'NOT RUN'})
     with tempfile.TemporaryDirectory(prefix='Yami lifecycle path with spaces ') as tmp:
         root = pathlib.Path(tmp).resolve()
         app = extract(args.archive.resolve(), root / 'portable application')
@@ -46,6 +47,7 @@ def lifecycle(args):
         data.mkdir()
         env.update(LOCALAPPDATA=str(data), XDG_DATA_HOME=str(data), YAMINET_PEER_DIR=str(data / 'peers'), YAMINET_BROWSER_DATA_DIR=str(data / 'library'))
         cwd = root / 'non development working directory'; cwd.mkdir()
+        report['phase'] = 'portable-cli'
         report['checks']['portable'] = verify(app)
         suffix = '.exe' if os.name == 'nt' else ''
         keys = data / 'identity'
@@ -60,6 +62,7 @@ def lifecycle(args):
         def unchanged():
             if any(not p.is_file() or hashlib.sha256(p.read_bytes()).hexdigest() != digest for p, digest in hashes.items()):
                 raise ValueError('persistent identity, bookmarks or peer configuration changed')
+        report['phase'] = 'installer-or-desktop-lifecycle'
         if os.name == 'nt':
             import winreg
             key = r'Software\Microsoft\Windows\CurrentVersion\Uninstall\YamiNet'
@@ -75,7 +78,8 @@ def lifecycle(args):
                 raise ValueError('native Windows lifecycle requires an NSIS installer')
             dest = root / 'installed application with spaces'
             previous = args.previous_installer or args.installer
-            run([previous.resolve(), '/S', f'/D={dest}'], env, cwd)
+            # NSIS /D= is a special final raw tail, NOT an ordinary quoted argv item.
+            subprocess.run(f'"{previous.resolve()}" /S /D={dest}', env=env, cwd=cwd, capture_output=True, text=True, timeout=45, check=True)
             if not (dest / 'Uninstall.exe').is_file() or not (menu / 'Yami Browser.lnk').is_file():
                 raise ValueError('installer failed to create uninstall program or shortcut')
             old_version = run([dest / 'yami-browser.exe', '--version'], env, cwd).stdout.strip().rsplit(' ', 1)[-1]
@@ -83,7 +87,7 @@ def lifecycle(args):
                 raise ValueError('previous installer must contain an actually older version')
             report['upgrade_from'] = old_version
             unchanged()
-            run([args.installer.resolve(), '/S', f'/D={dest}'], env, cwd)
+            subprocess.run(f'"{args.installer.resolve()}" /S /D={dest}', env=env, cwd=cwd, capture_output=True, text=True, timeout=45, check=True)
             report['checks']['installed'] = verify(dest, expected_version=report['checks']['portable']['version'], installed=True)
             unchanged()
             report['cross_version_upgrade'] = 'PASS' if args.previous_installer else 'NOT RUN (same-build reinstall only)'
@@ -117,6 +121,8 @@ def lifecycle(args):
             report['uid'] = os.getuid()
         report['checks']['persistent_user_data_survived'] = 'PASS'
         if args.gui:
+            report['phase'] = 'gui'
+            report['gui'] = 'RUNNING'
             # Separate fresh profile: smoke actions may deliberately save test bookmarks.
             env['YAMINET_BROWSER_DATA_DIR'] = str(data / 'gui profile')
             for launch in range(2):
@@ -132,6 +138,7 @@ def lifecycle(args):
                 report.setdefault('gui_runs', []).append(observed)
             report['gui'] = 'PASS (native window, logical test actions; no physical keyboard/IME claim)'
         unchanged()
+    report['phase'] = 'complete'
     report['result'] = 'PASS'
     return report
 
@@ -144,8 +151,9 @@ if __name__ == '__main__':
     p.add_argument('--report', type=pathlib.Path, required=True)
     p.add_argument('--gui', action='store_true')
     args = p.parse_args()
+    report = {}
     try:
-        report = lifecycle(args)
+        report = lifecycle(args, report)
     except Exception as error:
         if isinstance(error, subprocess.CalledProcessError):
             # Only synthetic lifecycle fixtures run here; never dump process environments.
@@ -153,7 +161,8 @@ if __name__ == '__main__':
             stderr = error.stderr or ''
             args.report.with_name(args.report.stem + '-failure.log').write_text(
                 'Synthetic package smoke subprocess failed\nstdout:\n' + str(stdout)[-32768:] + '\nstderr:\n' + str(stderr)[-32768:], encoding='utf-8')
-        report = {'schema': 'yaminet-package-lifecycle-1', 'result': 'FAIL', 'error_class': type(error).__name__, 'gui': 'NOT VERIFIED'}
+        report.update(result='FAIL', error_class=type(error).__name__, failed_phase=report.get('phase', 'extract'))
+        if report.get('phase') == 'gui': report['gui'] = 'FAIL'
         args.report.write_text(json.dumps(report, indent=2), encoding='utf-8')
         raise
     args.report.write_text(json.dumps(report, indent=2), encoding='utf-8')
