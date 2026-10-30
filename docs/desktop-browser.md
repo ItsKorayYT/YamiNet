@@ -87,6 +87,17 @@ For two multi-page sites with links between them, run
 instead, then open `ynp://127.0.0.1:7301/home`. See
 [Creating and publishing a YamiNet site](publishing-sites.md).
 
+### Native identity addresses (`yami://`)
+
+Enter `yami://<full-yn1-node-id>/home` without a server endpoint. The existing
+DHT supplies signed locations; the browser then verifies the exact requested ID
+over TLS 1.3 before fetching. Omitting the document key selects `home`.
+There are no bundled bootstrap peers or aliases. Configure ordinary peers using
+the existing peer store; see [native addressing](native-addressing.md) for
+public/local settings, persistent state, links, tests and current security limits.
+Native lookup runs in the existing background loader and retains the native URL
+in history and the address bar. No browser private key is required.
+
 ### Verified nodes (`ynps://`)
 
 Enter an address such as `ynps://yn1-...@192.168.1.50:7443/home`, as printed
@@ -113,8 +124,7 @@ advertised peers into that list.
 
 Stop each sample node with Ctrl-C in its terminal. Keep the plaintext sample
 nodes local; remote experiments require the separate public TLS mode.
-`yami://` addresses are not supported. All peer application
-messages, including missing-document replies, use the existing binary YNP
+All peer application messages, including missing-document replies, use the existing binary YNP
 protocol.
 
 ## Tabs, navigation and scrolling

@@ -2281,6 +2281,7 @@ dependencies = [
  "softbuffer",
  "tiny-skia",
  "winit",
+ "yami-dht",
  "yami-identity",
  "yami-node",
  "yami-render",

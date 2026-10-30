@@ -23,6 +23,20 @@ pub struct Service {
     disk: Arc<Mutex<Disk>>,
 }
 impl Service {
+    /// Open a lookup-only cache without a client signing key. `local` is only
+    /// a routing origin/cache owner, never sent as an authenticated identity.
+    /// Keep its public ID across restarts; discard a new origin's private key.
+    pub fn open_lookup(path: impl AsRef<Path>, network: Network) -> io::Result<Self> {
+        let path = path.as_ref();
+        let local = match read_snapshot(path, network) {
+            Ok(state) => state.local,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                *NodeIdentity::generate().map_err(io::Error::other)?.id()
+            }
+            Err(error) => return Err(error),
+        };
+        Self::open(path, local, network)
+    }
     pub fn open(path: impl AsRef<Path>, local: NodeId, network: Network) -> io::Result<Self> {
         let path = path.as_ref();
         let parent = path

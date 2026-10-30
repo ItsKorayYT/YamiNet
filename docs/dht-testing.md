@@ -9,6 +9,7 @@ new transport or a centralized directory. Read the
 
 ```powershell
 cargo test -p yami-dht
+cargo test -p yami-browser --test native_dht --locked -- --nocapture
 cargo test -p yami-node --test dht -- --nocapture
 cargo fmt --all -- --check
 cargo clippy --workspace --all-targets -- -D warnings
@@ -118,12 +119,13 @@ source and `Verified node ... over TLS 1.3 after distributed lookup`. Its
 output escapes control characters and executes no remote content. A successful
 lookup alone prints a signed but unconfirmed `ynps://.../home` location.
 
-To browse, explicitly copy that returned `ynps://` URL into the existing Yami
-Browser address field. The browser verifies A's ID again and renders normally;
-no new browser UI or automatic site opening is introduced. `/home` is a
-convenience default, not a homepage field in the DHT record. Use `dht fetch
-<id> <key>` or another existing URL key for a different document. Sample internal
-links may need their numeric endpoint updated using the existing YLang syntax.
+To browse, configure B in a separate browser peer directory and select
+`YAMINET_BROWSER_DHT_NETWORK=local`, then enter `yami://<A-full-ID>/home`
+directly in the browser. The browser uses `yami-dht` itself, authenticates A
+over TLS 1.3 and renders normally without A's IP in its address. The older
+returned `ynps://` URL still works. See [native browser setup and testing](native-addressing.md)
+for exact commands and identity-preserving links. `/home` is a convenience
+default, not a homepage field in the DHT record.
 
 Stop B and repeat C's fetch after C learned A: it should query/authenticate A
 directly without B. Stop A: lookup may still return its unexpired signed

@@ -4,7 +4,9 @@
 small Kademlia-inspired signed-value lookup system, not a full Kademlia
 implementation or compatibility protocol. The existing public IPv4 TLS
 transport and manual bootstrap peer store were verified before implementation.
-Neither is replaced. YNP document frames, YLang, YSL and the browser are unchanged.
+Neither is replaced. YNP document frames, YLang and YSL are unchanged. The
+browser integrates this crate for native identity addressing; see
+[native addressing](../../native-addressing.md).
 
 ## Identity, routing and lookup
 
@@ -135,7 +137,11 @@ performs that fresh TLS check before asking for a YNP document. It tries at
 most four signed endpoints, each with a three-second total connection/I/O
 budget, validates the YNP document key and rechecks record expiry before use.
 `lookup` only prints `ynps://` locations (convenience key `/home`); it does not
-open sites. Browser users may explicitly open that URL through existing controls.
+open sites. Browser users may explicitly open that URL, or enter
+`yami://<full-node-id>/home` to resolve and authenticate through this same crate.
+Browser lookup requires no private key: its public routing/cache origin is not
+a client authentication identity. Separate policy-tagged browser snapshots keep
+public and explicit loopback state apart. See [configuration](../../native-addressing.md).
 
 `RpcConnector` is a small transport extension point. The default `PinnedTls`
 adapter delegates to `ynp-tls`. Future adapters must preserve exact-key TLS

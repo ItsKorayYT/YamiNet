@@ -57,17 +57,41 @@ pub struct Lookup {
     pub record: Option<PeerRecord>,
     pub queries: usize,
     pub failures: usize,
+    /// Malformed responses or batches rejected by record/sequence validation.
+    pub invalid_records: usize,
+    /// RPC timeouts, including the overall lookup deadline.
+    pub timeouts: usize,
 }
 /// Sequential iterative lookup (alpha=1), nearest first. Each endpoint attempt
 /// consumes one query, including failures. No recursion, automatic fetch or DNS.
 pub fn lookup(service: &Service, target: NodeId, seeds: &[Contact]) -> io::Result<Lookup> {
     lookup_with_connector(service, target, seeds, &PinnedTls)
 }
+/// Refresh a failed cached location. An equal/older valid record must not stop
+/// iteration before another peer can supply a newer location. This uses the
+/// same FIND protocol, validators and global query/time budgets as lookup.
+pub fn lookup_newer(
+    service: &Service,
+    target: NodeId,
+    seeds: &[Contact],
+    after_sequence: u64,
+) -> io::Result<Lookup> {
+    lookup_after(service, target, seeds, &PinnedTls, Some(after_sequence))
+}
 pub fn lookup_with_connector(
     service: &Service,
     target: NodeId,
     seeds: &[Contact],
     connector: &dyn RpcConnector,
+) -> io::Result<Lookup> {
+    lookup_after(service, target, seeds, connector, None)
+}
+fn lookup_after(
+    service: &Service,
+    target: NodeId,
+    seeds: &[Contact],
+    connector: &dyn RpcConnector,
+    after_sequence: Option<u64>,
 ) -> io::Result<Lookup> {
     let initial = service.snapshot()?;
     let network = initial.network;
@@ -81,6 +105,8 @@ pub fn lookup_with_connector(
         record: None,
         queries: 0,
         failures: 0,
+        invalid_records: 0,
+        timeouts: 0,
     };
     let deadline = Instant::now() + LOOKUP_TIMEOUT;
     let mut candidates = service.candidates(now()?)?;
@@ -99,22 +125,36 @@ pub fn lookup_with_connector(
         result.queries += 1;
         let timeout = RPC_TIMEOUT.min(deadline.saturating_duration_since(Instant::now()));
         let mut returned_target = false;
-        let attempt = query_with_connector(connector, contact, Message::Find(target), timeout)
-            .and_then(|response| {
-                let Message::Peers(records) = response else {
-                    return Err(invalid("expected DHT records"));
-                };
-                returned_target = records.iter().any(|r| r.id() == target);
-                service.accept_many(records, now()?)?;
-                service.observed(contact, now()?)
-            });
-        if attempt.is_err() {
+        let response = query_with_connector(connector, contact, Message::Find(target), timeout);
+        if matches!(&response, Err(error) if error.kind() == io::ErrorKind::InvalidData) {
+            result.invalid_records += 1;
+        }
+        let attempt = response.and_then(|response| {
+            let Message::Peers(records) = response else {
+                return Err(invalid("expected DHT records"));
+            };
+            returned_target = records.iter().any(|r| r.id() == target);
+            if let Err(error) = service.accept_many(records, now()?) {
+                result.invalid_records += 1;
+                return Err(error);
+            }
+            service.observed(contact, now()?)
+        });
+        if let Err(error) = &attempt {
             result.failures += 1;
+            if matches!(
+                error.kind(),
+                io::ErrorKind::TimedOut | io::ErrorKind::WouldBlock
+            ) {
+                result.timeouts += 1;
+            }
             service.failed(contact)?;
         }
         let state = service.snapshot()?;
         if attempt.is_ok() && returned_target {
-            result.record = state.get(target, now()?);
+            result.record = state
+                .get(target, now()?)
+                .filter(|r| after_sequence.is_none_or(|sequence| r.sequence() > sequence));
         }
         if result.record.is_some() {
             break;
@@ -122,7 +162,13 @@ pub fn lookup_with_connector(
         candidates.extend(service.candidates(now()?)?);
     }
     if result.record.is_none() {
-        result.record = service.snapshot()?.get(target, now()?);
+        result.record = service
+            .snapshot()?
+            .get(target, now()?)
+            .filter(|r| after_sequence.is_none_or(|sequence| r.sequence() > sequence));
+        if Instant::now() >= deadline && result.timeouts == 0 {
+            result.timeouts += 1;
+        }
     }
     Ok(result)
 }

@@ -2,11 +2,12 @@
 //!
 //! The desktop adapter owns all interaction and drawing. This module never
 //! touches a window and never performs a network request on its calling thread.
+use crate::native::{self, Address, Resolver};
 use std::{
     collections::VecDeque,
     io,
     net::SocketAddr,
-    sync::{mpsc, Arc, Condvar, Mutex},
+    sync::{mpsc, Arc, Condvar, Mutex, OnceLock},
     thread,
 };
 use yami_identity::NodeId;
@@ -27,17 +28,22 @@ pub enum Location {
     Ynp(String),
     /// YNP over TLS 1.3 to the node ID named in the address.
     Ynps(String),
+    /// Stable identity address resolved through the existing DHT.
+    Yami(Address),
 }
 impl Location {
     pub fn parse(input: &str) -> Result<Self, String> {
         let address = input.trim();
         let unusable = |error: io::Error| {
-            format!("Cannot open this address: {error}. Use ynps://node-id@address:port/key, a localhost ynp:// address or local:welcome.")
+            format!("Cannot open this address: {error}. Use yami://node-id/key, ynps://node-id@address:port/key, a localhost ynp:// address or local:welcome.")
         };
         match address {
             "" => Ok(Self::Home),
             "local:welcome" => Ok(Self::Welcome),
             "local:about" => Ok(Self::About),
+            _ if address.starts_with(native::SCHEME) => Address::parse(input)
+                .map(Self::Yami)
+                .map_err(|error| format!("Cannot open this address: {error}")),
             _ if address.starts_with(ynp_tls::SCHEME) => {
                 ynp_tls::parse_url(address).map_err(unusable)?;
                 Ok(Self::Ynps(address.into()))
@@ -54,6 +60,7 @@ impl Location {
             Self::Welcome => "local:welcome".into(),
             Self::About => "local:about".into(),
             Self::Ynp(address) | Self::Ynps(address) => address.clone(),
+            Self::Yami(address) => address.url(),
         }
     }
     fn label(&self) -> &str {
@@ -61,7 +68,7 @@ impl Location {
             Self::Home => "New tab",
             Self::Welcome => "Welcome to YamiNet",
             Self::About => "About YamiNet",
-            Self::Ynp(_) | Self::Ynps(_) => "YNP document",
+            Self::Ynp(_) | Self::Ynps(_) | Self::Yami(_) => "YNP document",
         }
     }
 }
@@ -83,6 +90,9 @@ pub struct Page {
     pub document: ylang::Document,
     pub style: ysl::Stylesheet,
     pub security: Security,
+    /// Endpoint of the authenticated native fetch, used only to upgrade old
+    /// same-node numeric links while retaining the canonical identity address.
+    pub endpoint: Option<SocketAddr>,
 }
 #[derive(Debug)]
 pub enum PageState {
@@ -137,9 +147,29 @@ impl Tab {
     /// A link `ynp://A/key` on a page loaded from `ynps://N@A/...` names the
     /// same node, so it opens as `ynps://N@A/key` with the same pinned
     /// identity. YLang links are always written `ynp://`; this keeps a LAN
-    /// site navigable without ever sending a plaintext request. Every other
-    /// link is used exactly as written.
+    /// site navigable without ever sending a plaintext request. Native pages
+    /// likewise retain their ID for matching numeric links, and interpret full
+    /// identity targets as native addresses. `Browser::follow` refuses other
+    /// plaintext links from native pages.
     pub fn resolve_link(&self, target: &str) -> String {
+        if let (Location::Yami(current), PageState::Ready(page)) = (self.location(), &self.state) {
+            if page.security == Security::Verified(current.id) {
+                if let Some(rest) = target.strip_prefix("ynp://") {
+                    if let Ok(linked) = Address::parse(&format!("yami://{rest}")) {
+                        return linked.url();
+                    }
+                    if let Ok((endpoint, key)) = ynp::parse_endpoint(rest) {
+                        if page.endpoint == Some(endpoint) {
+                            return Address {
+                                id: current.id,
+                                key,
+                            }
+                            .url();
+                        }
+                    }
+                }
+            }
+        }
         if let (Location::Ynps(current), Some(rest)) =
             (self.location(), target.strip_prefix("ynp://"))
         {
@@ -259,6 +289,14 @@ impl Browser {
     /// Open a link from the active page (see [`Tab::resolve_link`]).
     pub fn follow(&mut self, target: &str, loader: &Loader) -> Result<(), String> {
         let address = self.active().resolve_link(target);
+        if matches!(self.active().location(), Location::Yami(_)) && address.starts_with("ynp://") {
+            let message = "Refused plaintext link from a Yami page. Use a yami:// identity address or an explicit ynps:// address.".to_string();
+            let tab = self.active_mut();
+            tab.generation = tab.generation.wrapping_add(1);
+            loader.cancel(tab.id);
+            tab.state = PageState::Error(message.clone());
+            return Err(message);
+        }
         self.navigate(&address, loader)
     }
     pub fn navigate_location(&mut self, location: Location, loader: &Loader) {
@@ -359,7 +397,36 @@ pub struct Loader {
 }
 impl Loader {
     pub fn new(wake: Arc<dyn Fn() + Send + Sync>) -> io::Result<Self> {
-        Self::with_fetcher(wake, Arc::new(load_page))
+        let resolver = OnceLock::new();
+        Self::with_fetcher(
+            wake,
+            Arc::new(move |location| {
+                if matches!(location, Location::Yami(_)) {
+                    let resolver = resolver
+                        .get_or_init(Resolver::from_environment)
+                        .as_ref()
+                        .map_err(Clone::clone)?;
+                    load_native_page(location, resolver)
+                } else {
+                    load_page(location)
+                }
+            }),
+        )
+    }
+    pub fn with_resolver(
+        wake: Arc<dyn Fn() + Send + Sync>,
+        resolver: Arc<Resolver>,
+    ) -> io::Result<Self> {
+        Self::with_fetcher(
+            wake,
+            Arc::new(move |location| {
+                if matches!(location, Location::Yami(_)) {
+                    load_native_page(location, &resolver)
+                } else {
+                    load_page(location)
+                }
+            }),
+        )
     }
     fn with_fetcher(wake: Arc<dyn Fn() + Send + Sync>, fetcher: Arc<Fetcher>) -> io::Result<Self> {
         let shared = Arc::new(Shared {
@@ -465,21 +532,43 @@ fn load_page(location: &Location) -> Result<Page, String> {
             })?;
             (data.source, data.style, Security::Plaintext)
         }
+        Location::Yami(_) => return Err("Native loading requires a browser DHT resolver.".into()),
         Location::Ynps(address) => {
             let (data, id) = fetch_verified(address)?;
             (data.source, data.style, Security::Verified(id))
         }
     };
-    let document = ylang::parse(&source).map_err(|error| format!("YLang {error}"))?;
+    parse_page(&source, &style, security, None)
+}
+fn load_native_page(location: &Location, resolver: &Resolver) -> Result<Page, String> {
+    let Location::Yami(address) = location else {
+        unreachable!()
+    };
+    let (data, endpoint) = resolver.fetch(address)?;
+    parse_page(
+        &data.source,
+        &data.style,
+        Security::Verified(address.id),
+        Some(endpoint),
+    )
+}
+fn parse_page(
+    source: &str,
+    style: &str,
+    security: Security,
+    endpoint: Option<SocketAddr>,
+) -> Result<Page, String> {
+    let document = native::parse_document(source).map_err(|error| format!("YLang {error}"))?;
     let style = if style.is_empty() {
         ysl::Stylesheet::default()
     } else {
-        ysl::parse(&style).map_err(|error| format!("YSL {error}"))?
+        ysl::parse(style).map_err(|error| format!("YSL {error}"))?
     };
     Ok(Page {
         document,
         style,
         security,
+        endpoint,
     })
 }
 /// Fetch a `ynps://` address from exactly the node ID it names. Nothing is
@@ -524,6 +613,7 @@ mod tests {
             document: ylang::parse(&format!("@page 0.1\n  title {title}\n= {title}")).unwrap(),
             style: ysl::Stylesheet::default(),
             security: Security::BuiltIn,
+            endpoint: None,
         }
     }
     fn loader() -> Loader {

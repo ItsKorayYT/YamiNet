@@ -5,7 +5,7 @@ use std::{
 };
 use ynp::LoopbackTcp;
 
-const USAGE: &str = "yami-browser [document.ylang | ynp://loopback-IP:port/key | ynps://node-id@IP:port/key] [--style theme.ysl] [--ppm output.ppm]\nWithout a source, opens the built-in sample. Links are displayed, never automatically fetched.\nEXPERIMENTAL: ynp:// is plaintext and unauthenticated; ynps:// is TLS 1.3 to the node ID in the address. Neither is reviewed or anonymous.";
+const USAGE: &str = "yami-browser [document.ylang | yami://node-id/key | ynp://loopback-IP:port/key | ynps://node-id@IP:port/key] [--style theme.ysl] [--ppm output.ppm]\nWithout a source, opens the built-in sample. Links are displayed, never automatically fetched.\nEXPERIMENTAL: ynp:// is plaintext and unauthenticated; yami:// and ynps:// use TLS 1.3 to the node ID in the address. Neither is reviewed or anonymous.";
 fn read_file(path: &str, limit: usize) -> io::Result<String> {
     let mut text = String::new();
     File::open(path)?
@@ -40,9 +40,9 @@ pub fn run(arguments: Vec<String>) -> Result<(), Box<dyn Error>> {
             _ => return Err(USAGE.into()),
         }
     }
-    let verified = source
-        .as_deref()
-        .is_some_and(|url| url.starts_with(ynp_tls::SCHEME));
+    let verified = source.as_deref().is_some_and(|url| {
+        url.starts_with(ynp_tls::SCHEME) || url.starts_with(yami_browser::native::SCHEME)
+    });
     eprintln!(
         "{}",
         if verified {
@@ -52,6 +52,15 @@ pub fn run(arguments: Vec<String>) -> Result<(), Box<dyn Error>> {
         }
     );
     let (text, remote_style) = match source.as_deref() {
+        Some(url) if url.starts_with(yami_browser::native::SCHEME) => {
+            let address = yami_browser::native::Address::parse(url)?;
+            let (data, _) = yami_browser::native::Resolver::from_environment()?.fetch(&address)?;
+            eprintln!(
+                "Verified node {} over TLS 1.3 after distributed lookup",
+                address.id
+            );
+            (data.source, Some(data.style))
+        }
         Some(url) if url.starts_with("ynp://") => {
             let (address, key) = ynp::parse_url(url)?;
             let data = ynp::fetch(&LoopbackTcp, address, &key)?;
@@ -73,7 +82,7 @@ pub fn run(arguments: Vec<String>) -> Result<(), Box<dyn Error>> {
             _ => ysl::Stylesheet::default(),
         },
     };
-    let document = ylang::parse(&text)?;
+    let document = yami_browser::native::parse_document(&text)?;
     let layout = yami_render::layout(&document, &style)?;
     println!("YamiNet — {}\n", document.metadata.title);
     print!("{}", layout.terminal());

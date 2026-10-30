@@ -13,8 +13,8 @@ Privacy is a design goal, not a
 security guarantee. Nodes can have persistent Ed25519 identities that sign
 site metadata. An experimental TLS 1.3 transport encrypts YNP and
 authenticates a node against a node ID the client trusts in advance; the
-browser uses it for `ynps://` addresses. The original `ynp://` transport
-remains plaintext, unauthenticated and loopback-only. There is no anonymity.
+browser uses it for `ynps://` and native `yami://` addresses. The original
+`ynp://` transport remains plaintext, unauthenticated and loopback-only. There is no anonymity.
 
 ## Run
 
@@ -40,8 +40,8 @@ cd /workspace/YamiNet
 
 The default command opens the native desktop browser. Its new-tab page has
 local document shortcuts and sample-node bookmarks; the address bar accepts
-`ynps://` addresses and localhost `ynp://` URLs. Tabs, Back, Forward, Reload, document links and
-scrolling operate on actual YLang documents. Network work runs in bounded
+`yami://` identity addresses, `ynps://` addresses and localhost `ynp://` URLs.
+Tabs, Back, Forward, Reload, document links and scrolling operate on actual YLang documents. Network work runs in bounded
 background workers, with stale-response protection.
 
 See [Desktop browser and Windows launch instructions](docs/desktop-browser.md)
@@ -236,12 +236,19 @@ yami-node dht peers --dir <state-directory>
 Bootstrap configuration reuses the existing manual peer store. Lookup validates
 signed records and prints unconfirmed `ynps://` locations; fetch resolves the
 ID and then authenticates the actual endpoint before requesting the document.
-The browser remains unchanged and can explicitly open a returned URL. Routing,
+The browser also resolves `yami://<full-node-id>/home` directly using this same
+crate, without CLI subprocesses or a browser private key. It keeps that identity
+address visible and pins every document connection to the requested ID. Configure
+ordinary bootstrap peers through the existing `YAMINET_PEER_DIR` / manual peer
+store; public and explicit localhost-test caches remain separate. See
+[native browser addressing and configuration](docs/native-addressing.md). Routing,
 records, frames, timeouts and query counts are bounded. Expired locations are
 ignored while bounded sequence history is retained to reject rollback.
 
 Run `cargo test -p yami-node --test dht -- --nocapture` to reproduce the
 three-process A→B→C publication/lookup/TLS-fetch simulation and wrong-key checks.
+`cargo test -p yami-browser --test native_dht --locked` additionally exercises
+native addressing through the real browser model, workers, navigation and renderer.
 This is loopback validation, **not real internet validation**. Read
 [DHT testing](docs/dht-testing.md) and the
 [versioned protocol/security limits](docs/specs/v0.1/dht.md), including the

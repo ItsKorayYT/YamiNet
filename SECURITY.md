@@ -4,8 +4,8 @@ YamiNet 0.1 is **not secure for sensitive use**. It has no anonymity and no
 protection against a malicious local user. The default `ynp://` transport is
 plaintext, unauthenticated and loopback-only. Nodes can have persistent signing
 identities (below), and an experimental TLS 1.3 transport (below), used by the
-browser for `ynps://` addresses, authenticates a node against a pinned node ID
-on loopback, LAN or known public IPv4 endpoints. Public listening needs a
+browser for `ynps://` and `yami://` addresses, authenticates a node against a
+pinned node ID on loopback, LAN or known public IPv4 endpoints. Public listening needs a
 separate `--public` opt-in. This integration has not been independently
 reviewed or established as production-safe. Every peer and every received
 document must be considered untrusted. Do not put private documents,
@@ -98,7 +98,12 @@ sequence cannot replace a cache's high-water mark, including after expiry or
 restart. Records alone never prove endpoint presence. `dht fetch` pins the
 actual connection to the requested ID before any YNP document request. Public
 lookup policy refuses private/loopback/link-local/special-use probes; simulation
-requires a separate explicitly loopback-only policy. DHT is off without `--dht`.
+requires a separate explicitly loopback-only policy. Serving DHT is off without
+`--dht`. Browser `yami://` navigation runs identity-free lookup against configured
+ordinary peers and its own persistent, policy-tagged signed cache; it stores no
+browser private key. The signed location never replaces the requested TLS pin.
+Native pages cannot silently follow plaintext links. See
+[native browser addressing](docs/native-addressing.md) for configuration and limits.
 
 Routing tables, persistent signed caches, per-message record counts, RPC frames
 and lookup attempts/time are bounded. RPC requests/responses are the same fixed

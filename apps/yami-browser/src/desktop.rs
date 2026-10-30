@@ -23,7 +23,7 @@ use yami_render::native::{NativeDocument, TextEngine};
 
 pub fn run(args: Vec<String>) -> Result<(), Box<dyn Error>> {
     if args.len() > 1 {
-        return Err("--desktop accepts at most one ynps:// address, localhost ynp:// address or built-in local:welcome/local:about".into());
+        return Err("--desktop accepts at most one yami:// or ynps:// address, localhost ynp:// address or built-in local:welcome/local:about".into());
     }
     let event_loop = EventLoop::<()>::with_user_event().build()?;
     let proxy = event_loop.create_proxy();
@@ -427,7 +427,10 @@ impl Desktop {
             PageState::Home => chrome::home(&mut c, &mut scene, &ui),
             PageState::Loading => {
                 chrome::document_viewport(&mut c, &mut scene, &ui);
-                let verifying = matches!(self.browser.active().location(), Location::Ynps(_));
+                let verifying = matches!(
+                    self.browser.active().location(),
+                    Location::Ynps(_) | Location::Yami(_)
+                );
                 c.text(
                     if verifying {
                         "Verifying node identity…"
