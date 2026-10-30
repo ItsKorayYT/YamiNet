@@ -2309,7 +2309,7 @@ checksum = "b9cc00251562a284751c9973bace760d86c0276c471b4be569fe6b068ee97a56"
 
 [[package]]
 name = "yami-browser"
-version = "0.2.0"
+version = "0.3.0-alpha.1"
 dependencies = [
  "arboard",
  "getrandom 0.4.3",
@@ -2331,7 +2331,7 @@ dependencies = [
 
 [[package]]
 name = "yami-config"
-version = "0.2.0"
+version = "0.3.0-alpha.1"
 dependencies = [
  "yami-dht",
  "yami-identity",
@@ -2340,7 +2340,7 @@ dependencies = [
 
 [[package]]
 name = "yami-dht"
-version = "0.2.0"
+version = "0.3.0-alpha.1"
 dependencies = [
  "getrandom 0.4.3",
  "yami-identity",
@@ -2350,7 +2350,7 @@ dependencies = [
 
 [[package]]
 name = "yami-identity"
-version = "0.2.0"
+version = "0.3.0-alpha.1"
 dependencies = [
  "ed25519-dalek",
  "getrandom 0.4.3",
@@ -2361,7 +2361,7 @@ dependencies = [
 
 [[package]]
 name = "yami-node"
-version = "0.2.0"
+version = "0.3.0-alpha.1"
 dependencies = [
  "ctrlc",
  "getrandom 0.4.3",
@@ -2380,7 +2380,7 @@ dependencies = [
 
 [[package]]
 name = "yami-relay"
-version = "0.2.0"
+version = "0.3.0-alpha.1"
 dependencies = [
  "getrandom 0.4.3",
  "yami-identity",
@@ -2390,7 +2390,7 @@ dependencies = [
 
 [[package]]
 name = "yami-relay-cli"
-version = "0.2.0"
+version = "0.3.0-alpha.1"
 dependencies = [
  "ctrlc",
  "yami-config",
@@ -2404,7 +2404,7 @@ dependencies = [
 
 [[package]]
 name = "yami-render"
-version = "0.2.0"
+version = "0.3.0-alpha.1"
 dependencies = [
  "cosmic-text",
  "png",
@@ -2431,15 +2431,15 @@ checksum = "e01738255b5a16e78bbb83e7fbba0a1e7dd506905cfc53f4622d89015a03fbb5"
 
 [[package]]
 name = "ylang"
-version = "0.2.0"
+version = "0.3.0-alpha.1"
 
 [[package]]
 name = "ynp"
-version = "0.2.0"
+version = "0.3.0-alpha.1"
 
 [[package]]
 name = "ynp-discovery"
-version = "0.2.0"
+version = "0.3.0-alpha.1"
 dependencies = [
  "getrandom 0.4.3",
  "if-addrs",
@@ -2452,7 +2452,7 @@ dependencies = [
 
 [[package]]
 name = "ynp-tls"
-version = "0.2.0"
+version = "0.3.0-alpha.1"
 dependencies = [
  "rcgen",
  "rustls",
@@ -2464,7 +2464,7 @@ dependencies = [
 
 [[package]]
 name = "ysl"
-version = "0.2.0"
+version = "0.3.0-alpha.1"
 
 [[package]]
 name = "zeno"

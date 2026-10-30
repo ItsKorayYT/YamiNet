@@ -15,3 +15,8 @@ dht-*.cache
 dht-*.lock
 dht-*.tmp
 dht-*-maintenance.status
+
+/work/
+/dist/
+
+__pycache__/
