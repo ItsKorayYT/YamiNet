@@ -11,6 +11,7 @@ pub struct Prepared {
     pub output: PathBuf,
     pub id: yami_identity::NodeId,
     pub pages: usize,
+    pub entry_key: String,
 }
 fn invalid(message: &str) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidInput, message)
@@ -97,5 +98,11 @@ pub fn prepare(
         output,
         id: *key.id(),
         pages: report.pages.len(),
+        entry_key: report
+            .pages
+            .iter()
+            .find(|key| key.as_str() == "home")
+            .unwrap_or(&report.pages[0])
+            .clone(),
     })
 }

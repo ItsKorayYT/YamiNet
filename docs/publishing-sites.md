@@ -330,7 +330,8 @@ Windows example, in PowerShell:
 Omit `--new personal` to select an existing site. `blog` and `portfolio` are also
 available templates. Setup uses the production validator, creates or loads the
 persistent identity, validates the networking profile, saves a **new** config
-without overwriting one, and prints the canonical address. It performs no network
+without overwriting one, and prints the canonical address (home when present,
+otherwise the first validated page). It performs no network
 requests or hosting by default. Keys must be outside the site/application tree.
 Local mode listens on loopback port 7443 with a local DHT advertisement when
 explicitly started; the printed canonical address is not proof of resolution.

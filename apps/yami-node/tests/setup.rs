@@ -47,5 +47,23 @@ fn setup_is_offline_validated_reuses_keys_and_refuses_config_overwrite() {
     assert!(!bad.exists());
     assert!(!dir.join("unused-keys/node.key").exists());
     assert_eq!(*NodeIdentity::load(&keys).unwrap().id(), prepared.id);
+    let existing = dir.join("existing-site");
+    fs::create_dir(&existing).unwrap();
+    fs::write(
+        existing.join("start.ylang"),
+        "@page 0.1\n  title Existing site\n= Start here\n",
+    )
+    .unwrap();
+    let existing = yami_node::setup::prepare(
+        &existing,
+        &keys,
+        &dir.join("existing.conf"),
+        None,
+        None,
+        &[],
+    )
+    .unwrap();
+    assert_eq!(existing.entry_key, "start");
+    assert_eq!(existing.id, prepared.id);
     fs::remove_dir_all(dir).unwrap();
 }

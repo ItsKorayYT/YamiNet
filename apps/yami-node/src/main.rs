@@ -1124,7 +1124,7 @@ fn setup_command(args: &[String]) -> Result<Vec<String>> {
         relay,
         &bootstraps,
     )?;
-    println!("1. Site validated: {} pages.\n2. Persistent identity ready: {}\n3. Config validated and saved: {}\n4. Mode: {}.\n5. Canonical address: yami://{}/home", prepared.pages, prepared.id, prepared.output.display(), if relay.is_some() { "explicit outbound relay (public)" } else { "local loopback only" }, prepared.id);
+    println!("1. Site validated: {} pages.\n2. Persistent identity ready: {}\n3. Config validated and saved: {}\n4. Mode: {}.\n5. Canonical address: yami://{}/{}", prepared.pages, prepared.id, prepared.output.display(), if relay.is_some() { "explicit outbound relay (public)" } else { "local loopback only" }, prepared.id, prepared.entry_key);
     println!("No hosting started during preparation. DHT advertisements never prove reachability.\nPreview: yami-node site preview <site> --identity <same-key-directory>\nStart: yami-node --config <saved-config>\nDiagnostics: yami-node diagnose --config <saved-config> [--connect]");
     if preview {
         return Ok(vec![

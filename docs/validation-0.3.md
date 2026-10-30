@@ -24,7 +24,8 @@ Implemented:
   CPU benchmarks for simple, long and image-heavy documents with observed
   environment/results in performance-0.3.md. No persistent document/image cache.
 - Offline `site setup` validates/creates a site, creates or reuses a persistent
-  identity, validates/writes a new config and prints the canonical address.
+  identity, validates/writes a new config and prints a canonical address for an
+  existing page, including sites without a home page.
   Optional preview or host start is explicit. Existing authoring and network
   implementations are reused. Host diagnostics include site inventory, local/
   public intent, relay registration and DHT snapshots, timestamps and errors.
