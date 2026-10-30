@@ -31,21 +31,29 @@
 //! per-source snapshots. `catalog search`-style callers can use
 //! [`DiscoveryStore::load_last`] and [`CatalogView::search`] without reading any
 //! source file; only explicit rebuild or refresh calls read directories. Remote
-//! `yami://` subscriptions are stored as inactive addresses and are never
-//! fetched by this crate.
+//! `yami://` subscriptions use [`AuthenticatedFetcher`] on an explicit
+//! [`DiscoveryStore::refresh_source_with`] call, reusing signed DHT lookup,
+//! pinned TLS 1.3 and YNP framing. No remote content is fetched in the
+//! background or during search.
 
 mod address;
 mod catalog;
 mod directory;
 mod normalize;
 mod registry;
+mod remote;
 mod store;
 
 pub use address::WebsiteAddress;
 pub use catalog::{Catalog, Entry, ImportReport, SearchHit, SourceInfo};
 pub use directory::{Directory, DirectoryEntry};
 pub use registry::{
-    CatalogView, DiscoveryStore, Source, SourceKind, SourceRegistry, SourceState, SourceStatus,
+    CatalogView, DiscoveryStore, RefreshReport, Source, SourceKind, SourceRegistry, SourceState,
+    SourceStatus,
+};
+pub use remote::{
+    load_bootstrap_peers, merge_bootstrap_peers, AuthenticatedFetcher, RemoteDirectoryFetcher,
+    RemoteFetchError, RemoteFetchErrorKind,
 };
 
 use std::{fmt, io};

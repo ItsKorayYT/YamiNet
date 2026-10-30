@@ -43,7 +43,7 @@ pub(crate) fn write_atomic(path: &Path, contents: &str, mode: Mode) -> Result<()
     }
 
     let commit = match mode {
-        Mode::CreateNew => match fs::hard_link(&temporary, path) {
+        Mode::CreateNew => match retry_permission(|| fs::hard_link(&temporary, path)) {
             Ok(()) => {
                 // The destination is now complete and durable. Cleanup of the
                 // temporary hard link is best-effort.
@@ -52,8 +52,7 @@ pub(crate) fn write_atomic(path: &Path, contents: &str, mode: Mode) -> Result<()
             }
             Err(error) => Err(error),
         },
-        Mode::Replace => fs::rename(&temporary, path),
-        Mode::ReplaceOrCreate => fs::rename(&temporary, path),
+        Mode::Replace | Mode::ReplaceOrCreate => retry_permission(|| fs::rename(&temporary, path)),
     };
     match commit {
         Ok(()) => {
@@ -65,6 +64,27 @@ pub(crate) fn write_atomic(path: &Path, contents: &str, mode: Mode) -> Result<()
             Err(error.into())
         }
     }
+}
+
+/// Windows can briefly deny a rename/hard-link while another process has the
+/// target open for inspection (for example a filesystem indexer or scanner).
+/// The operation is idempotent and the target is still validated, so retry a
+/// bounded number of times; never fall back to non-atomic replacement.
+fn retry_permission(mut operation: impl FnMut() -> io::Result<()>) -> io::Result<()> {
+    let mut last = None;
+    for attempt in 0..10 {
+        match operation() {
+            Ok(()) => return Ok(()),
+            Err(error) if error.kind() == io::ErrorKind::PermissionDenied => {
+                last = Some(error);
+                if attempt < 9 {
+                    std::thread::sleep(std::time::Duration::from_millis(20));
+                }
+            }
+            Err(error) => return Err(error),
+        }
+    }
+    Err(last.unwrap_or_else(|| io::Error::other("atomic commit failed")))
 }
 
 fn check_target(path: &Path, mode: Mode) -> Result<()> {

@@ -263,19 +263,28 @@ format, and it never contains keys or trust assertions.
 - `snapshots/<sha256(source-name)>.ylang` is a canonical version-1 directory
   document. It is produced by the same renderer and validated by the same
   parser as any imported directory, so snapshots are bounded by all section 5
-  limits. A snapshot is used only when the source is unavailable at an explicit
-  refresh.
+  limits. Snapshots back normal local search and are used as the fallback when a
+  source is unavailable at an explicit refresh.
 - `snapshots/<sha256(source-name)>.status` begins with
   `yami-discover-source-status 1` and records `fresh`, `cached <reason>`,
   `unavailable <reason>`, `inactive-remote` or `not-built` with hex-encoded,
   bounded reasons. Status is provenance for the last explicit refresh, not a
   trust proof or a claim of current availability.
-- Remote subscriptions use `remote` registry lines and are always treated as
-  inactive. They never get a snapshot and are never marked fresh or cached.
-  No network request is defined or performed by this milestone.
+- Remote subscriptions use `remote` registry lines. They are fetched only by an
+  explicit `source refresh` through the existing signed DHT lookup and pinned
+  TLS 1.3 YNP transport. A successful authenticated fetch validates the
+  delivered bytes as a version-1 directory before writing a snapshot and
+  marking the source `fresh`. A failed fetch retains the last snapshot as
+  `cached`, or reports `unavailable` when none exists. Remote sources remain
+  `inactive-remote` until the first successful fetch; there is no background,
+  startup or search-time fetch and no plaintext fallback.
+- The state directory may also contain the existing bounded
+  `dht-public-discover.cache` / `dht-local-discover.cache` lookup files and
+  locks. They contain signed peer records, never directory trust assertions.
 - `catalog search` and source listing read only the registry and snapshots;
-  `catalog rebuild` and `source refresh` are the only operations that read
-  source files. No background or implicit refresh exists.
+  `catalog rebuild` reads only local source files, and `source refresh` reads
+  one local file or performs one explicit remote fetch. No background or
+  implicit refresh exists.
 - Corrupt snapshots degrade the affected source to unavailable (or a
   snapshot-backed cached state when readable), while a corrupt registry is a
   hard error because source identity cannot be guessed. All state writes use

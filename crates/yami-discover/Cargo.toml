@@ -13,5 +13,8 @@ name = "yami-discover"
 path = "src/main.rs"
 
 [dependencies]
+yami-dht = { path = "../yami-dht" }
 yami-identity = { path = "../yami-identity" }
 ylang = { path = "../ylang" }
+ynp = { path = "../ynp" }
+ynp-tls = { path = "../ynp-tls" }

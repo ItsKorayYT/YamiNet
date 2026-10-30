@@ -1,15 +1,16 @@
 //! Persistent local source registry and bounded cached catalog snapshots.
 //!
-//! The registry stores only local source settings: a unique display name and a
-//! canonical local path or an inactive `yami://` subscription address. It never
-//! stores keys, credentials, query text or trust state. Remote subscriptions are
-//! recorded for future compatibility but are never fetched or marked current.
+//! The registry stores only source settings: a unique display name and a
+//! canonical local path or `yami://` subscription address. It never stores keys,
+//! credentials, query text or trust state. Remote sources are fetched only by an
+//! explicit refresh through the existing authenticated DHT/TLS/YNP stack.
 //!
 //! Snapshot files are ordinary version-1 directory documents. They are bounded
-//! by the same parser and limits as every other directory, and are used only as
-//! an explicit fallback when a local source is unavailable at rebuild time.
+//! by the same parser and limits as every other directory, and are used as the
+//! explicit fallback when a source is unavailable at refresh time.
 use crate::{
     catalog::source_label,
+    remote::{RemoteDirectoryFetcher, RemoteFetchError},
     store::{self, Mode},
     Catalog, Directory, Error, Result, SearchHit, WebsiteAddress, MAX_REGISTRY_BYTES, MAX_SOURCES,
     MAX_SOURCE_PATH_BYTES, MAX_STATUS_BYTES, MAX_STATUS_REASON_CHARS,
@@ -31,7 +32,7 @@ const SNAPSHOTS_DIRECTORY: &str = "snapshots";
 pub enum SourceKind {
     /// A local version-1 directory document.
     Local(PathBuf),
-    /// An inactive future `yami://` subscription. Never fetched by this build.
+    /// A remote `yami://` subscription. Fetched only on an explicit refresh.
     Remote(WebsiteAddress),
 }
 
@@ -79,7 +80,8 @@ pub enum SourceState {
     Cached { reason: String },
     /// Neither the source nor a usable snapshot was available.
     Unavailable { reason: String },
-    /// A remote subscription. It is deliberately inactive and never fetched.
+    /// A remote subscription with no successfully fetched snapshot yet.
+    /// Nothing is scheduled; only an explicit refresh performs network access.
     InactiveRemote,
     /// The source was registered but no catalog snapshot has been built yet.
     NotBuilt,
@@ -118,6 +120,16 @@ pub struct SourceStatus {
     pub state: SourceState,
     /// Unique entries contributed after first-source-wins deduplication.
     pub entries: usize,
+}
+
+/// Result of an explicit source refresh.
+#[derive(Debug)]
+pub struct RefreshReport {
+    /// Merged view after refresh, including any retained cached snapshot.
+    pub view: CatalogView,
+    /// Present when an explicitly refreshed remote source failed. The view
+    /// still reflects the persisted cached or unavailable fallback state.
+    pub remote_error: Option<RemoteFetchError>,
 }
 
 /// A merged catalog plus per-source provenance.
@@ -334,10 +346,12 @@ impl SourceRegistry {
         Ok(source)
     }
 
-    /// Registers an inactive remote `yami://` directory subscription.
+    /// Registers a remote `yami://` directory subscription without any network
+    /// access.
     ///
-    /// This build performs no network access and never marks the subscription
-    /// as fetched. Its status remains [`SourceState::InactiveRemote`].
+    /// The source remains [`SourceState::InactiveRemote`] until an explicit
+    /// [`DiscoveryStore::refresh_source_with`] call supplies an authenticated
+    /// fetcher and a validated directory is cached.
     pub fn register_remote(&mut self, name: &str, address: WebsiteAddress) -> Result<Source> {
         let name = source_label(name)?;
         ensure_source_capacity(self.sources.len())?;
@@ -427,7 +441,7 @@ impl DiscoveryStore {
         Ok(source)
     }
 
-    /// Registers an inactive remote source, then persists the registry.
+    /// Registers a remote source without fetching, then persists the registry.
     pub fn register_remote(&mut self, name: &str, address: WebsiteAddress) -> Result<Source> {
         let mut next = self.registry.clone();
         let source = next.register_remote(name, address)?;
@@ -450,11 +464,16 @@ impl DiscoveryStore {
     /// Refreshes every registered local source, rebuilding the catalog.
     ///
     /// Freshly loaded sources are snapshotted. Failed local sources fall back
-    /// to their last validated snapshot. Remote subscriptions remain inactive.
+    /// to their last validated snapshot. Remote subscriptions are not fetched
+    /// here; their existing status and snapshot are loaded unchanged.
     pub fn rebuild(&self) -> Result<CatalogView> {
         let mut catalog = Catalog::new();
         let mut statuses = Vec::with_capacity(self.registry.len());
         for source in self.registry.sources() {
+            if matches!(source.kind(), SourceKind::Remote(_)) {
+                statuses.push(self.cached_status(source, &mut catalog));
+                continue;
+            }
             let (state, entries) = self.rebuild_source(source, &mut catalog)?;
             statuses.push(SourceStatus {
                 name: source.name.clone(),
@@ -465,8 +484,11 @@ impl DiscoveryStore {
         Ok(CatalogView { catalog, statuses })
     }
 
-    /// Explicitly refreshes one source and reloads the combined catalog from
-    /// snapshots. Other source files are not read or refreshed.
+    /// Explicitly refreshes one local source and reloads the combined catalog
+    /// from snapshots. Other source files are not read or refreshed.
+    ///
+    /// For a remote source this only records inactive status; use
+    /// [`Self::refresh_source_with`] for an authenticated network fetch.
     pub fn refresh_source(&self, name: &str) -> Result<CatalogView> {
         let source = self
             .registry
@@ -502,6 +524,63 @@ impl DiscoveryStore {
             }
         }
         self.load_last()
+    }
+
+    /// Explicitly refreshes one source, using the supplied authenticated fetcher
+    /// for a remote `yami://` subscription.
+    ///
+    /// Local sources behave exactly like [`Self::refresh_source`]. Remote
+    /// success writes a validated snapshot and marks the source fresh. Remote
+    /// failure writes a cached state when a prior snapshot is available, or
+    /// unavailable otherwise, then returns the merged fallback view together
+    /// with the failure in [`RefreshReport::remote_error`]. No other source
+    /// files are read.
+    pub fn refresh_source_with(
+        &self,
+        name: &str,
+        fetcher: &dyn RemoteDirectoryFetcher,
+    ) -> Result<RefreshReport> {
+        let source = self
+            .registry
+            .get(name.trim())
+            .ok_or_else(|| Error::source(format!("no source named {name:?}")))?;
+        let SourceKind::Remote(address) = source.kind() else {
+            return Ok(RefreshReport {
+                view: self.refresh_source(&source.name)?,
+                remote_error: None,
+            });
+        };
+        let fetched = fetcher.fetch(address);
+        let remote_error = fetched.as_ref().err().cloned();
+        match fetched {
+            Ok(directory) => {
+                self.write_snapshot(&source.name, &directory)?;
+                self.write_status(&source.name, &SourceState::Fresh)?;
+            }
+            Err(error) => {
+                let state = self.remote_failure_state(&source.name, &error)?;
+                self.write_status(&source.name, &state)?;
+            }
+        }
+        let view = self.load_last()?;
+        Ok(RefreshReport { view, remote_error })
+    }
+
+    fn remote_failure_state(&self, name: &str, error: &RemoteFetchError) -> Result<SourceState> {
+        let fetch_reason = reason_text(error.to_string());
+        match self.read_snapshot(name) {
+            Ok(Some(_)) => Ok(SourceState::Cached {
+                reason: format!("remote fetch failed: {fetch_reason}"),
+            }),
+            Ok(None) => Ok(SourceState::Unavailable {
+                reason: format!("remote fetch failed: {fetch_reason}; no snapshot"),
+            }),
+            Err(snapshot_error) => Ok(SourceState::Unavailable {
+                reason: format!(
+                    "remote fetch failed: {fetch_reason}; snapshot invalid: {snapshot_error}"
+                ),
+            }),
+        }
     }
 
     /// Loads the combined catalog from cached snapshots without reading any
@@ -584,13 +663,7 @@ impl DiscoveryStore {
     }
 
     fn cached_status(&self, source: &Source, catalog: &mut Catalog) -> SourceStatus {
-        if matches!(source.kind(), SourceKind::Remote(_)) {
-            return SourceStatus {
-                name: source.name.clone(),
-                state: SourceState::InactiveRemote,
-                entries: 0,
-            };
-        }
+        let remote = matches!(source.kind(), SourceKind::Remote(_));
         let status = self.read_status(&source.name);
         let snapshot = self.read_snapshot(&source.name);
         match snapshot {
@@ -602,7 +675,11 @@ impl DiscoveryStore {
                         reason: format!("using retained snapshot after: {reason}"),
                     },
                     Ok(Some(SourceState::InactiveRemote)) => SourceState::Cached {
-                        reason: "invalid remote status on a local source".into(),
+                        reason: if remote {
+                            "remote subscription inactive; using retained snapshot".into()
+                        } else {
+                            "invalid remote status on a local source".into()
+                        },
                     },
                     Ok(Some(SourceState::NotBuilt)) => SourceState::Cached {
                         reason: "status says not built; using snapshot".into(),
@@ -627,6 +704,29 @@ impl DiscoveryStore {
                         },
                         entries: 0,
                     },
+                }
+            }
+            Ok(None) if remote => {
+                let state = match status {
+                    Ok(Some(SourceState::Unavailable { reason })) => {
+                        SourceState::Unavailable { reason }
+                    }
+                    Ok(Some(SourceState::Fresh | SourceState::Cached { .. })) => {
+                        SourceState::Unavailable {
+                            reason: "snapshot is missing; run source refresh".into(),
+                        }
+                    }
+                    Ok(Some(SourceState::InactiveRemote | SourceState::NotBuilt)) | Ok(None) => {
+                        SourceState::InactiveRemote
+                    }
+                    Err(error) => SourceState::Unavailable {
+                        reason: format!("corrupt status and no snapshot: {error}"),
+                    },
+                };
+                SourceStatus {
+                    name: source.name.clone(),
+                    state,
+                    entries: 0,
                 }
             }
             Ok(None) => {
@@ -656,7 +756,11 @@ impl DiscoveryStore {
             Err(error) => SourceStatus {
                 name: source.name.clone(),
                 state: SourceState::Unavailable {
-                    reason: format!("snapshot invalid: {error}"),
+                    reason: if remote {
+                        format!("cached remote snapshot invalid: {error}")
+                    } else {
+                        format!("snapshot invalid: {error}")
+                    },
                 },
                 entries: 0,
             },
@@ -894,9 +998,23 @@ fn unhex(text: &str) -> Option<Vec<u8>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::remote::{RemoteFetchError, RemoteFetchErrorKind};
     use crate::{DirectoryEntry, MAX_REGISTRY_BYTES, MAX_SOURCE_LABEL_CHARS, MAX_TOTAL_ENTRIES};
 
     const ID: &str = "yn1-tiqub4vxm4zslzlrhlfhc5k6b7vvkealot25nodtcixooe6xfzmxfsm6re";
+
+    struct MockFetcher {
+        result: std::result::Result<Directory, RemoteFetchError>,
+    }
+
+    impl RemoteDirectoryFetcher for MockFetcher {
+        fn fetch(
+            &self,
+            _address: &WebsiteAddress,
+        ) -> std::result::Result<Directory, RemoteFetchError> {
+            self.result.clone()
+        }
+    }
 
     fn temp_root(name: &str) -> PathBuf {
         let root = std::env::temp_dir().join(format!(
@@ -1213,7 +1331,7 @@ mod tests {
     }
 
     #[test]
-    fn remote_sources_remain_inactive_and_never_get_snapshots() {
+    fn remote_sources_without_explicit_fetch_stay_inactive() {
         let root = temp_root("remote");
         let state = root.join("state");
         let mut store = DiscoveryStore::open(&state).unwrap();
@@ -1233,6 +1351,168 @@ mod tests {
             SourceState::InactiveRemote
         );
         assert!(!store.snapshot_path("remote").exists());
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn remote_refresh_caches_success_and_falls_back_on_failure() {
+        let root = temp_root("remote-fetch");
+        let state = root.join("state");
+        let mut store = DiscoveryStore::open(&state).unwrap();
+        let remote_address = WebsiteAddress::parse(&format!("yami://{ID}/home")).unwrap();
+        store
+            .register_remote("remote", remote_address.clone())
+            .unwrap();
+        let directory = Directory::new(
+            "Remote",
+            vec![DirectoryEntry::new(
+                "Remote title",
+                "Remote entry",
+                WebsiteAddress::parse(&format!("yami://{ID}/about")).unwrap(),
+                None,
+            )
+            .unwrap()],
+        )
+        .unwrap();
+
+        let report = store
+            .refresh_source_with(
+                "remote",
+                &MockFetcher {
+                    result: Ok(directory.clone()),
+                },
+            )
+            .unwrap();
+        assert!(report.remote_error.is_none());
+        assert_eq!(report.view.len(), 1);
+        assert_eq!(
+            report.view.status_for("remote").unwrap().state,
+            SourceState::Fresh
+        );
+        assert!(store.snapshot_path("remote").is_file());
+
+        let reopened = DiscoveryStore::open(&state).unwrap();
+        let view = reopened.load_last().unwrap();
+        assert_eq!(view.len(), 1);
+        assert_eq!(view.search("remote").unwrap().len(), 1);
+        assert_eq!(view.status_for("remote").unwrap().state, SourceState::Fresh);
+        let rebuilt = reopened.rebuild().unwrap();
+        assert_eq!(rebuilt.len(), 1);
+        assert_eq!(
+            rebuilt.status_for("remote").unwrap().state,
+            SourceState::Fresh
+        );
+
+        let report = reopened
+            .refresh_source_with(
+                "remote",
+                &MockFetcher {
+                    result: Err(RemoteFetchError::identity("wrong identity")),
+                },
+            )
+            .unwrap();
+        assert_eq!(
+            report.remote_error.as_ref().unwrap().kind,
+            RemoteFetchErrorKind::Identity
+        );
+        assert_eq!(report.view.len(), 1);
+        assert!(matches!(
+            report.view.status_for("remote").unwrap().state,
+            SourceState::Cached { .. }
+        ));
+        assert_eq!(report.view.search("remote").unwrap().len(), 1);
+
+        let report = reopened
+            .refresh_source_with(
+                "remote",
+                &MockFetcher {
+                    result: Err(RemoteFetchError::invalid_directory("bad document")),
+                },
+            )
+            .unwrap();
+        assert_eq!(
+            report.remote_error.as_ref().unwrap().kind,
+            RemoteFetchErrorKind::InvalidDirectory
+        );
+        assert_eq!(report.view.len(), 1);
+
+        let state_without_cache = root.join("state-no-cache");
+        let mut empty = DiscoveryStore::open(&state_without_cache).unwrap();
+        empty.register_remote("remote", remote_address).unwrap();
+        let report = empty
+            .refresh_source_with(
+                "remote",
+                &MockFetcher {
+                    result: Err(RemoteFetchError::unreachable("offline")),
+                },
+            )
+            .unwrap();
+        assert_eq!(
+            report.remote_error.as_ref().unwrap().kind,
+            RemoteFetchErrorKind::Unreachable
+        );
+        assert!(report.view.is_empty());
+        assert!(matches!(
+            report.view.status_for("remote").unwrap().state,
+            SourceState::Unavailable { .. }
+        ));
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn remote_refresh_preserves_registration_order() {
+        let root = temp_root("remote-order");
+        let sources = root.join("sources");
+        let state = root.join("state");
+        fs::create_dir_all(&sources).unwrap();
+        let local = sources.join("local.ylang");
+        simple_source(&local, "Local", "Local title", "local");
+        let mut store = DiscoveryStore::open(&state).unwrap();
+        store.register_local("local", &local).unwrap();
+        store
+            .register_remote(
+                "remote",
+                WebsiteAddress::parse(&format!("yami://{ID}/home")).unwrap(),
+            )
+            .unwrap();
+        store.rebuild().unwrap();
+
+        let directory = Directory::new(
+            "Remote",
+            vec![DirectoryEntry::new(
+                "Remote title",
+                "Remote entry",
+                WebsiteAddress::parse(&format!("yami://{ID}/remote")).unwrap(),
+                None,
+            )
+            .unwrap()],
+        )
+        .unwrap();
+        let report = store
+            .refresh_source_with(
+                "remote",
+                &MockFetcher {
+                    result: Ok(directory),
+                },
+            )
+            .unwrap();
+        assert_eq!(
+            report
+                .view
+                .statuses()
+                .iter()
+                .map(|status| status.name.clone())
+                .collect::<Vec<_>>(),
+            ["local", "remote"]
+        );
+        assert!(report
+            .view
+            .statuses()
+            .iter()
+            .all(|status| status.state.is_fresh()));
+        assert_eq!(report.view.len(), 2);
 
         let _ = fs::remove_dir_all(root);
     }

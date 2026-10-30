@@ -156,7 +156,7 @@ yami-discover source add community sites/directories/community.ylang
 yami-discover source add garden sites/directories/garden.ylang
 yami-discover source list
 
-# Explicitly load every registered source and write validated snapshots.
+# Explicitly reload local sources and write validated snapshots.
 yami-discover catalog rebuild
 
 # Search the last built catalog. Source files are not read here.
@@ -177,6 +177,9 @@ directory. The state directory contains:
 sources.conf                       versioned source registry
 snapshots/<sha256>.ylang           validated version-1 directory snapshot
 snapshots/<sha256>.status          versioned provenance/cache status
+dht-public-discover.cache          bounded DHT lookup cache (remote refresh)
+dht-local-discover.cache           bounded loopback DHT lookup cache
+*.lock                             existing DHT/registry locking files
 ```
 
 `source add` validates a local directory with the existing parser before
@@ -195,26 +198,67 @@ Each source has one bounded status:
 | `fresh` | The source was loaded successfully at the last explicit refresh for that source. Search results loaded from its snapshot display `[fresh]`; this is build-time provenance, not current network availability. |
 | `cached` | The source was unavailable at the last explicit refresh, so its last validated snapshot was used. The bounded reason is shown with the results. |
 | `unavailable` | Neither the source nor a usable snapshot was available at the last refresh. No entries are contributed. |
-| `inactive remote` | A future `yami://` subscription. It is deliberately never fetched and never marked fresh. |
+| `inactive remote` | A remote subscription with no successfully fetched snapshot yet. Nothing is scheduled; only an explicit `source refresh` performs network access. |
 | `not built` | The source is registered but no catalog snapshot has been built yet. |
 
-`catalog rebuild` refreshes all sources in registration order. `source refresh`
-refreshes exactly one source and then reloads the combined view from snapshots;
-other source files are not read. Both paths use the existing `Catalog`, so
-source order is deterministic and the first source wins when two sources list
-the same canonical address.
+`catalog rebuild` refreshes all local sources in registration order. It does not
+fetch remote subscriptions; their existing status and snapshot are loaded
+unchanged. `source refresh NAME` refreshes exactly one source. For a remote
+source it performs one explicitly requested authenticated fetch and then
+reloads the combined view from snapshots; other source files are never read.
+Both paths use the existing `Catalog`, so source order is deterministic and the
+first source wins when two sources list the same canonical address.
 
-Remote subscriptions can be recorded now without any network implementation:
+### Authenticated remote refresh
+
+Remote `yami://` subscriptions become usable through the existing networking
+stack:
 
 ```sh
 yami-discover source add future --remote yami://yn1-.../home
-yami-discover catalog rebuild
-yami-discover source list
+
+# Use one or more existing trusted manual bootstrap pins.
+yami-discover source refresh future \
+  --bootstrap yn1-BOOTSTRAP@198.51.100.10:7443 \
+  --network public
+
+# Or read the existing YAMINET_PEER_DIR / peering peers.tsv read-only.
+yami-discover source refresh future --peer-dir /path/to/peers --network public
+
+# Loopback/private test networks select the local DHT policy explicitly.
+yami-discover source refresh future --network local --peer-dir ./test-peers
 ```
 
-The remote source remains `inactive remote`; no socket, DNS, HTTP or YNP
-request is made. A future transport may add fetching, but this build never
-marks such a source as fetched, fresh or cached.
+The fetcher reuses, rather than reimplements:
+
+1. the existing bounded DHT lookup cache (`Service::open_lookup`) and signed
+   `lookup_fresh` record validation;
+2. existing manually trusted bootstrap `Contact`s supplied by `--bootstrap`
+   and/or the existing `peers.tsv` manual peer store, read without writing;
+3. existing `ynp-tls` `TlsTransport`, which proves the exact node ID from the
+   subscription before sending a request, with TLS 1.3 pinning and no plaintext
+   fallback;
+4. existing YNP document framing and the existing `Directory::parse`
+   validator, including size and version limits.
+
+A successful fetch writes the validated directory into the existing snapshot
+store and marks the source `fresh`. The document is accepted only after TLS
+authentication and full version-1 directory validation. A failure retains the
+last valid snapshot as `cached` with a bounded reason, or marks the source
+`unavailable` when no snapshot exists. Failure categories distinguish
+configuration, signed lookup, unreachable endpoint, identity mismatch,
+transport/document framing, and invalid directory errors.
+
+`--network public` is the default and requires public IPv4 bootstrap endpoints.
+`--network local` uses the existing loopback DHT policy. This build tries
+direct signed endpoints only; a source advertising only relay routes fails with
+a clear transport error rather than silently using another path. There is no
+automatic refresh, startup fetch, search-time fetch, crawling, telemetry or
+query transmission. The DHT cache and snapshot files remain bounded by the
+existing count and byte limits.
+
+TLS authentication proves which node delivered the directory. It does **not**
+make the directory content, listed websites or their owners trustworthy.
 
 Snapshot and status files are bounded and validated. A corrupt snapshot makes
 its source unavailable with a bounded reason; a corrupt status falls back to
@@ -286,8 +330,9 @@ HTML, CSS, an external web engine, accounts, telemetry or query reporting.
 
 ## API for the next browser milestone
 
-The crate is independent of the browser and contains no networking calls. A
-later milestone can add it as a path dependency:
+The crate is independent of the browser. It contains only the explicit remote
+refresh path, which reuses the existing `yami-dht`, `ynp-tls` and `ynp` crates
+rather than duplicating them. A later milestone can add it as a path dependency:
 
 ```toml
 yami-discover = { path = "../../crates/yami-discover" }
@@ -349,18 +394,28 @@ Public API surface:
 | `SourceRegistry` | Versioned, persistent local source settings |
 | `DiscoveryStore::open(state_dir)` | Open the registry and snapshot state |
 | `DiscoveryStore::register_local` / `register_remote` / `remove_source` | Manage registered sources |
-| `DiscoveryStore::rebuild` / `refresh_source` | Explicit full or single-source refresh |
+| `DiscoveryStore::rebuild` / `refresh_source` | Explicit local rebuild or single-source refresh |
+| `DiscoveryStore::refresh_source_with(name, fetcher)` | Explicit authenticated remote refresh returning `RefreshReport` |
 | `DiscoveryStore::load_last` | Load the merged catalog from snapshots only |
+| `AuthenticatedFetcher` | Signed DHT lookup + pinned TLS 1.3 + YNP directory fetch |
+| `RemoteDirectoryFetcher` | Transport adapter trait; must authenticate the exact identity |
+| `RemoteFetchError` / `RemoteFetchErrorKind` | Bounded diagnostic categories and messages |
+| `load_bootstrap_peers` / `merge_bootstrap_peers` | Read existing `peers.tsv` manual pins and merge conflicts |
+| `RefreshReport` | Post-refresh view plus optional remote fetch failure |
 | `CatalogView` | Merged `Catalog` plus per-source `SourceStatus` |
 | `CatalogView::search` / `status_for` | Existing Unicode search plus provenance |
 | `SourceState` | `Fresh`, `Cached`, `Unavailable`, `InactiveRemote`, `NotBuilt` |
 
 For browser integration, open a `DiscoveryStore` at a per-user state directory
-and use `load_last` + `CatalogView::search` for normal searches. Call `rebuild`
-or `refresh_source` only in response to an explicit user refresh action, since
-those are the only operations that read source files. The browser must still
-mark every result untrusted and authenticate the canonical destination over
-TLS 1.3 when it is opened.
+and use `load_last` + `CatalogView::search` for normal searches. Call `rebuild`,
+`refresh_source`, or `refresh_source_with` only in response to an explicit user
+refresh action, since those are the only operations that read source files or
+perform network access. For a remote refresh, construct `AuthenticatedFetcher`
+with existing manually trusted bootstrap `Contact`s (or read them through
+`load_bootstrap_peers`), then pass it to `refresh_source_with`. Show
+`RefreshReport::remote_error` when present. The browser must still mark every
+result untrusted and authenticate the canonical destination over TLS 1.3 when
+it is opened.
 
 ```rust
 use yami_discover::{DiscoveryStore, Error};
@@ -402,6 +457,8 @@ activation of the canonical address.
 | Snapshot per source | 256 KiB (version-1 directory limit) |
 | Status file | 4 KiB |
 | Status reason | 240 characters |
+| Manual bootstrap peers read from `peers.tsv` | 256 (existing peer-store bound) |
+| Signed DHT lookup | Existing fixed query, record and timeout budgets |
 | Query | 128 characters, 8 terms |
 | Results | 100 |
 
@@ -424,7 +481,9 @@ documents, entry/source/catalog caps, duplicate handling, Unicode and partial
 search, query limits, the result cap, authoring round-trips, reserved-text
 escaping, in-place edits/removals, atomic writes, registry restarts, stable
 source ordering, cached fallback, corrupt state, source removal, individual
-refresh and inactive remote subscriptions.
+refresh, inactive remote subscriptions, authenticated loopback TLS/YNP fetches,
+wrong identities, invalid delivered documents, mock transport failures and
+remote cache recovery.
 
 ## Scope
 
@@ -436,13 +495,16 @@ In scope for this milestone:
 - local validation, merging and search;
 - local directory authoring, escaped rendering and atomic writes;
 - a persistent source registry with bounded cached snapshots and explicit
-  refresh, including inactive future remote subscriptions;
+  refresh;
+- explicitly requested authenticated remote `yami://` directory fetching over
+  the existing signed DHT lookup, pinned TLS 1.3 and YNP stack;
 - documentation and unit tests.
 
 Out of scope, deliberately:
 
 - browser UI integration;
-- automatic downloading or discovery of directory documents;
+- automatic or background downloading/crawling of directory documents;
+- remote fetching through relay routes in this milestone;
 - directory signatures or reputation;
 - a central search server;
 - changes to TLS, DHT, relays, installers, CI or the existing browser model.

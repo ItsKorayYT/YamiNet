@@ -1,17 +1,22 @@
 //! Local CLI for demonstrating, authoring, validating and searching YamiNet
 //! website directories.
 //!
-//! The `demo` command uses the three sample directory documents compiled into
-//! the binary. Authoring commands write only local YLang files. This tool
-//! performs no network access and no crawling.
+//! The `demo`, search, list, validate and authoring commands use only local
+//! files. An explicit `source refresh` of a remote subscription reuses the
+//! existing signed DHT lookup, pinned TLS 1.3 and YNP transport. There is no
+//! crawling, background fetch or plaintext fallback.
 use std::{
     collections::{HashMap, HashSet},
+    net::SocketAddrV4,
     path::{Path, PathBuf},
 };
+use yami_dht::{Contact, Network};
 use yami_discover::{
-    Catalog, CatalogView, Directory, DirectoryEntry, DiscoveryStore, Source, SourceKind,
-    SourceState, WebsiteAddress, MAX_RESULTS, MAX_SOURCE_LABEL_CHARS,
+    load_bootstrap_peers, merge_bootstrap_peers, AuthenticatedFetcher, Catalog, CatalogView,
+    Directory, DirectoryEntry, DiscoveryStore, Source, SourceKind, SourceState, WebsiteAddress,
+    MAX_RESULTS, MAX_SOURCE_LABEL_CHARS,
 };
+use yami_identity::NodeId;
 
 const DEFAULT_STATE_DIRECTORY: &str = ".yami-discover";
 
@@ -46,7 +51,7 @@ Usage:
   yami-discover source add NAME --remote YAMI_URL [--state DIR]
   yami-discover source list [--state DIR]
   yami-discover source remove NAME [--state DIR]
-  yami-discover source refresh NAME [--state DIR]
+  yami-discover source refresh NAME [--state DIR] [--network public|local] [--bootstrap PIN]... [--peer-dir DIR]
   yami-discover catalog rebuild [--state DIR]
   yami-discover catalog search QUERY [--state DIR]
   yami-discover catalog list [--state DIR]
@@ -63,7 +68,8 @@ Commands:
   remove     Remove the entry with the given canonical address.
   edit       Change an existing entry's title, description or category.
   show       Display one directory's metadata and entries.
-  source     Register, list, remove or explicitly refresh local sources.
+  source     Register, list, remove or explicitly refresh sources. Remote
+             refresh uses signed DHT lookup and pinned TLS 1.3.
   catalog    Rebuild, search or list the persistent combined catalog.
 
 Options:
@@ -75,6 +81,9 @@ Options:
   --clear-category   Remove the category during edit
   --state DIR        Registry/snapshot directory (default: .yami-discover)
   --remote YAMI_URL  Register an inactive remote directory subscription
+  --network MODE     Remote refresh DHT policy: public (default) or local
+  --bootstrap PIN    Trusted bootstrap NODE_ID@IPv4:PORT (repeatable)
+  --peer-dir DIR     Read existing manual peers.tsv pins for bootstrap
   -h, --help         Show this help
 
 Authoring writes atomically through a temporary file. Entries keep document
@@ -84,10 +93,13 @@ descriptions are escaped so reserved YLang prefixes and brackets round-trip.
 Persistent sources are read only by an explicit `catalog rebuild` or
 `source refresh`. `catalog search` uses the last validated snapshots, so a
 temporary source outage does not make previously imported listings disappear.
-Remote subscriptions are stored as inactive addresses and are never fetched.
-No operation performs network access or marks a listed website as trusted.";
+`source refresh` on a remote source performs one explicitly requested signed
+DHT lookup and pinned TLS 1.3 fetch; it caches the validated directory and
+falls back to the last snapshot on failure. There is no automatic or background
+fetch. Opening a listed website still requires independent identity
+authentication, and directory content remains untrusted.";
 
-const TRUST_NOTE: &str = "Entries are untrusted hints: opening one still requires the existing TLS 1.3 identity check. This tool performs no network access.";
+const TRUST_NOTE: &str = "Entries are untrusted hints: opening one still requires the existing TLS 1.3 identity check. Remote refresh authenticates only the directory source, not the websites it lists.";
 
 fn main() {
     if let Err(error) = run(std::env::args().skip(1).collect()) {
@@ -222,7 +234,7 @@ fn create(args: &[String]) -> Result<(), String> {
         println!("{USAGE}");
         return Ok(());
     }
-    let options = parse_command_options(args, &["--title"], &[], "create")?;
+    let options = parse_command_options(args, &["--title"], &[], &[], "create")?;
     let file = options.file("create")?;
     let directory = Directory::new(options.required("create", "--title")?, Vec::new())
         .map_err(|error| error.to_string())?;
@@ -241,6 +253,7 @@ fn add(args: &[String]) -> Result<(), String> {
     let options = parse_command_options(
         args,
         &["--title", "--description", "--address", "--category"],
+        &[],
         &[],
         "add",
     )?;
@@ -275,7 +288,7 @@ fn remove(args: &[String]) -> Result<(), String> {
         println!("{USAGE}");
         return Ok(());
     }
-    let options = parse_command_options(args, &["--address"], &[], "remove")?;
+    let options = parse_command_options(args, &["--address"], &[], &[], "remove")?;
     let file = options.file("remove")?;
     let address = parse_address(options.required("remove", "--address")?)?;
     let mut directory =
@@ -304,6 +317,7 @@ fn edit(args: &[String]) -> Result<(), String> {
         args,
         &["--address", "--title", "--description", "--category"],
         &["--clear-category"],
+        &[],
         "edit",
     )?;
     let file = options.file("edit")?;
@@ -367,7 +381,7 @@ fn show(args: &[String]) -> Result<(), String> {
         println!("{USAGE}");
         return Ok(());
     }
-    let options = parse_command_options(args, &[], &[], "show")?;
+    let options = parse_command_options(args, &[], &[], &[], "show")?;
     let file = options.file("show")?;
     let directory =
         Directory::load(file).map_err(|error| format!("{}: {error}", file.display()))?;
@@ -432,7 +446,7 @@ fn source_add(args: &[String]) -> Result<(), String> {
         println!("{USAGE}");
         return Ok(());
     }
-    let options = parse_command_options(args, &["--state", "--remote"], &[], "source add")?;
+    let options = parse_command_options(args, &["--state", "--remote"], &[], &[], "source add")?;
     let state = state_directory(&options)?;
     if let Some(address) = options.values.get("--remote") {
         if options.positionals.len() != 1 {
@@ -447,7 +461,7 @@ fn source_add(args: &[String]) -> Result<(), String> {
             .register_remote(&options.positionals[0], address)
             .map_err(|error| error.to_string())?;
         println!(
-            "Registered inactive remote source {:?} ({}).",
+            "Registered remote source {:?} ({}) as an inactive subscription.",
             source.name(),
             source
                 .remote_address()
@@ -455,7 +469,8 @@ fn source_add(args: &[String]) -> Result<(), String> {
                 .unwrap_or_default()
         );
         println!(
-            "No network fetch is performed. Run `yami-discover catalog rebuild --state {}` to record its inactive status.",
+            "Registration performs no fetch. Run `yami-discover source refresh {:?} --state {}` with trusted bootstrap peers for an explicit authenticated refresh.",
+            source.name(),
             state.display()
         );
     } else {
@@ -490,7 +505,7 @@ fn source_list(args: &[String]) -> Result<(), String> {
         println!("{USAGE}");
         return Ok(());
     }
-    let options = parse_command_options(args, &["--state"], &[], "source list")?;
+    let options = parse_command_options(args, &["--state"], &[], &[], "source list")?;
     if !options.positionals.is_empty() {
         return Err(format!("source list does not accept arguments\n\n{USAGE}"));
     }
@@ -530,7 +545,7 @@ fn source_remove(args: &[String]) -> Result<(), String> {
         println!("{USAGE}");
         return Ok(());
     }
-    let options = parse_command_options(args, &["--state"], &[], "source remove")?;
+    let options = parse_command_options(args, &["--state"], &[], &[], "source remove")?;
     if options.positionals.len() != 1 {
         return Err(format!(
             "source remove NAME requires exactly one NAME\n\n{USAGE}"
@@ -554,7 +569,13 @@ fn source_refresh(args: &[String]) -> Result<(), String> {
         println!("{USAGE}");
         return Ok(());
     }
-    let options = parse_command_options(args, &["--state"], &[], "source refresh")?;
+    let options = parse_command_options(
+        args,
+        &["--state", "--network", "--peer-dir"],
+        &[],
+        &["--bootstrap"],
+        "source refresh",
+    )?;
     if options.positionals.len() != 1 {
         return Err(format!(
             "source refresh NAME requires exactly one NAME\n\n{USAGE}"
@@ -564,23 +585,104 @@ fn source_refresh(args: &[String]) -> Result<(), String> {
     let name = options.positionals[0].trim();
     let store = DiscoveryStore::open(state.clone())
         .map_err(|error| format!("{}: {error}", state.display()))?;
-    let view = store
-        .refresh_source(name)
-        .map_err(|error| error.to_string())?;
+    let kind = store
+        .registry()
+        .get(name)
+        .ok_or_else(|| format!("source refresh: no source named {name:?}"))?
+        .kind()
+        .clone();
+    let view = match kind {
+        SourceKind::Local(_) => store
+            .refresh_source(name)
+            .map_err(|error| error.to_string())?,
+        SourceKind::Remote(_) => {
+            let network = parse_network(options.values.get("--network"))?;
+            let mut bootstrap = Vec::new();
+            if let Some(directory) = peer_directory(&options)? {
+                bootstrap = load_bootstrap_peers(&directory, network)
+                    .map_err(|error| format!("{}: {error}", directory.display()))?;
+            }
+            let explicit = options
+                .values_for("--bootstrap")
+                .iter()
+                .map(|value| parse_bootstrap(value, network))
+                .collect::<Result<Vec<_>, _>>()?;
+            bootstrap =
+                merge_bootstrap_peers(bootstrap, explicit).map_err(|error| error.to_string())?;
+            let fetcher = AuthenticatedFetcher::open(&state, network, bootstrap)
+                .map_err(|error| error.to_string())?;
+            let report = store
+                .refresh_source_with(name, &fetcher)
+                .map_err(|error| error.to_string())?;
+            if let Some(error) = report.remote_error {
+                let status = report
+                    .view
+                    .status_for(name)
+                    .ok_or_else(|| format!("source refresh: no status for {name:?}"))?;
+                println!("Remote refresh failed for {name:?}: {error}");
+                println!(
+                    "Retained source status: {} ({} entries).",
+                    status_detail(&status.state),
+                    status.entries
+                );
+                println!("Catalog: {} unique entries.", report.view.len());
+                return Err("remote refresh failed".into());
+            }
+            report.view
+        }
+    };
     let status = view
         .status_for(name)
         .ok_or_else(|| format!("source refresh: no status for {name:?}"))?;
-    if matches!(status.state, SourceState::InactiveRemote) {
-        println!("Remote source {name:?} remains inactive; no network fetch was performed.");
-    } else {
-        println!(
-            "Refreshed {name:?}: {} ({} entries).",
-            status_detail(&status.state),
-            status.entries
-        );
-    }
+    println!(
+        "Refreshed {name:?}: {} ({} entries).",
+        status_detail(&status.state),
+        status.entries
+    );
     println!("Catalog: {} unique entries.", view.len());
     Ok(())
+}
+
+fn parse_network(value: Option<&String>) -> Result<Network, String> {
+    match value.map(String::as_str).unwrap_or("public") {
+        "public" => Ok(Network::Public),
+        "local" => Ok(Network::Loopback),
+        _ => Err(format!("--network must be public or local\n\n{USAGE}")),
+    }
+}
+
+fn parse_bootstrap(value: &str, network: Network) -> Result<Contact, String> {
+    let (id, endpoint) = value
+        .split_once('@')
+        .ok_or_else(|| format!("--bootstrap expects NODE_ID@IPv4:PORT\n\n{USAGE}"))?;
+    let id: NodeId = id
+        .parse()
+        .map_err(|_| format!("invalid bootstrap node ID\n\n{USAGE}"))?;
+    let endpoint: SocketAddrV4 = endpoint
+        .parse()
+        .map_err(|_| format!("invalid bootstrap IPv4 endpoint\n\n{USAGE}"))?;
+    Contact::new(id, endpoint, network)
+        .map_err(|error| format!("bootstrap is outside the selected network: {error}"))
+}
+
+fn peer_directory(options: &CommandOptions) -> Result<Option<PathBuf>, String> {
+    if let Some(directory) = options.values.get("--peer-dir") {
+        let directory = PathBuf::from(directory);
+        if !directory.is_dir() {
+            return Err(format!(
+                "--peer-dir {} is not an existing directory",
+                directory.display()
+            ));
+        }
+        return Ok(Some(directory));
+    }
+    let default = std::env::var_os("YAMINET_PEER_DIR")
+        .map(PathBuf::from)
+        .or_else(|| {
+            yami_identity::default_dir()
+                .and_then(|directory| directory.parent().map(|parent| parent.join("peers")))
+        });
+    Ok(default.filter(|directory| directory.is_dir()))
 }
 
 fn catalog_rebuild(args: &[String]) -> Result<(), String> {
@@ -588,7 +690,7 @@ fn catalog_rebuild(args: &[String]) -> Result<(), String> {
         println!("{USAGE}");
         return Ok(());
     }
-    let options = parse_command_options(args, &["--state"], &[], "catalog rebuild")?;
+    let options = parse_command_options(args, &["--state"], &[], &[], "catalog rebuild")?;
     if !options.positionals.is_empty() {
         return Err(format!(
             "catalog rebuild does not accept arguments\n\n{USAGE}"
@@ -621,7 +723,7 @@ fn catalog_search(args: &[String]) -> Result<(), String> {
         println!("{USAGE}");
         return Ok(());
     }
-    let options = parse_command_options(args, &["--state"], &[], "catalog search")?;
+    let options = parse_command_options(args, &["--state"], &[], &[], "catalog search")?;
     if options.positionals.is_empty() {
         return Err(format!("catalog search requires QUERY\n\n{USAGE}"));
     }
@@ -661,7 +763,7 @@ fn catalog_list(args: &[String]) -> Result<(), String> {
         println!("{USAGE}");
         return Ok(());
     }
-    let options = parse_command_options(args, &["--state"], &[], "catalog list")?;
+    let options = parse_command_options(args, &["--state"], &[], &[], "catalog list")?;
     if !options.positionals.is_empty() {
         return Err(format!("catalog list does not accept arguments\n\n{USAGE}"));
     }
@@ -778,7 +880,7 @@ fn status_summary(view: &CatalogView) -> String {
 fn source_kind_detail(source: &Source) -> String {
     match source.kind() {
         SourceKind::Local(path) => format!("local {}", path.display()),
-        SourceKind::Remote(address) => format!("inactive remote {address}"),
+        SourceKind::Remote(address) => format!("remote {address}"),
     }
 }
 
@@ -802,6 +904,7 @@ fn parse_address(text: &str) -> Result<WebsiteAddress, String> {
 #[derive(Debug, Default)]
 struct CommandOptions {
     values: HashMap<String, String>,
+    multi_values: HashMap<String, Vec<String>>,
     flags: HashSet<String>,
     positionals: Vec<String>,
 }
@@ -816,6 +919,13 @@ impl CommandOptions {
 
     fn flag(&self, option: &str) -> bool {
         self.flags.contains(option)
+    }
+
+    fn values_for(&self, option: &str) -> &[String] {
+        self.multi_values
+            .get(option)
+            .map(Vec::as_slice)
+            .unwrap_or(&[])
     }
 
     fn file(&self, command: &str) -> Result<&Path, String> {
@@ -838,6 +948,7 @@ fn parse_command_options(
     args: &[String],
     value_options: &[&str],
     flag_options: &[&str],
+    repeatable_options: &[&str],
     command: &str,
 ) -> Result<CommandOptions, String> {
     let mut parsed = CommandOptions::default();
@@ -873,7 +984,13 @@ fn parse_command_options(
                         })?
                     }
                 };
-                if parsed.values.insert(option.to_string(), value).is_some() {
+                if repeatable_options.contains(&option) {
+                    parsed
+                        .multi_values
+                        .entry(option.to_string())
+                        .or_default()
+                        .push(value);
+                } else if parsed.values.insert(option.to_string(), value).is_some() {
                     return Err(format!(
                         "{command}: {option} was given more than once\n\n{USAGE}"
                     ));
@@ -1046,6 +1163,7 @@ mod tests {
             &args,
             &["--title", "--category"],
             &["--clear-category"],
+            &[],
             "edit",
         )
         .unwrap();
@@ -1054,18 +1172,61 @@ mod tests {
         assert!(options.flag("--clear-category"));
         assert_eq!(options.positionals, ["file.ylang"]);
 
-        assert!(
-            parse_command_options(&["--unknown".to_string()], &["--title"], &[], "create").is_err()
-        );
+        assert!(parse_command_options(
+            &["--unknown".to_string()],
+            &["--title"],
+            &[],
+            &[],
+            "create"
+        )
+        .is_err());
         assert!(parse_command_options(
             &["--clear-category=yes".to_string()],
             &[],
             &["--clear-category"],
+            &[],
             "edit"
         )
         .is_err());
         assert!(wants_help(&["--help".to_string()]));
         assert!(!wants_help(&["file.ylang".to_string()]));
+    }
+
+    #[test]
+    fn remote_refresh_options_parse_bootstrap_pins_and_network() {
+        const ID: &str = "yn1-tiqub4vxm4zslzlrhlfhc5k6b7vvkealot25nodtcixooe6xfzmxfsm6re";
+        let args = vec![
+            "remote".to_string(),
+            "--bootstrap".to_string(),
+            "one".to_string(),
+            "--bootstrap=two".to_string(),
+            "--network".to_string(),
+            "local".to_string(),
+        ];
+        let options = parse_command_options(
+            &args,
+            &["--network", "--bootstrap"],
+            &[],
+            &["--bootstrap"],
+            "source refresh",
+        )
+        .unwrap();
+        assert_eq!(options.values_for("--bootstrap").len(), 2);
+        assert_eq!(options.values.get("--network").unwrap(), "local");
+        assert_eq!(options.positionals, ["remote"]);
+
+        assert_eq!(parse_network(None).unwrap(), Network::Public);
+        assert_eq!(
+            parse_network(Some(&"local".to_string())).unwrap(),
+            Network::Loopback
+        );
+        assert!(parse_network(Some(&"unknown".to_string())).is_err());
+
+        let pin = format!("{ID}@127.0.0.1:7443");
+        let contact = parse_bootstrap(&pin, Network::Loopback).unwrap();
+        assert_eq!(contact.id.to_string(), ID);
+        assert!(parse_bootstrap("bad", Network::Loopback).is_err());
+        assert!(parse_bootstrap(&pin, Network::Public).is_err());
     }
 
     #[test]
@@ -1311,6 +1472,28 @@ mod tests {
             SourceState::InactiveRemote
         );
         run(command!["source", "list", "--state", &state_arg]).unwrap();
+
+        let empty_peers = root.join("empty-peers");
+        std::fs::create_dir_all(&empty_peers).unwrap();
+        let empty_peers_arg = empty_peers.to_string_lossy().into_owned();
+        assert!(run(command![
+            "source",
+            "refresh",
+            "remote",
+            "--state",
+            &state_arg,
+            "--network",
+            "local",
+            "--peer-dir",
+            &empty_peers_arg,
+        ])
+        .is_err());
+        let store = DiscoveryStore::open(&state).unwrap();
+        let view = store.load_last().unwrap();
+        assert!(matches!(
+            view.status_for("remote").unwrap().state,
+            SourceState::Unavailable { .. }
+        ));
 
         run(command![
             "source",
