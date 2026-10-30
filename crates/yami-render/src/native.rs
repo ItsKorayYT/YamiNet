@@ -25,6 +25,11 @@ pub struct TextRect {
     pub width: f32,
     pub height: f32,
 }
+/// One literal Unicode text occurrence, with shaped rectangles across wrapped lines.
+#[derive(Debug, Clone)]
+pub struct SearchMatch {
+    pub rects: Vec<TextRect>,
+}
 impl TextRect {
     fn contains(self, x: f32, y: f32) -> bool {
         x >= self.x && y >= self.y && x < self.x + self.width && y < self.y + self.height
@@ -312,6 +317,53 @@ pub struct NativeDocument {
     link_states: Option<(Color, Color)>,
 }
 impl NativeDocument {
+    /// Local, case-sensitive UTF-8 search of rendered text. Never examines URLs,
+    /// metadata or hidden source syntax. Results are bounded to 4096 occurrences.
+    pub fn find(&self, query: &str) -> Vec<SearchMatch> {
+        let mut matches = Vec::new();
+        if query.is_empty() || query.len() > 4096 {
+            return matches;
+        }
+        for block in &self.blocks {
+            for (line_i, line) in block.buffer.lines.iter().enumerate() {
+                for (start, _) in line.text().match_indices(query) {
+                    let end = start + query.len();
+                    let mut rects = Vec::new();
+                    for run in block
+                        .buffer
+                        .layout_runs()
+                        .filter(|run| run.line_i == line_i)
+                    {
+                        let glyphs: Vec<_> = run
+                            .glyphs
+                            .iter()
+                            .filter(|g| g.start < end && g.end > start)
+                            .collect();
+                        if !glyphs.is_empty() {
+                            let left = glyphs.iter().map(|g| g.x).fold(f32::INFINITY, f32::min);
+                            let right = glyphs
+                                .iter()
+                                .map(|g| g.x + g.w)
+                                .fold(f32::NEG_INFINITY, f32::max);
+                            rects.push(TextRect {
+                                x: block.x + left,
+                                y: block.y + run.line_top,
+                                width: (right - left).max(1.0),
+                                height: run.line_height,
+                            });
+                        }
+                    }
+                    if !rects.is_empty() {
+                        matches.push(SearchMatch { rects });
+                    }
+                    if matches.len() == 4096 {
+                        return matches;
+                    }
+                }
+            }
+        }
+        matches
+    }
     pub fn layout(
         document: &Document,
         style: &Stylesheet,
@@ -636,6 +688,25 @@ impl DocumentBuilder<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn find_uses_visible_unicode_text_and_shaped_wrapping() {
+        let mut engine = TextEngine::new();
+        for version in ["0.1", "0.2"] {
+            let doc = ylang::parse(&format!("@page {version}\n  title Hidden metadata\ncafé naïve café\n> ynp://127.0.0.1:7301/secret | Visible label\n")).unwrap();
+            let layout =
+                NativeDocument::layout(&doc, &Stylesheet::default(), 280.0, 1.0, &mut engine)
+                    .unwrap();
+            assert_eq!(layout.find("café").len(), 2);
+            assert!(layout.find("secret").is_empty());
+            assert!(layout.find("Hidden").is_empty());
+            assert!(layout.find("").is_empty());
+            assert!(layout.find("naïve café")[0]
+                .rects
+                .iter()
+                .all(|r| r.width > 0.0 && r.height > 0.0));
+        }
+    }
 
     fn sample() -> Document {
         ylang::parse("@page 0.1\n  title Native document\n= Clear native type\n:: Reading\n  Words wrap using actual shaped glyph advances, including café and naïve.\n  > ynp://127.0.0.1:7302/about | A long clickable link that wraps across narrow views").unwrap()

@@ -27,6 +27,22 @@ struct Data {
     visits: Vec<Visit>,
     history: bool,
     home: String,
+    settings: Settings,
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Settings {
+    pub onboarded: bool,
+    pub local_only: bool,
+    pub relays: bool,
+}
+impl Default for Settings {
+    fn default() -> Self {
+        Self {
+            onboarded: false,
+            local_only: true,
+            relays: false,
+        }
+    }
 }
 pub struct Library {
     dir: PathBuf,
@@ -125,6 +141,23 @@ impl Library {
     pub fn homepage(&self) -> &str {
         &self.data.home
     }
+    pub fn settings(&self) -> Settings {
+        self.data.settings
+    }
+    pub fn set_settings(&mut self, settings: Settings) -> io::Result<()> {
+        let mut data = self.data.clone();
+        data.settings = settings;
+        self.commit(data)
+    }
+    /// Reset preferences and optional visits; retain bookmarks, keys and peer stores.
+    pub fn reset_settings(&mut self) -> io::Result<()> {
+        let mut data = self.data.clone();
+        data.settings = Settings::default();
+        data.history = false;
+        data.visits.clear();
+        data.home.clear();
+        self.commit(data)
+    }
     pub fn save_bookmark(&mut self, url: &str, title: &str, folder: &str) -> io::Result<()> {
         let url = address(url)?;
         if url.is_empty() {
@@ -205,6 +238,13 @@ impl Library {
             u8::from(data.history),
             data.home
         );
+        let s = data.settings;
+        text.push_str(&format!(
+            "settings\t{}\t{}\t{}\n",
+            u8::from(s.onboarded),
+            u8::from(s.local_only),
+            u8::from(s.relays)
+        ));
         for b in &data.bookmarks {
             text.push_str(&format!("b\t{}\t{}\t{}\n", b.folder, b.title, b.address));
         }
@@ -259,9 +299,23 @@ fn parse(text: &str) -> io::Result<Data> {
         home,
         ..Data::default()
     };
+    let mut settings_seen = false;
     for line in lines {
         let f: Vec<_> = line.split('\t').collect();
         match f.as_slice() {
+            ["settings", onboarded, local, relays] if !settings_seen => {
+                let flag = |value: &str| match value {
+                    "0" => Ok(false),
+                    "1" => Ok(true),
+                    _ => Err(invalid("invalid settings flag")),
+                };
+                d.settings = Settings {
+                    onboarded: flag(onboarded)?,
+                    local_only: flag(local)?,
+                    relays: flag(relays)?,
+                };
+                settings_seen = true;
+            }
             ["b", folder, title, url] if d.bookmarks.len() < MAX_BOOKMARKS => {
                 field(folder, 64)?;
                 field(title, 160)?;
@@ -338,5 +392,46 @@ mod tests {
         }
         assert!(address("yami://fake/home").is_err());
         assert!(parse("YAMILIBRARY2\n").is_err());
+    }
+}
+
+#[cfg(test)]
+mod alpha_tests {
+    use super::*;
+    #[test]
+    fn legacy_library_gets_safe_defaults_and_invalid_settings_fail() {
+        let legacy = "YAMILIBRARY1\nhistory\t0\nhome\t\n";
+        assert_eq!(parse(legacy).unwrap().settings, Settings::default());
+        assert!(parse(&format!("{legacy}settings\t1\tmaybe\t0\n")).is_err());
+        assert!(parse(&format!("{legacy}settings\t1\t0\t0\nsettings\t1\t0\t0\n")).is_err());
+    }
+    #[test]
+    fn preferences_survive_reopen_and_reset_preserves_bookmarks_and_key() {
+        let dir = std::env::temp_dir().join(format!("yami-alpha-settings-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("node.key"), b"untouched identity fixture").unwrap();
+        let mut library = Library::open(&dir).unwrap();
+        library
+            .save_bookmark("local:welcome", "Welcome", "")
+            .unwrap();
+        let settings = Settings {
+            onboarded: true,
+            local_only: false,
+            relays: true,
+        };
+        library.set_settings(settings).unwrap();
+        drop(library);
+        let mut library = Library::open(&dir).unwrap();
+        assert_eq!(library.settings(), settings);
+        library.reset_settings().unwrap();
+        assert_eq!(library.settings(), Settings::default());
+        assert!(!library.history_enabled());
+        assert_eq!(library.bookmarks().len(), 1);
+        assert_eq!(
+            std::fs::read(dir.join("node.key")).unwrap(),
+            b"untouched identity fixture"
+        );
+        drop(library);
+        std::fs::remove_dir_all(dir).unwrap();
     }
 }

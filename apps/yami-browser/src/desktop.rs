@@ -34,6 +34,7 @@ pub fn run(
     let wake: Arc<dyn Fn() + Send + Sync> = Arc::new(move || {
         let _ = proxy.send_event(());
     });
+    let explicit_network = resolver.is_some() || relay_enabled.is_some();
     let loader = if let Some(resolver) = resolver {
         Loader::with_resolver(Arc::clone(&wake), resolver)?
     } else {
@@ -46,12 +47,24 @@ pub fn run(
     match yami_browser::library::Library::default_directory()
         .and_then(yami_browser::library::Library::open)
     {
-        Ok(library) => app.browser.library = Some(library),
+        Ok(library) => {
+            app.settings = library.settings();
+            app.settings_open = !app.settings.onboarded;
+            app.browser.library = Some(library);
+        }
         Err(error) => {
             eprintln!("Browser library unavailable: {error}");
             app.browser.library_error = Some(error.to_string());
         }
     }
+    if explicit_network {
+        app.settings.local_only = false;
+    }
+    if let Some(enabled) = relay_enabled {
+        app.settings.relays = enabled;
+    }
+    app.loader.set_local_only(app.settings.local_only);
+    app.loader.set_relay_enabled(app.settings.relays);
     app.discovery = crate::discovery::Discovery::new(wake);
     if let Some(address) = args.first() {
         let _ = app.browser.navigate(address, &app.loader);
@@ -155,6 +168,12 @@ struct CachedDocument {
     document: Result<NativeDocument, String>,
 }
 struct Desktop {
+    find: yami_browser::find::Find,
+    find_open: bool,
+    find_edit: bool,
+    find_stamp: Option<(u64, u64, u64, u32, u64)>,
+    settings: yami_browser::library::Settings,
+    settings_open: bool,
     window: Option<Arc<Window>>,
     _context: Option<Context<Arc<Window>>>,
     surface: Option<Surface<Arc<Window>, Arc<Window>>>,
@@ -186,6 +205,12 @@ struct Desktop {
 impl Desktop {
     fn new(loader: Loader) -> Self {
         Self {
+            find: yami_browser::find::Find::default(),
+            find_open: false,
+            find_edit: false,
+            find_stamp: None,
+            settings: yami_browser::library::Settings::default(),
+            settings_open: false,
             window: None,
             _context: None,
             surface: None,
@@ -233,6 +258,7 @@ impl Desktop {
         chrome::viewport(w, h)
     }
     fn clear_focus(&mut self) {
+        self.find_edit = false;
         self.bootstrap_edit = false;
         self.bookmark_edit = None;
         self.composing = false;
@@ -240,6 +266,10 @@ impl Desktop {
         self.keyboard_focus = None;
     }
     fn commit(&mut self) {
+        if self.find_edit {
+            self.act(Action::FindNext(self.modifiers.shift_key()));
+            return;
+        }
         let value = if self.editor.focus.is_some() {
             self.editor.value.clone()
         } else {
@@ -278,6 +308,54 @@ impl Desktop {
     }
     fn act(&mut self, action: Action) {
         match action {
+            Action::Find => {
+                self.clear_focus();
+                self.find_open = true;
+                self.find_edit = true;
+                self.editor.activate(&self.find.query);
+            }
+            Action::FindNext(backwards) => {
+                self.find.step(backwards);
+                self.scroll_to_match();
+            }
+            Action::CloseFind => {
+                self.find_open = false;
+                self.clear_focus();
+            }
+            Action::Settings => {
+                self.settings_open = !self.settings_open;
+                self.clear_focus();
+            }
+            Action::FinishSetup => {
+                self.settings.onboarded = true;
+                self.save_settings();
+                self.settings_open = false;
+                self.clear_focus();
+            }
+            Action::ToggleLocal => {
+                self.settings.local_only = !self.settings.local_only;
+                self.loader.set_local_only(self.settings.local_only);
+                if self.settings.local_only {
+                    for tab in &mut self.browser.tabs {
+                        if matches!(tab.state, PageState::Loading) {
+                            tab.state =
+                                PageState::Error("Loading cancelled by local-only mode.".into());
+                        }
+                    }
+                }
+                self.save_settings();
+            }
+            Action::ResetSettings => {
+                if let Some(library) = &mut self.browser.library {
+                    if let Err(error) = library.reset_settings() {
+                        self.browser.library_error = Some(error.to_string());
+                    }
+                }
+                self.settings = yami_browser::library::Settings::default();
+                self.loader.set_local_only(true);
+                self.loader.set_relay_enabled(false);
+                self.settings_open = true;
+            }
             Action::Library => {
                 self.library_open = !self.library_open;
                 self.discovery.open = false;
@@ -366,6 +444,8 @@ impl Desktop {
             }
             Action::ToggleRelay => {
                 self.loader.set_relay_enabled(!self.loader.relay_enabled());
+                self.settings.relays = self.loader.relay_enabled();
+                self.save_settings();
                 self.clear_focus();
             }
             Action::FindLocal => {
@@ -440,6 +520,47 @@ impl Desktop {
             }
         }
         self.redraw();
+    }
+    fn save_settings(&mut self) {
+        let result = self
+            .browser
+            .library
+            .as_mut()
+            .ok_or_else(|| {
+                std::io::Error::other("Settings unavailable: browser library could not be opened")
+            })
+            .and_then(|library| library.set_settings(self.settings));
+        if let Err(error) = result {
+            self.browser.library_error = Some(error.to_string());
+        }
+    }
+    fn scroll_to_match(&mut self) {
+        if let Some(rect) = self.find.selected().and_then(|m| m.rects.first()) {
+            let (_, _, scale) = self.size();
+            let target = f64::from(rect.y / scale - 70.0).clamp(0.0, self.scroll_limit());
+            self.browser.active_mut().target_scroll = target;
+        }
+    }
+    fn update_find(&mut self) {
+        if !self.find_open {
+            return;
+        }
+        let query_changed = self.find_edit && self.find.query != self.editor.value;
+        if query_changed {
+            self.find.query = self.editor.value.clone();
+        }
+        let stamp = self
+            .native
+            .as_ref()
+            .map(|c| (c.id, c.generation, c.revision, c.width, c.scale));
+        if query_changed || stamp != self.find_stamp {
+            self.find.matches = self
+                .current_layout()
+                .map_or_else(Vec::new, |doc| doc.find(&self.find.query));
+            self.find.current = 0;
+            self.find_stamp = stamp;
+            self.scroll_to_match();
+        }
     }
     fn current_layout(&self) -> Option<&NativeDocument> {
         let tab = self.browser.active();
@@ -565,7 +686,11 @@ impl Desktop {
                     .map_err(|e| e.to_string()),
                 });
             }
+        } else {
+            // Do not retain a closed tab's decoded images/shaped document.
+            self.native = None;
         }
+        self.update_find();
         let elapsed = self.last.elapsed().as_secs_f64().min(0.1);
         self.last = Instant::now();
         let limit = self.scroll_limit();
@@ -713,9 +838,44 @@ impl Desktop {
         if self.library_open {
             chrome::library_panel(&mut c, &mut scene, &ui, &self.browser, self.library_page);
         }
+        if self.settings_open {
+            chrome::settings_panel(
+                &mut c,
+                &mut scene,
+                &ui,
+                self.settings,
+                self.browser.library_error.as_deref(),
+            );
+        }
+        if self.find_open && !self.settings_open {
+            if let Some(selected) = self.find.selected() {
+                for rect in &selected.rects {
+                    let top = (viewport.y + rect.y / scale - self.browser.active().scroll as f32)
+                        .max(viewport.y);
+                    let bottom = (viewport.y + (rect.y + rect.height) / scale
+                        - self.browser.active().scroll as f32)
+                        .min(viewport.y + viewport.h);
+                    if bottom > top {
+                        c.round(
+                            Rect::new(
+                                viewport.x + rect.x / scale,
+                                top,
+                                rect.width / scale,
+                                bottom - top,
+                            ),
+                            1.0,
+                            [255, 190, 25, 110],
+                            [255, 190, 25, 110],
+                            Some([255, 190, 25, 255]),
+                        );
+                    }
+                }
+            }
+            chrome::find_bar(&mut c, &mut scene, &ui, &self.find, self.find_edit);
+        }
         self.scene = scene;
     }
-    fn keyboard(&mut self, key: &Key, text: Option<&str>, event_loop: &ActiveEventLoop) {
+    fn keyboard(&mut self, key: &Key, text: Option<&str>, event_loop: Option<&ActiveEventLoop>) {
         // Windows exposes AltGr as Ctrl+Alt. Preserve printable input from
         // European keyboard layouts (including IPv6 brackets) in the editor.
         let altgr = self.modifiers.control_key() && self.modifiers.alt_key();
@@ -723,6 +883,23 @@ impl Desktop {
         if command {
             if let Key::Character(ch) = key {
                 match ch.to_lowercase().as_str() {
+                    "f" => {
+                        self.act(Action::Find);
+                        return;
+                    }
+                    "g" => {
+                        self.act(Action::FindNext(self.modifiers.shift_key()));
+                        return;
+                    }
+                    "c" if self.modifiers.shift_key() && self.editor.focus.is_none() => {
+                        if self.clipboard.is_none() {
+                            self.clipboard = arboard::Clipboard::new().ok();
+                        }
+                        if let Some(clipboard) = &mut self.clipboard {
+                            let _ = clipboard.set_text(self.browser.active().location().address());
+                        }
+                        return;
+                    }
                     "d" => {
                         self.act(Action::SaveBookmark);
                         return;
@@ -803,6 +980,9 @@ impl Desktop {
         match key {
             Key::Named(NamedKey::Escape) => {
                 self.discovery.open = false;
+                self.library_open = false;
+                self.settings_open = false;
+                self.find_open = false;
                 self.clear_focus();
             }
             Key::Named(NamedKey::Tab) if command => {
@@ -883,7 +1063,12 @@ impl Desktop {
                 tab.target_scroll = (tab.target_scroll - f64::from(delta)).max(0.0);
             }
             Key::Named(NamedKey::F5) => self.act(Action::Reload),
-            Key::Named(NamedKey::F4) if self.modifiers.alt_key() => event_loop.exit(),
+            Key::Named(NamedKey::F3) => self.act(Action::FindNext(self.modifiers.shift_key())),
+            Key::Named(NamedKey::F4) if self.modifiers.alt_key() => {
+                if let Some(event_loop) = event_loop {
+                    event_loop.exit();
+                }
+            }
             _ if self.editor.focus.is_some()
                 && !command
                 && (!self.modifiers.alt_key() || altgr) =>
@@ -945,7 +1130,7 @@ impl ApplicationHandler<()> for Desktop {
             WindowEvent::KeyboardInput { event, .. }
                 if event.state == ElementState::Pressed && !self.composing =>
             {
-                self.keyboard(&event.logical_key, event.text.as_deref(), event_loop)
+                self.keyboard(&event.logical_key, event.text.as_deref(), Some(event_loop))
             }
             WindowEvent::Ime(Ime::Disabled) => {
                 self.composing = false;
@@ -966,6 +1151,8 @@ impl ApplicationHandler<()> for Desktop {
                 self.redraw();
             }
             WindowEvent::CursorMoved { position, .. } => {
+                let previous_hit = self.scene.hit(self.mouse.0, self.mouse.1);
+                let previous_link = self.link();
                 let scale = self.window.as_ref().unwrap().scale_factor() as f32;
                 self.mouse = (position.x as f32 / scale, position.y as f32 / scale);
                 if self.scroll_drag {
@@ -978,7 +1165,12 @@ impl ApplicationHandler<()> for Desktop {
                     _ => CursorIcon::Default,
                 };
                 self.window.as_ref().unwrap().set_cursor(cursor);
-                self.redraw();
+                if self.scroll_drag
+                    || previous_hit != self.scene.hit(self.mouse.0, self.mouse.1)
+                    || previous_link != self.link()
+                {
+                    self.redraw();
+                }
             }
             WindowEvent::CursorLeft { .. } => {
                 self.mouse = (-1.0, -1.0);
@@ -1067,6 +1259,48 @@ mod tests {
         assert_eq!(e.value, "badnp://");
         e.replace(&"x".repeat(4097));
         assert_eq!(e.value, "badnp://");
+    }
+
+    #[test]
+    fn keyboard_find_unicode_scroll_modal_escape_and_closed_layout_cleanup() {
+        let mut app = headless(1440.0, 900.0);
+        app.browser.navigate("local:welcome", &app.loader).unwrap();
+        settle(&mut app);
+        frame(&mut app);
+        app.modifiers = ModifiersState::CONTROL;
+        app.keyboard(&Key::Character("l".into()), None, None);
+        assert!(app.editor.selected);
+        app.keyboard(&Key::Character("t".into()), None, None);
+        assert_eq!(app.browser.tabs.len(), 2);
+        app.keyboard(&Key::Character("w".into()), None, None);
+        assert_eq!(app.browser.tabs.len(), 1);
+        if let PageState::Ready(page) = &mut app.browser.active_mut().state {
+            let source = format!(
+                "@page 0.2\n  title Search\n{}\ncafé [strong: unique] café\n",
+                "Long paragraph for scroll.\n\n".repeat(90)
+            );
+            page.document = ylang::parse(&source).unwrap();
+            page.revision += 1;
+        }
+        frame(&mut app);
+        app.keyboard(&Key::Character("f".into()), None, None);
+        app.editor.replace("café");
+        frame(&mut app);
+        assert_eq!(app.find.matches.len(), 2);
+        assert!(app.browser.active().target_scroll > 500.0, "target={} limit={} rect={:?}", app.browser.active().target_scroll, app.scroll_limit(), app.find.selected());
+        app.modifiers = ModifiersState::empty();
+        app.keyboard(&Key::Named(NamedKey::Enter), None, None);
+        assert_eq!(app.find.current, 1);
+        app.modifiers = ModifiersState::SHIFT;
+        app.keyboard(&Key::Named(NamedKey::Enter), None, None);
+        assert_eq!(app.find.current, 0);
+        app.settings_open = true;
+        app.library_open = true;
+        app.keyboard(&Key::Named(NamedKey::Escape), None, None);
+        assert!(!app.find_open && !app.settings_open && !app.library_open);
+        app.act(Action::Close(0));
+        frame(&mut app);
+        assert!(app.native.is_none());
     }
 
     fn headless(w: f32, h: f32) -> Desktop {

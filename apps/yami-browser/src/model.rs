@@ -36,6 +36,15 @@ pub enum Location {
     Yami(Address),
 }
 impl Location {
+    pub fn is_local(&self) -> bool {
+        match self {
+            Self::Home | Self::Welcome | Self::About | Self::Ynp(_) => true,
+            Self::Ynps(url) => {
+                ynp_tls::parse_url(url).is_ok_and(|(_, endpoint, _)| endpoint.ip().is_loopback())
+            }
+            Self::Yami(_) => false,
+        }
+    }
     pub fn parse(input: &str) -> Result<Self, String> {
         let address = input.trim();
         let unusable = |error: io::Error| {
@@ -516,6 +525,7 @@ type Fetcher = dyn Fn(&Location, Instant) -> Result<Page, String> + Send + Sync;
 /// In-flight obsolete work is bounded to WORKERS; queued work for the same tab
 /// is replaced by its latest request. No loader task ever follows page links.
 pub struct Loader {
+    local_only: Arc<AtomicBool>,
     shared: Arc<Shared>,
     results: mpsc::Receiver<Completion>,
     resources: mpsc::Receiver<ResourceCompletion>,
@@ -523,6 +533,23 @@ pub struct Loader {
     bootstrap: Arc<Bootstrap>,
 }
 impl Loader {
+    pub fn set_local_only(&self, enabled: bool) {
+        self.local_only.store(enabled, Ordering::SeqCst);
+        if enabled {
+            let mut pending = self
+                .shared
+                .pending
+                .lock()
+                .unwrap_or_else(|e| e.into_inner());
+            for (_, flag) in &pending.active {
+                flag.store(true, Ordering::SeqCst);
+            }
+            for job in &pending.jobs {
+                job.cancel.store(true, Ordering::SeqCst);
+            }
+            pending.jobs.clear();
+        }
+    }
     pub fn new(wake: Arc<dyn Fn() + Send + Sync>) -> io::Result<Self> {
         let resolver = OnceLock::new();
         let relay_enabled = Arc::new(AtomicBool::new(
@@ -588,6 +615,7 @@ impl Loader {
         let (sender, results) = mpsc::sync_channel(MAX_PENDING);
         let (resource_sender, resources) = mpsc::sync_channel(MAX_PENDING);
         let loader = Self {
+            local_only: Arc::new(AtomicBool::new(false)),
             shared: Arc::clone(&shared),
             results,
             resources,
@@ -600,6 +628,7 @@ impl Loader {
             let resource_sender = resource_sender.clone();
             let wake = Arc::clone(&wake);
             let fetcher = Arc::clone(&fetcher);
+            let local_only = loader.local_only.clone();
             thread::Builder::new()
                 .name(format!("yami-loader-{index}"))
                 .spawn(move || loop {
@@ -621,6 +650,8 @@ impl Loader {
                     let page =
                         if Instant::now() >= job.deadline || job.cancel.load(Ordering::SeqCst) {
                             Err("Navigation deadline exceeded or cancelled while queued.".into())
+                        } else if local_only.load(Ordering::SeqCst) && !job.location.is_local() {
+                            Err("Local-only mode blocks network browsing. Open Settings to enable explicitly configured peers.".into())
                         } else {
                             fetcher(&job.location, job.deadline)
                         };
@@ -668,6 +699,9 @@ impl Loader {
         Ok(loader)
     }
     fn submit(&self, job: Job) -> Result<(), String> {
+        if self.local_only.load(Ordering::SeqCst) && !job.location.is_local() {
+            return Err("Local-only mode: open Settings to enable network browsing. No connection was attempted.".into());
+        }
         let mut pending = self
             .shared
             .pending
@@ -866,6 +900,35 @@ mod tests {
             origin: None,
         }
     }
+    #[test]
+    fn local_only_blocks_remote_before_calling_fetcher() {
+        let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let counter = calls.clone();
+        let loader = Loader::with_fetcher(
+            Arc::new(|| {}),
+            Arc::new(move |_, _| {
+                counter.fetch_add(1, Ordering::SeqCst);
+                Ok(page("Local"))
+            }),
+        )
+        .unwrap();
+        loader.set_local_only(true);
+        let id = *yami_identity::NodeIdentity::generate().unwrap().id();
+        let mut browser = Browser::new();
+        browser
+            .navigate(&format!("yami://{id}/home"), &loader)
+            .unwrap();
+        assert!(matches!(browser.active().state, PageState::Error(_)));
+        browser
+            .navigate(&format!("ynps://{id}@192.168.1.2:7443/home"), &loader)
+            .unwrap();
+        assert!(matches!(browser.active().state, PageState::Error(_)));
+        assert_eq!(calls.load(Ordering::SeqCst), 0);
+        browser.navigate("local:welcome", &loader).unwrap();
+        wait(&mut browser, &loader);
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+    }
+
     fn loader() -> Loader {
         Loader::with_fetcher(
             Arc::new(|| {}),
