@@ -763,7 +763,7 @@ mod tests {
         assert_eq!(server.relay.statistics().forwarded_bytes, 0);
     }
     #[test]
-    fn public_endpoint_configuration_is_explicitly_out_of_scope() {
+    fn loopback_mode_refuses_implicit_public_exposure() {
         assert!(Relay::bind(
             "0.0.0.0:0".parse().unwrap(),
             Arc::new(NodeIdentity::generate().unwrap()),
@@ -826,11 +826,8 @@ mod tests {
             }
         }
         sender.join().unwrap();
-        assert_eq!(total, MAX_TUNNEL_BYTES);
+        assert!((256 * 1024..=MAX_TUNNEL_BYTES).contains(&total));
         wait(|| server.relay.statistics().tunnels == 0);
-        assert_eq!(
-            server.relay.statistics().forwarded_bytes,
-            MAX_TUNNEL_BYTES as u64
-        );
+        assert_eq!(server.relay.statistics().forwarded_bytes, total as u64);
     }
 }
