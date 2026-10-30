@@ -278,3 +278,23 @@ sequence high-water checks, atomic batch validation and public/isolated-loopback
 endpoint policies apply to both versions. Relay-only records do not become
 routing-table contacts: DHT RPC contacts still require direct endpoints.
 Older software rejects v2 safely; use upgraded DHT peers for relay publication.
+
+
+### Admission and recovery policy update
+
+The frame and snapshot formats remain unchanged. New untrusted owners are capped
+at 240 of the existing 256 history slots; 16 slots are reserved for the local
+identity and at most fifteen explicitly configured bootstrap identities. This
+is local admission policy, not a new trust signature or eviction permission.
+Existing owner updates still require monotonic sequences and exact signature,
+expiry and endpoint validation. Expired history remains persistent. Legacy full
+snapshots remain readable and retain their history, even without reservation
+headroom. Finite exact rollback history cannot admit arbitrary owner churn
+forever; Sybil/eclipsing/withholding and exhaustion of untrusted admissions remain.
+
+Each Service admits at most sixteen STORE requests per one-second window before
+signature/persistence work. FIND, frame, cache and routing bounds are preserved.
+The existing maintainer remembers bounded peer acknowledgements and republishes
+the current self-record to new/recovering peers during health passes. Browser
+discovery shares in-flight per-owner/sequence work and has bounded cooldowns;
+no shared document or connection authentication replaces a fresh pinned handshake.

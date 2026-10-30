@@ -207,3 +207,22 @@ These are application resource limits, not protection against volumetric DoS,
 TCP backlog exhaustion, distributed attacks or TLS CPU starvation. Use provider
 DDoS protection and an OS firewall. Public mode remains experimental and must
 not be described as production-secure without independent security review.
+
+
+### Reliability and operation updates
+
+The host's GO control-frame read now has a separate five-second total deadline,
+including partial bytes from an authenticated but malicious relay. The outer
+session's longer lease cannot extend it. Configured relay diagnostics run once
+per second in the existing accept loop, write bounded local snapshots under an
+exclusive state lock and mark clean shutdown. They are not a network status
+endpoint or an end-to-end authentication proof. Host registration health feeds
+the existing DHT worker, never a second publication scheduler.
+
+The native browser remembers bounded route failures, uses jittered exponential
+cooldowns, shares owner discovery and serializes same-owner document attempts
+under the original navigation deadline. It still reauthenticates both pinned
+identities on each relayed connection, and can choose another explicitly
+advertised eligible relay. Independent browsers can still compete for capacity;
+there is no global fairness or availability guarantee. File profiles and safe
+restart/upgrade instructions are in [configuration](../../configuration.md).

@@ -257,8 +257,10 @@ impl Config {
             ],
             Role::Browser => &["role", "network", "state", "bootstrap", "relay-fallback"],
         };
-        if fields.iter().any(|(key, _)| !allowed.contains(key)) {
-            return Err(invalid("field is not supported for the selected role"));
+        if let Some((key, _)) = fields.iter().find(|(key, _)| !allowed.contains(key)) {
+            return Err(invalid(format!(
+                "field {key} is not supported for role {role:?}"
+            )));
         }
         match role {
             Role::Node => {

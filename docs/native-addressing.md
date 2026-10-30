@@ -168,12 +168,13 @@ tests remain opt-in. This run does not establish public-network availability
 or native desktop visual correctness on another platform.
 
 DHT RPCs have a three-second total connection/I/O budget; lookup is bounded to
-15 seconds and 16 queries. Each fetch pass tries at most four signed endpoints
-with a three-second budget each. A failed cache pass, lookup and refreshed
-fetch pass can therefore take roughly 39 seconds plus bounded local work.
-At most two obsolete requests can remain in flight; queued same-tab jobs are
-replaced and stale completions cannot change the current page. There is no
-unbounded retry, background crawl or periodic maintenance.
+15 seconds and 16 queries. Native navigation has a thirty-second total budget
+starting at queue submission, including discovery, shared waits, cached and
+refreshed record attempts, jittered retry delays and document I/O. Each record
+has at most four direct endpoints and two relay routes, tried in at most two
+passes with three seconds per connection attempt. At most two obsolete requests
+can remain in flight; queued same-tab jobs are replaced and stale completions
+cannot change the current page. There is no unbounded retry or browser crawl.
 
 This remains an experimental, small DHT, without guaranteed availability.
 Owners must publish fresh records; they expire within 24 hours. Serving nodes
@@ -205,9 +206,11 @@ the default public policy refuses relay/direct probes to private addresses.
 
 The existing two loader workers resolve and validate DHT records, attempt up to
 four direct endpoints first, then up to two signed relay routes if enabled.
-Each direct endpoint has a three-second budget; each relay route permits up to
-two attempts sharing a three-second budget, with a 400 ms renewal-gap delay. Lookup, cached attempts and refreshed
-record attempts share a thirty-second total deadline. There is no plaintext
+Connection attempts have a three-second budget. Each signed record gets at
+most two passes over eligible direct endpoints and relay routes, with bounded
+exponential jittered cooldowns (400 ms base, 30 seconds maximum). Lookup, queued
+work, cached attempts and refreshed-record attempts share a thirty-second total
+navigation deadline. There is no plaintext
 fallback. The canonical yami:// identity, navigation, tabs, history and reload
 are unchanged. Numeric links naming a relay are not treated as host links.
 

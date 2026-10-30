@@ -287,3 +287,5 @@ mod tests {
 pub mod relay_host;
 
 pub mod configuration;
+
+pub mod diagnostics;

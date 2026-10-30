@@ -6,6 +6,12 @@ on loopback. Public VPS routing, provider NAT, home-router behavior and Windows
 runtime operation still require validation on real machines. Do not publish
 sensitive documents. Public relay security needs independent review.
 
+Validated file profiles and an optional service are available in
+[configuration.md](configuration.md). Use the newer [executable validation
+plan](cross-network-validation.md) and [report template](validation-report-template.md)
+when recording an actual cross-network trial. All original CLI commands below
+remain supported.
+
 You need three machines/connections:
 
 - A VPS with a reachable public IPv4, acting as relay R and an ordinary DHT peer B.

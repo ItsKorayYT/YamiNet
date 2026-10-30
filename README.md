@@ -16,6 +16,39 @@ authenticates a node against a node ID the client trusts in advance; the
 browser uses it for `ynps://` and native `yami://` addresses. The original
 `ynp://` transport remains plaintext, unauthenticated and loopback-only. There is no anonymity.
 
+## Reliability and deployment milestone
+
+Native lookups now share bounded in-flight discovery across tabs and remember
+failing endpoints with exponential jittered cooldowns. Direct endpoints remain
+preferred when eligible; configured relay alternatives recover under outages.
+Same-owner browser transfers use deadline-aware permits for the relay's single
+host slot, while every new TLS connection still proves the exact destination.
+The thirty-second native navigation deadline includes queueing and retries.
+
+DHT health maintenance republishes to recovering peers before the next global
+renewal. Persistent history reserves capacity for the local identity and explicit
+bootstrap pins without evicting rollback protection. Owner churn/Sybil attacks
+can still fill the finite untrusted partition; this is not a complete DHT or DoS
+defense. Relay health/status diagnostics report local samples and errors, never
+replace end-to-end authentication. Public control, STORE and identity-file bounds
+have additional regression coverage; this developer review is not an audit.
+
+Use validated [node/relay/browser configuration files](docs/configuration.md),
+[example profiles and optional systemd service](deploy), and the Rust diagnostic
+command `yami-node diagnose --config FILE [--connect]`. Existing CLI commands
+remain compatible. Configured startup loads existing identities; public listeners
+require explicit opt-in. [The seven-process resilience scenario](docs/relay-integration-testing.md)
+covers independent relays/DHT peers, concurrent tabs, endpoint changes and restart.
+
+[Direct NAT traversal research](docs/nat-traversal.md) evaluates UDP discovery,
+punching and a future authenticated QUIC transport. Only tested socket-free
+mutual-consent/replay prerequisites are delivered: **no direct NAT traversal or
+QUIC document transport is implemented or enabled**. TCP/TLS relays remain the
+available NAT path. The [executable physical-network plan](docs/cross-network-validation.md)
+and [blank report](docs/validation-report-template.md) distinguish automated
+loopback/stream impairment results from still-unverified VPS/home-router,
+Windows-runtime, physical packet-loss and cross-network operation.
+
 ## Run
 
 Install Rust 1.90.0 with rustfmt and Clippy (the toolchain is pinned). From this
@@ -306,6 +339,7 @@ bounds. Original isolated [relay commands/tests](docs/relay-testing.md) still wo
 | `ynp` | Binary frame codec, strict limits, transport traits, legacy plaintext loopback TCP client/listener |
 | `ynp-tls` | YNP over pinned TLS 1.3, local/public IPv4 clients and separately opted-in LAN/public listeners |
 | `ynp-discovery` | Opt-in IPv4 LAN multicast queries, bounded untrusted advertisements and rate-limited responses |
+| `yami-config` | Bounded versioned local profiles, explicit listener/pin policy and read-only relay status |
 | `yami-dht` | Bounded XOR routing, signed expiring peer records, iterative pinned-TLS lookup and persistent sequence history |
 | `yami-render` | Original terminal/bitmap renderer plus shaped native document layout and antialiased text |
 | `yami-browser` | Native desktop tabs/navigation and preserved terminal/PPM document tools |

@@ -121,6 +121,23 @@ fn host_relay_cli_publishes_fetches_stops_and_restarts_with_new_sequence() {
         .status()
         .unwrap()
         .success());
+    let diagnostic = Command::new(env!("CARGO_BIN_EXE_yami-node"))
+        .args(["diagnose", "--config"])
+        .arg(&config_path)
+        .arg("--connect")
+        .output()
+        .unwrap();
+    assert!(
+        diagnostic.status.success(),
+        "{}",
+        String::from_utf8_lossy(&diagnostic.stderr)
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&diagnostic.stdout)
+            .matches("TLS pin authenticated")
+            .count(),
+        2
+    );
     let mut previous = 0;
     for configured in [false, true] {
         let mut child = if configured {

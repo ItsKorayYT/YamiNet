@@ -239,3 +239,19 @@ owner/destination key to at most four sorted direct endpoints and two sorted
 relay key/IPv4-endpoint pairs, expiry and sequence. Empty v2 records withdraw
 locations while preserving the owner sequence. V1 signatures retain their
 original bytes and domain. See [dht.md](dht.md) for encoding and validation.
+
+
+### Experimental rendezvous consent prerequisite
+
+The socket-free research API defines `yaminet.rendezvous-consent.v1\0` over
+`coordinator-key[32] || initiator-key[32] || responder-key[32] || nonce[32] ||
+expiry-u64` (big endian). Both participants sign the same tuple. The isolated
+validator enforces distinct parties/coordinator, live expiry at most thirty
+seconds ahead, nonzero nonce, bounded replay memory and no clock rollback. No
+endpoint is authenticated by this tuple and no transport is enabled. See
+[NAT assessment](../../nat-traversal.md) before implementing any wire service.
+
+Identity loading now rejects oversized public ID files, special-file/symlink
+paths and Unix multiply hard-linked key files, in addition to key/public-ID and
+owner-only file permission checks. Keep parent directories and Windows ACLs
+private: pre-open path validation is not a hostile-filesystem race defense.

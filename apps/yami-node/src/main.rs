@@ -16,7 +16,8 @@ use ynp::{DocumentData, Incoming, LocalListener, LoopbackTcp};
 use ynp_tls::{TlsListener, TlsTransport};
 
 type Result<T> = std::result::Result<T, Box<dyn Error>>;
-const USAGE: &str = "yami-node --config <file> | check-config <file>
+const USAGE: &str = "yami-node diagnose --config <file> [--connect]
+yami-node --config <file> | check-config <file>
 yami-node host-relay <site-directory> --identity <existing-key-directory> --relay <relay-ID@IPv4:port> [--relay <second-relay-ID@IPv4:port>] [--dht-dir <peer-directory>] [--dht-local] [--dht-renew-secs 30..43200] [--dht-health-secs 5..3600]
 yami-node demo
 yami-node tls-demo <identity-directory-1> <identity-directory-2>
@@ -979,6 +980,15 @@ fn host_relay(args: &[String]) -> Result<()> {
 }
 fn run() -> Result<()> {
     let mut args: Vec<String> = std::env::args().skip(1).collect();
+    if (args.len() == 3 || args.len() == 4) && args[0] == "diagnose" && args[1] == "--config" {
+        let connect = match args.get(3).map(String::as_str) {
+            None => false,
+            Some("--connect") => true,
+            _ => return Err(USAGE.into()),
+        };
+        let config = yami_config::Config::load(&args[2])?;
+        return yami_node::diagnostics::run(&config, connect).map_err(Into::into);
+    }
     if args.len() == 2 && args[0] == "check-config" {
         let config = yami_config::Config::load(&args[1])?;
         config.expect_role(yami_config::Role::Node)?;

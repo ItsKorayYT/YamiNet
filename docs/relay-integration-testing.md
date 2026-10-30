@@ -108,3 +108,17 @@ Configuration smoke tests run actual node/relay/browser executables. They cover
 existing CLI compatibility, idempotent configured bootstraps, missing-identity
 refusal, local status snapshots and clean configured relay shutdown. The isolated
 NAT consent prerequisites have their own tests; no NAT transport is exercised.
+
+
+Final reliability milestone validation on 2026-10-30, Linux with Rust 1.90.0:
+`cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets --locked --
+-D warnings`, `cargo test --workspace --locked` and `cargo build --workspace
+--locked` all passed. The updated workspace reports **195 passed, 0 failed,
+8 existing opt-in tests ignored**. This includes the full-capacity mixed-reply
+regression: reserved/known updates still progress, direct rejected STOREs are not
+acknowledged, and malformed/forged batches remain atomic. The Rust configured-pin
+diagnostic was exercised against the real local relay and DHT TLS listeners.
+
+Physical VPS/home-router/Windows scenarios, actual IP packet loss and the
+proposed QUIC NAT transport remain unverified or unimplemented as recorded in
+[the executable plan](cross-network-validation.md) and [NAT assessment](nat-traversal.md).

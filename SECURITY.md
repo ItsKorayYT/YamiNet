@@ -203,8 +203,8 @@ The existing DHT maintainer receives live registration state and renews/routes
 with bounded jittered backoff and publication frequency. There are at most two
 explicit host relay slots. Each serves one client at a time and re-registers
 after its lease or request. Browser workers try direct routes first, then at
-most two relay routes with up to two attempts each within a three-second route
-budget and a thirty-second overall resolution/fetch budget. Verified UI status
+most two relay routes and two passes over eligible locations, with three seconds
+per connection attempt and a thirty-second overall queued navigation budget. Verified UI status
 comes only from a completed authenticated fetch; destination and relay IDs are
 shown separately. Bootstrap configuration and discovery never open content.
 
@@ -262,3 +262,15 @@ consent/replay prerequisites. It does not enable UDP, QUIC, endpoint discovery,
 punching or any new document transport. Raw UDP cannot carry the existing TCP
 TLS stream safely; a reviewed transport adapter and physical-NAT validation are
 still required. Existing exact identity pinning and relay operation are unchanged.
+
+
+Validated local configuration never accepts secret fields or silently selects a
+public listener. Unknown/duplicate fields, bounded lists and inappropriate role
+settings fail before startup; configured node/relay identities must already
+exist. Bootstrap pin conflicts require explicit operator replacement. Status
+files and diagnostic commands expose public IDs/counters only and are not
+cryptographic reachability proofs. `diagnose --connect` is an explicit bounded
+TLS pin check, not registration, document retrieval or a DHT-advertisement probe.
+See [deployment profiles](docs/configuration.md) and [the unexecuted physical
+network plan](docs/cross-network-validation.md). No live firewall or external
+infrastructure changes were made as part of this development work.

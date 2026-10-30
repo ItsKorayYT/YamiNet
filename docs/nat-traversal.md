@@ -102,6 +102,10 @@ rejects replays and caps retained sessions at 64; only expired entries are
 removed. `validate_candidate` enforces public endpoint policy without sending
 anything. Neither API proves endpoint observation or permits document delivery.
 These APIs are not wired into a production listener, CLI or browser setting.
+The consent gate is intentionally in-memory: a future wire coordinator must bind
+issued sessions to a fresh process instance or persist replay state so a restart
+cannot admit an old still-live consent again. The present helper is not a
+restart-safe rendezvous service.
 
 ```sh
 cargo test -p yami-relay rendezvous --locked
