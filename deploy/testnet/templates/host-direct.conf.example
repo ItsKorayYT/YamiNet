@@ -1,0 +1,15 @@
+# TEMPLATE ONLY. Replace every placeholder before use.
+# Direct public website: opens one explicitly selected inbound TCP port.
+yaminet-config 1
+role node
+network public
+public-listen yes
+identity /var/lib/yaminet/testnet/host/identity
+state /var/lib/yaminet/testnet/host/state
+site /var/lib/yaminet/testnet/host/site
+listen BIND_IPV4:17445
+advertise PUBLIC_IPV4:17445
+dht yes
+bootstrap BOOTSTRAP_ID@PUBLIC_IPV4:17444
+renew-secs 21600
+health-secs 300

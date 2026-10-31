@@ -1,0 +1,27 @@
+[package]
+name = "yami-testnet"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "yami-testnet"
+path = "src/main.rs"
+
+[lints]
+workspace = true
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+yami-config = { path = "../../crates/yami-config" }
+yami-dht = { path = "../../crates/yami-dht" }
+yami-identity = { path = "../../crates/yami-identity" }
+yami-node = { path = "../yami-node" }
+yami-relay = { path = "../../crates/yami-relay" }
+yami-render = { path = "../../crates/yami-render" }
+ylang = { path = "../../crates/ylang" }
+ynp = { path = "../../crates/ynp" }
+ynp-tls = { path = "../../crates/ynp-tls" }
+ysl = { path = "../../crates/ysl" }

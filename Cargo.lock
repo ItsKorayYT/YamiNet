@@ -2622,6 +2622,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "yami-testnet"
+version = "0.3.1-alpha.1"
+dependencies = [
+ "serde",
+ "serde_json",
+ "yami-config",
+ "yami-dht",
+ "yami-identity",
+ "yami-node",
+ "yami-relay",
+ "yami-render",
+ "ylang",
+ "ynp",
+ "ynp-tls",
+ "ysl",
+]
+
+[[package]]
 name = "yasna"
 version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
