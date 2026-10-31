@@ -42,6 +42,12 @@ impl Rect {
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Action {
+    OpenGame,
+    GamePath,
+    LaunchGame,
+    GamePause,
+    GameReset,
+    GameStop,
     Discover,
     DiscoverView(bool),
     DiscoverMode(bool),
@@ -110,7 +116,7 @@ impl Scene {
             .find(|h| h.rect.contains(x, y))
             .map(|h| h.action.clone())
     }
-    fn add(&mut self, rect: Rect, action: Action) {
+    pub(crate) fn add(&mut self, rect: Rect, action: Action) {
         self.hits.push(Hit { rect, action });
     }
 }
@@ -137,8 +143,13 @@ impl<'a> Canvas<'a> {
             return;
         }
         if let Some(path) = rounded_path(r, radius) {
-            let mut paint = Paint {
-                shader: LinearGradient::new(
+            // Solid surfaces dominate continuous game painting. Sending equal
+            // stops through a gradient shader needlessly evaluates every pixel.
+            let mut paint = Paint::default();
+            if top == bottom {
+                paint.set_color(color(top));
+            } else {
+                paint.shader = LinearGradient::new(
                     Point::from_xy(r.x, r.y),
                     Point::from_xy(r.x, r.y + r.h),
                     vec![
@@ -148,9 +159,8 @@ impl<'a> Canvas<'a> {
                     SpreadMode::Pad,
                     Transform::identity(),
                 )
-                .unwrap(),
-                ..Paint::default()
-            };
+                .unwrap();
+            }
             self.pix.fill_path(
                 &path,
                 &paint,
@@ -669,6 +679,16 @@ pub fn paint(c: &mut Canvas<'_>, browser: &Browser, ui: &ChromeState<'_>) -> Sce
         scene.add(new_tab, Action::NewTab);
     }
 
+    panel_button(
+        c,
+        &mut scene,
+        ui,
+        Rect::new(left, y + ROW + 4.0, inner, 26.0),
+        "Open local game",
+        Action::OpenGame,
+        true,
+    );
+
     // Bottom utility: return the current tab to its empty start page.
     let home = Rect::new(left, h - MARGIN - 32.0, 26.0, 26.0);
     ghost(
@@ -1039,7 +1059,7 @@ pub fn discovery_rect(width: f32, height: f32) -> Rect {
         474.0,
     )
 }
-fn panel_button(
+pub(crate) fn panel_button(
     c: &mut Canvas<'_>,
     scene: &mut Scene,
     ui: &ChromeState<'_>,

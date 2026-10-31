@@ -33,6 +33,11 @@ def package(platform, binaries, output):
         shutil.copy2(ROOT / filename, stage / filename)
     for directory in ('docs', 'examples', 'sites'):
         shutil.copytree(ROOT / directory, stage / directory)
+    # Ship only the explicit local game example, never guest build directories.
+    for filename in ('README.md', 'breakout/game.yami-game.json', 'breakout/breakout.wasm'):
+        destination = stage / 'games' / filename
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(ROOT / 'games' / filename, destination)
     shutil.copytree(ROOT / 'crates/yami-render/assets/fonts', stage / 'fonts')
     shutil.copytree(ROOT / 'deploy', stage / 'config-examples')
     launchers = ('Launch Browser.cmd',) if platform == 'windows' else (

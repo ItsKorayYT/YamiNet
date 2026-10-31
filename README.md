@@ -102,6 +102,19 @@ Search queries run on your computer, and there is no central search server. Refr
 
 [Learn more about Discover](docs/discover.md) · [Full-text search guide](docs/fulltext-search.md)
 
+## 🎮 Play a local game
+
+Choose **Open local game** in the browser sidebar and enter the full path to
+`games/breakout/game.yami-game.json` in the package. **Prism Breakout** opens in
+its own native tab. Use **Space** to start and launch the ball, **A/D** or the
+arrow keys to move, and **P** to pause or resume.
+
+Games currently load only from files you explicitly choose on your computer;
+websites and Discover results cannot launch games. The WebAssembly runtime has
+experimental resource limits, without default WASI or operating-system access.
+See the [game walkthrough](games/README.md) and
+[ABI, limits and measured performance](docs/games-0.1.md).
+
 ## 🎨 Create your own website
 
 You can build a personal page, a blog or a portfolio with YamiNet's included site tools—**no HTML or JavaScript required**.
@@ -147,6 +160,7 @@ YamiNet is built in Rust with its own document and styling languages, **YLang** 
 | Follow a walkthrough with screenshots | [First steps](docs/getting-started-0.3.1.md) |
 | Understand how Discover works | [Website discovery](docs/discover.md) |
 | Search downloaded website pages | [Full-text search](docs/fulltext-search.md) |
+| Play the included local game | [Prism Breakout](games/README.md) |
 | Make and share my own website | [Create and publish websites](docs/publishing-sites.md) |
 | Understand privacy and limitations | [Security notes](SECURITY.md) |
 | Report a problem or suggest an idea | [GitHub issues](https://github.com/ItsKorayYT/YamiNet/issues) |
@@ -168,6 +182,7 @@ cargo build --workspace --locked
 - [YLang / YSL and website specifications](docs/websites-0.2.md)
 - [Discover and website directory format](docs/discover.md)
 - [Full-text search guide](docs/fulltext-search.md) and [validation](docs/fulltext-validation.md)
+- [Native game ABI and sandbox limits](docs/games-0.1.md)
 - [Node, network and relay configuration](docs/configuration.md)
 - [Release engineering and packaging](docs/releases.md)
 - [0.3.1 validation and remaining manual tests](docs/validation-0.3.1.md)

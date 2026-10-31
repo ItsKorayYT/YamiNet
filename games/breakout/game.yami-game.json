@@ -1,0 +1,7 @@
+{
+  "version": 1,
+  "abi": 1,
+  "title": "Prism Breakout",
+  "description": "An original YamiNet arcade game. Clear the prism wall, keep the ball alive, and chase 500 points.",
+  "module": "breakout.wasm"
+}
