@@ -132,6 +132,14 @@ pub enum PageState {
     Loading,
     Ready(Box<Page>),
     Error(String),
+    Game(Box<LocalGame>),
+}
+/// Local executable content has no document origin, remote URL or persisted history.
+#[derive(Debug)]
+pub struct LocalGame {
+    pub path: std::path::PathBuf,
+    pub session: yami_games::Session,
+    pub snapshot: yami_games::Snapshot,
 }
 #[derive(Debug)]
 pub struct Tab {
@@ -167,6 +175,7 @@ impl Tab {
         match &self.state {
             PageState::Ready(page) => &page.document.metadata.title,
             PageState::Loading => "Loading…",
+            PageState::Game(game) => &game.snapshot.title,
             PageState::Error(_) => "Could not open page",
             PageState::Home => self.location().label(),
         }
@@ -321,10 +330,46 @@ impl Browser {
         let Some(next) = self.next_id.checked_add(1) else {
             return false;
         };
+        self.pause_active_game();
         self.tabs.push(Tab::new(self.next_id));
         self.next_id = next;
         self.active = self.tabs.len() - 1;
         true
+    }
+    /// Explicit user action only; document navigation and links never invoke this loader.
+    pub fn open_game(
+        &mut self,
+        path: std::path::PathBuf,
+        wake: Arc<dyn Fn() + Send + Sync>,
+    ) -> Result<(), String> {
+        if self.tabs.len() >= MAX_TABS {
+            return Err("Close a tab before opening a game".into());
+        }
+        let session = yami_games::Session::launch(path.clone(), wake)?;
+        if !self.open_tab() {
+            return Err("Cannot open another tab".into());
+        }
+        let snapshot = session.snapshot();
+        let tab = self.active_mut();
+        tab.address = "Local WebAssembly game".into();
+        tab.state = PageState::Game(Box::new(LocalGame {
+            path,
+            session,
+            snapshot,
+        }));
+        Ok(())
+    }
+    pub fn poll_games(&mut self) -> bool {
+        let mut changed = false;
+        for tab in &mut self.tabs {
+            if let PageState::Game(game) = &mut tab.state {
+                let snapshot = game.session.snapshot();
+                changed |= snapshot.frames != game.snapshot.frames
+                    || snapshot.status != game.snapshot.status;
+                game.snapshot = snapshot;
+            }
+        }
+        changed
     }
     /// Keep one blank tab when the last tab closes. Pending results cannot
     /// target its replacement because tab IDs are never reused.
@@ -349,8 +394,14 @@ impl Browser {
             self.active = self.active.min(self.tabs.len() - 1);
         }
     }
+    pub fn pause_active_game(&self) {
+        if let PageState::Game(game) = &self.active().state {
+            game.session.pause();
+        }
+    }
     pub fn select(&mut self, index: usize) {
-        if index < self.tabs.len() {
+        if index < self.tabs.len() && index != self.active {
+            self.pause_active_game();
             self.active = index;
         }
     }

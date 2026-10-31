@@ -28,6 +28,7 @@ pub fn run(
     resolver: Option<Arc<yami_browser::native::Resolver>>,
     diagnostic_dir: Option<std::path::PathBuf>,
     smoke_output: Option<std::path::PathBuf>,
+    game_path: Option<std::path::PathBuf>,
 ) -> Result<(), Box<dyn Error>> {
     if args.len() > 1 {
         return Err("--desktop accepts at most one yami:// or ynps:// address, localhost ynp:// address or built-in local:welcome/local:about".into());
@@ -84,9 +85,13 @@ pub fn run(
         app.smoke = Some(smoke::Smoke::new(output, app.settings.onboarded));
     }
     app.discover.set_wake(wake.clone());
+    app.game_wake = Arc::clone(&wake);
     app.discovery = crate::discovery::Discovery::new(wake);
     if let Some(address) = args.first() {
         let _ = app.browser.navigate(address, &app.loader);
+    }
+    if let Some(path) = game_path {
+        app.browser.open_game(path, Arc::clone(&app.game_wake))?;
     }
     eprintln!("{}\n{}", ynp::WARNING, ynp_tls::WARNING);
     event_loop.run_app(&mut app)?;
@@ -187,6 +192,11 @@ struct CachedDocument {
     document: Result<NativeDocument, String>,
 }
 struct Desktop {
+    game_wake: Arc<dyn Fn() + Send + Sync>,
+    game_open: bool,
+    game_error: Option<String>,
+    game_keys: std::collections::HashSet<winit::keyboard::KeyCode>,
+    game_presentation: super::game_view::Presentation,
     smoke: Option<smoke::Smoke>,
     frames: u64,
     log: Option<yami_browser::diagnostics::Log>,
@@ -229,6 +239,11 @@ struct Desktop {
 impl Desktop {
     fn new(loader: Loader) -> Self {
         Self {
+            game_wake: Arc::new(|| {}),
+            game_open: false,
+            game_error: None,
+            game_keys: std::collections::HashSet::new(),
+            game_presentation: super::game_view::Presentation::default(),
             smoke: None,
             frames: 0,
             log: None,
@@ -315,6 +330,18 @@ impl Desktop {
         self.keyboard_focus = None;
     }
     fn commit(&mut self) {
+        if self.game_open {
+            let path = std::path::PathBuf::from(self.editor.value.trim());
+            match self.browser.open_game(path, Arc::clone(&self.game_wake)) {
+                Ok(()) => {
+                    self.game_open = false;
+                    self.clear_focus();
+                }
+                Err(error) => self.game_error = Some(error),
+            }
+            self.redraw();
+            return;
+        }
         if self.discover_edit.is_some() {
             self.clear_focus();
             self.redraw();
@@ -367,6 +394,29 @@ impl Desktop {
         self.redraw();
     }
     fn act(&mut self, action: Action) {
+        self.game_keys.clear();
+        if !matches!(
+            action,
+            Action::LaunchGame | Action::GamePath | Action::DiscoveryPanel
+        ) {
+            self.game_open = false;
+        }
+        // Any browser action releases held game keys. Modal controls also pause it.
+        if let PageState::Game(game) = &self.browser.active().state {
+            game.session.clear_input();
+            if matches!(
+                action,
+                Action::OpenGame
+                    | Action::Address
+                    | Action::Find
+                    | Action::Settings
+                    | Action::Library
+                    | Action::Discover
+                    | Action::FindLocal
+            ) {
+                game.session.pause();
+            }
+        }
         if matches!(
             &action,
             Action::Address
@@ -393,6 +443,58 @@ impl Desktop {
             self.record("navigation-start");
         }
         match action {
+            Action::OpenGame => {
+                self.clear_focus();
+                self.game_open = true;
+                self.game_error = None;
+                self.settings_open = false;
+                self.library_open = false;
+                self.discover.open = false;
+                self.discovery.open = false;
+                self.find_open = false;
+                self.editor.activate("");
+            }
+            Action::GamePath => {
+                self.editor.focus = Some(());
+            }
+            Action::LaunchGame => self.commit(),
+            Action::GamePause => {
+                if let PageState::Game(game) = &self.browser.active().state {
+                    match game.snapshot.status {
+                        yami_games::Status::Paused => game.session.resume(),
+                        _ => game.session.pause(),
+                    }
+                }
+                self.clear_focus();
+            }
+            Action::GameReset => {
+                if let PageState::Game(game) = &mut self.browser.active_mut().state {
+                    if matches!(
+                        game.snapshot.status,
+                        yami_games::Status::Stopped | yami_games::Status::Failed(_)
+                    ) {
+                        match yami_games::Session::launch(
+                            game.path.clone(),
+                            Arc::clone(&self.game_wake),
+                        ) {
+                            Ok(session) => {
+                                game.session = session;
+                                game.snapshot = game.session.snapshot();
+                            }
+                            Err(error) => game.snapshot.status = yami_games::Status::Failed(error),
+                        }
+                    } else {
+                        game.session.reset();
+                    }
+                }
+                self.clear_focus();
+            }
+            Action::GameStop => {
+                if let PageState::Game(game) = &self.browser.active().state {
+                    game.session.stop();
+                }
+                self.clear_focus();
+            }
             Action::Discover => {
                 self.clear_focus();
                 self.discover.toggle();
@@ -733,6 +835,9 @@ impl Desktop {
                 self.browser.forward(&self.loader);
                 self.clear_focus();
             }
+            Action::Reload if matches!(self.browser.active().state, PageState::Game(_)) => {
+                self.act(Action::GameReset);
+            }
             Action::Reload => {
                 self.browser.reload(&self.loader);
                 self.clear_focus();
@@ -889,6 +994,7 @@ impl Desktop {
                 Pixmap::new(size.width, size.height).ok_or("Cannot allocate native framebuffer")?
             }
         };
+        let paint_start = Instant::now();
         self.compose(&mut pix);
         let surface = self.surface.as_mut().unwrap();
         surface.resize(
@@ -902,6 +1008,8 @@ impl Desktop {
                 | u32::from(pixel.blue());
         }
         buffer.present()?;
+        let tab = self.browser.active();
+        self.game_presentation.record(tab.id, matches!(&tab.state, PageState::Game(g) if g.snapshot.status == yami_games::Status::Running), if let PageState::Game(g)=&tab.state {g.snapshot.frames}else{0}, paint_start.elapsed());
         self.frames += 1;
         self.frame = Some(pix);
         if let Some(window) = &self.window {
@@ -957,12 +1065,15 @@ impl Desktop {
             tab.scroll = tab.target_scroll;
         }
         self.animation = (tab.target_scroll - tab.scroll).abs() > 0.2;
-        let value =
-            if self.editor.focus.is_some() && !self.find_edit && self.discover_edit.is_none() {
-                &self.editor.value
-            } else {
-                &self.browser.active().address
-            };
+        let value = if self.editor.focus.is_some()
+            && !self.find_edit
+            && self.discover_edit.is_none()
+            && !self.game_open
+        {
+            &self.editor.value
+        } else {
+            &self.browser.active().address
+        };
         let focus = self
             .keyboard_focus
             .and_then(|i| self.scene.hits.get(i))
@@ -971,7 +1082,10 @@ impl Desktop {
             width: w,
             height: h,
             mouse: self.mouse,
-            editing: self.editor.focus.is_some() && !self.find_edit && self.discover_edit.is_none(),
+            editing: self.editor.focus.is_some()
+                && !self.find_edit
+                && self.discover_edit.is_none()
+                && !self.game_open,
             value,
             selection: self.editor.selected,
             selection_range: self.editor.range(),
@@ -983,6 +1097,13 @@ impl Desktop {
         let mut scene = chrome::paint(&mut c, &self.browser, &ui);
         chrome::relay_setting(&mut c, &mut scene, &ui, self.loader.relay_enabled());
         match &self.browser.active().state {
+            PageState::Game(game) => super::game_view::paint(
+                &mut c,
+                &mut scene,
+                &ui,
+                &game.snapshot,
+                &self.game_presentation,
+            ),
             PageState::Home => chrome::home(&mut c, &mut scene, &ui),
             PageState::Loading => {
                 chrome::document_viewport(&mut c, &mut scene, &ui);
@@ -1174,7 +1295,75 @@ impl Desktop {
                 2.0,
             );
         }
+        if self.game_open {
+            super::game_view::launcher(
+                &mut c,
+                &mut scene,
+                &ui,
+                &self.editor.value,
+                self.game_error.as_deref(),
+            );
+        }
         self.scene = scene;
+    }
+    fn game_key(&mut self, key: &winit::keyboard::PhysicalKey, down: bool, repeat: bool) -> bool {
+        use winit::keyboard::{KeyCode, PhysicalKey};
+        let bit = match key {
+            PhysicalKey::Code(KeyCode::ArrowLeft | KeyCode::KeyA) => yami_games::LEFT,
+            PhysicalKey::Code(KeyCode::ArrowRight | KeyCode::KeyD) => yami_games::RIGHT,
+            PhysicalKey::Code(KeyCode::Space | KeyCode::Enter) => yami_games::START,
+            PhysicalKey::Code(KeyCode::KeyR) => yami_games::RESET,
+            _ => 0,
+        };
+        let PageState::Game(game) = &self.browser.active().state else {
+            return false;
+        };
+        // Releases are always forwarded, including while an editor/modal owns focus.
+        if !down && bit != 0 {
+            if let PhysicalKey::Code(code) = key {
+                self.game_keys.remove(code);
+            }
+            let still_held = self.game_keys.iter().any(|code| match bit {
+                yami_games::LEFT => matches!(code, KeyCode::KeyA | KeyCode::ArrowLeft),
+                yami_games::RIGHT => matches!(code, KeyCode::KeyD | KeyCode::ArrowRight),
+                yami_games::START => matches!(code, KeyCode::Space | KeyCode::Enter),
+                yami_games::RESET => *code == KeyCode::KeyR,
+                _ => false,
+            });
+            if !still_held {
+                game.session.key(bit, false);
+            }
+        }
+        if self.modifiers.control_key()
+            || self.modifiers.super_key()
+            || self.modifiers.alt_key()
+            || self.editor.focus.is_some()
+            || self.game_open
+            || self.settings_open
+            || self.library_open
+            || self.discover.open
+            || self.discovery.open
+            || self.find_open
+        {
+            return false;
+        }
+        if matches!(key, PhysicalKey::Code(KeyCode::KeyP | KeyCode::Escape)) {
+            if down && !repeat {
+                self.act(Action::GamePause);
+                self.redraw();
+            }
+            return true;
+        }
+        if bit != 0 {
+            if down && !repeat {
+                if let PhysicalKey::Code(code) = key {
+                    self.game_keys.insert(*code);
+                }
+                game.session.key(bit, true);
+            }
+            return true;
+        }
+        false
     }
     fn keyboard(&mut self, key: &Key, text: Option<&str>, event_loop: Option<&ActiveEventLoop>) {
         // Windows exposes AltGr as Ctrl+Alt. Preserve printable input from
@@ -1280,6 +1469,7 @@ impl Desktop {
         }
         match key {
             Key::Named(NamedKey::Escape) => {
+                self.game_open = false;
                 self.discover.pages.cancel();
                 self.discover.open = false;
                 self.discovery.open = false;
@@ -1452,11 +1642,20 @@ impl ApplicationHandler<()> for Desktop {
         }
     }
     fn exiting(&mut self, _: &ActiveEventLoop) {
+        for tab in &self.browser.tabs {
+            if let PageState::Game(game) = &tab.state {
+                game.session.stop();
+            }
+        }
         self.record("shutdown");
     }
     fn user_event(&mut self, _: &ActiveEventLoop, _: ()) {
         let directories_changed = self.discover.poll();
         let discovery_changed = self.discovery.poll();
+        let games_changed = self.browser.poll_games();
+        if games_changed {
+            self.redraw();
+        }
         if self.browser.poll(&self.loader) || discovery_changed || directories_changed {
             self.record(
                 if matches!(self.browser.active().state, PageState::Error(_)) {
@@ -1482,15 +1681,24 @@ impl ApplicationHandler<()> for Desktop {
                 }
             }
             WindowEvent::ModifiersChanged(modifiers) => self.modifiers = modifiers.state(),
-            WindowEvent::KeyboardInput { event, .. }
-                if event.state == ElementState::Pressed && !self.composing =>
-            {
-                self.keyboard(&event.logical_key, event.text.as_deref(), Some(event_loop))
+            WindowEvent::KeyboardInput { event, .. } => {
+                if self.game_key(
+                    &event.physical_key,
+                    event.state == ElementState::Pressed,
+                    event.repeat,
+                ) {
+                    return;
+                }
+                if event.state == ElementState::Pressed && !self.composing {
+                    self.keyboard(&event.logical_key, event.text.as_deref(), Some(event_loop));
+                }
             }
             WindowEvent::Ime(Ime::Disabled) => {
                 self.composing = false;
             }
             WindowEvent::Occluded(true) => {
+                self.game_keys.clear();
+                self.browser.pause_active_game();
                 self.animation = false;
             }
             WindowEvent::Occluded(false) => {
@@ -1580,6 +1788,8 @@ impl ApplicationHandler<()> for Desktop {
                 self.redraw();
             }
             WindowEvent::Focused(false) => {
+                self.game_keys.clear();
+                self.browser.pause_active_game();
                 self.modifiers = ModifiersState::empty();
                 self.scroll_drag = false;
                 self.composing = false;
@@ -1618,6 +1828,156 @@ impl ApplicationHandler<()> for Desktop {
 #[cfg(test)]
 mod tests {
     use super::*;
+    fn game_path() -> std::path::PathBuf {
+        std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../games/breakout/game.yami-game.json")
+    }
+    fn game_wait(app: &mut Desktop, check: impl Fn(&yami_games::Snapshot) -> bool) {
+        let start = Instant::now();
+        loop {
+            app.browser.poll_games();
+            let PageState::Game(game) = &app.browser.active().state else {
+                panic!("game tab expected");
+            };
+            if check(&game.snapshot) {
+                return;
+            }
+            assert!(
+                start.elapsed() < Duration::from_secs(3),
+                "{:?}",
+                game.snapshot
+            );
+            std::thread::sleep(Duration::from_millis(2));
+        }
+    }
+    #[test]
+    fn local_game_launcher_keyboard_modals_pause_tabs_and_document_isolation() {
+        use winit::keyboard::{KeyCode, PhysicalKey};
+        let mut app = headless(1440., 900.);
+        app.settings_open = false;
+        app.act(Action::Navigate("local:welcome"));
+        settle(&mut app);
+        let document_id = app.browser.active().id;
+        app.act(Action::OpenGame);
+        app.editor.value = game_path().to_string_lossy().into();
+        app.commit();
+        assert_eq!(app.browser.tabs.len(), 2);
+        assert!(matches!(app.browser.tabs[0].state, PageState::Ready(_)));
+        assert_eq!(app.browser.tabs[0].id, document_id);
+        game_wait(&mut app, |s| s.frames > 0);
+        let _ = frame(&mut app);
+        for action in [Action::GamePause, Action::GameReset, Action::GameStop] {
+            assert!(app.scene.hits.iter().any(|hit| hit.action == action));
+        }
+        assert!(app.game_key(&PhysicalKey::Code(KeyCode::Space), true, false));
+        assert!(app.game_key(&PhysicalKey::Code(KeyCode::Space), false, false));
+        game_wait(&mut app, |s| {
+            s.frame.as_ref().is_some_and(|f| {
+                f.commands.iter().any(
+                    |c| matches!(c,yami_games::Command::Text{text,..} if text=="SPACE to launch"),
+                )
+            })
+        });
+        app.game_key(&PhysicalKey::Code(KeyCode::KeyA), true, false);
+        app.game_key(&PhysicalKey::Code(KeyCode::ArrowLeft), true, false);
+        app.game_key(&PhysicalKey::Code(KeyCode::KeyA), false, false);
+        assert!(app.game_keys.contains(&KeyCode::ArrowLeft));
+        app.act(Action::Address);
+        assert!(app.game_keys.is_empty());
+        game_wait(&mut app, |s| s.status == yami_games::Status::Paused);
+        assert!(!app.game_key(&PhysicalKey::Code(KeyCode::KeyA), true, false));
+        app.clear_focus();
+        app.act(Action::GamePause);
+        game_wait(&mut app, |s| s.status == yami_games::Status::Running);
+        app.act(Action::Tab(0));
+        assert!(matches!(app.browser.active().state, PageState::Ready(_)));
+        app.act(Action::Tab(1));
+        game_wait(&mut app, |s| s.status == yami_games::Status::Paused);
+        app.act(Action::GameStop);
+        game_wait(&mut app, |s| s.status == yami_games::Status::Stopped);
+        app.act(Action::GameReset);
+        game_wait(&mut app, |s| {
+            s.frames > 0 && s.status == yami_games::Status::Running
+        });
+        let _ = frame(&mut app);
+        app.act(Action::Close(1));
+        let _ = frame(&mut app);
+        assert_eq!(app.browser.tabs.len(), 1);
+        assert!(matches!(app.browser.active().state, PageState::Ready(_)));
+        // Executable manifests can never be opened by document addresses or links.
+        assert!(app
+            .browser
+            .navigate(&game_path().to_string_lossy(), &app.loader)
+            .is_err());
+    }
+    #[test]
+    fn game_rendering_is_scaled_and_clipped_to_the_document_viewport() {
+        let mut app = headless(900., 600.);
+        app.settings_open = false;
+        app.browser
+            .open_game(game_path(), Arc::clone(&app.game_wake))
+            .unwrap();
+        game_wait(&mut app, |s| s.frames > 1);
+        let original = frame(&mut app);
+        let PageState::Game(game) = &mut app.browser.active_mut().state else {
+            panic!()
+        };
+        game.session.pause();
+        game.snapshot.frame = Some(Arc::new(yami_games::Frame {
+            commands: vec![
+                yami_games::Command::Clear(0xff0000ff),
+                yami_games::Command::Text {
+                    x: 639,
+                    y: 479,
+                    size: 48,
+                    text: "OVERFLOW".into(),
+                    color: 0xffffffff,
+                },
+            ],
+        }));
+        let changed = frame(&mut app);
+        // Guest commands cannot alter the browser sidebar or its controls.
+        for y in 0..600 {
+            for x in 0..230 {
+                assert_eq!(original.pixel(x, y), changed.pixel(x, y));
+            }
+        }
+        assert!(changed
+            .pixels()
+            .iter()
+            .any(|p| p.red() == 255 && p.green() == 0 && p.blue() == 0));
+    }
+
+    #[test]
+    #[ignore = "manual software rendering benchmark"]
+    fn measure_native_game_rendering() {
+        let mut app = headless(1440., 900.);
+        app.settings_open = false;
+        app.browser
+            .open_game(game_path(), Arc::clone(&app.game_wake))
+            .unwrap();
+        game_wait(&mut app, |s| s.frames > 1);
+        if let PageState::Game(game) = &app.browser.active().state {
+            game.session.pause();
+        }
+        let (_, bytes) = yami_games::load_local(&game_path()).unwrap();
+        let mut vm = yami_games::Runtime::new(&bytes).unwrap();
+        vm.frame(0, yami_games::START).unwrap();
+        vm.frame(0, yami_games::START).unwrap();
+        let mut pix = Pixmap::new(1440, 900).unwrap();
+        let mut times = Vec::new();
+        for _ in 0..180 {
+            if let PageState::Game(game) = &mut app.browser.active_mut().state {
+                game.snapshot.frame = Some(vm.frame(0, 0).unwrap());
+            }
+            let now = Instant::now();
+            app.compose(&mut pix);
+            times.push(now.elapsed().as_secs_f64() * 1000.);
+        }
+        times.sort_by(f64::total_cmp);
+        println!("native compose 1440x900: avg={:.3}ms p50={:.3}ms p95={:.3}ms max={:.3}ms (180 gameplay frames)",times.iter().sum::<f64>()/times.len() as f64,times[90],times[171],times[179]);
+    }
+
     #[test]
     fn editor_handles_unicode_selection_and_bounds() {
         let mut e = Editor::default();

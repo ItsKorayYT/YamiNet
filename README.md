@@ -112,6 +112,15 @@ and [blank report](docs/validation-report-template.md) distinguish automated
 loopback/stream impairment results from still-unverified VPS/home-router,
 Windows-runtime, physical packet-loss and cross-network operation.
 
+## Local games (0.1)
+
+Yami Browser can play explicitly opened local WebAssembly games in a separate
+native canvas tab. [Prism Breakout](games/README.md) includes a playable Rust/Wasm
+module, keyboard controls, pause/resume and score/lives. Run
+`cargo run --release -p yami-browser -- --game games/breakout/game.yami-game.json`
+or use **Open local game** in the sidebar. See the
+[versioned ABI, runtime limits and validation report](docs/games-0.1.md).
+
 ## Run
 
 Install Rust 1.90.0 with rustfmt and Clippy (the toolchain is pinned). From this

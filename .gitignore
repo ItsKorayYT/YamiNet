@@ -20,3 +20,6 @@ dht-*-maintenance.status
 /dist/
 
 __pycache__/
+
+# Independent Wasm guest build output; only the reviewed module is checked in.
+/games/breakout/target/

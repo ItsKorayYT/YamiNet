@@ -50,6 +50,7 @@ def verify(stage, execute=True, expected_version=None, installed=False):
     suffix = '.exe' if windows else ''
     required = {n + suffix for n in BINS} | {f'fonts/{n}' for n in FONTS}
     required |= {'README.md', 'SECURITY.md', 'LICENSE', 'VERSION.txt', 'docs/installation.md', 'examples/welcome.ylang', 'config-examples/browser.conf.example'}
+    required |= {'games/README.md', 'games/breakout/game.yami-game.json', 'games/breakout/breakout.wasm', 'docs/games-0.1.md'}
     required |= {'Launch Browser.cmd'} if windows else {'launch-browser.sh', 'install-desktop.sh', 'uninstall-desktop.sh'}
     required |= {f'sites/{site}/home.ylang' for site in ('alice', 'bob', 'personal', 'blog', 'showcase')}
     required |= {f'sites/{site}/assets/cover.png' for site in ('personal', 'blog', 'showcase')}

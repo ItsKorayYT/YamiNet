@@ -29,6 +29,9 @@ class BundleTests(unittest.TestCase):
                 self.assertTrue((stage / 'fonts/OpenSans-Regular.ttf').is_file())
                 self.assertTrue((stage / 'sites/showcase/assets/cover.png').is_file())
                 self.assertTrue((stage / 'launch-browser.sh').is_file())
+                self.assertEqual((stage / 'games/breakout/breakout.wasm').read_bytes(),
+                                 (PACK.ROOT / 'games/breakout/breakout.wasm').read_bytes())
+                self.assertFalse((stage / 'games/breakout/target').exists())
                 self.assertFalse((stage / 'node.key').exists())
                 for line in (stage / 'MANIFEST.sha256').read_text().splitlines():
                     digest, name = line.split('  ', 1)
