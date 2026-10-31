@@ -15,11 +15,37 @@ use std::{
     io::{self, Read},
     net::SocketAddr,
     path::Path,
+    time::{Duration, Instant},
 };
 use yami_dht::{Contact, Network, PeerRecord, RelayRoute};
 use yami_identity::NodeId;
 use ynp::Protection;
 use ynp_tls::{IdentityMismatch, TlsTransport};
+
+struct DeadlineConnector(Instant);
+impl yami_dht::RpcConnector for DeadlineConnector {
+    fn connect(&self, contact: Contact, budget: Duration) -> io::Result<Box<dyn ynp::Connection>> {
+        let remaining = self.0.saturating_duration_since(Instant::now()).min(budget);
+        if remaining.is_zero() {
+            return Err(io::Error::new(
+                io::ErrorKind::TimedOut,
+                "document fetch deadline exceeded",
+            ));
+        }
+        yami_dht::RpcConnector::connect(&yami_dht::PinnedTls, contact, remaining)
+    }
+}
+fn remaining(until: Instant) -> std::result::Result<Duration, RemoteFetchError> {
+    let budget = until
+        .saturating_duration_since(Instant::now())
+        .min(yami_dht::RPC_TIMEOUT);
+    if budget.is_zero() {
+        return Err(RemoteFetchError::unreachable(
+            "document fetch deadline exceeded",
+        ));
+    }
+    Ok(budget)
+}
 
 const PEER_HEADER: &str = "YAMIPEERS\t1\n";
 const MAX_PEER_FILE: usize = 64 * 1024;
@@ -125,6 +151,26 @@ pub trait RemoteDirectoryFetcher: Send + Sync {
     fn fetch(&self, address: &WebsiteAddress) -> std::result::Result<Directory, RemoteFetchError>;
 }
 
+/// Retrieves an inert document only after authenticating the exact addressed node.
+/// Callers must separately validate the document format. Never pass search terms.
+pub trait AuthenticatedDocumentFetcher: Send + Sync {
+    fn fetch_document(
+        &self,
+        address: &WebsiteAddress,
+    ) -> std::result::Result<ynp::DocumentData, RemoteFetchError>;
+    /// Production adapters must propagate this absolute deadline to transport.
+    fn fetch_document_before(
+        &self,
+        address: &WebsiteAddress,
+        until: Instant,
+    ) -> std::result::Result<ynp::DocumentData, RemoteFetchError> {
+        remaining(until)?;
+        let document = self.fetch_document(address)?;
+        remaining(until)?;
+        Ok(document)
+    }
+}
+
 /// Authenticated fetcher using signed DHT lookup and pinned TLS 1.3 YNP.
 pub struct AuthenticatedFetcher {
     service: yami_dht::Service,
@@ -202,13 +248,27 @@ impl AuthenticatedFetcher {
         &self.bootstrap
     }
 
-    fn fetch_inner(
+    pub fn fetch_document(
         &self,
         address: &WebsiteAddress,
-    ) -> std::result::Result<Directory, RemoteFetchError> {
+    ) -> std::result::Result<ynp::DocumentData, RemoteFetchError> {
+        self.fetch_document_before(address, Instant::now() + Duration::from_secs(30))
+    }
+
+    pub fn fetch_document_before(
+        &self,
+        address: &WebsiteAddress,
+        until: Instant,
+    ) -> std::result::Result<ynp::DocumentData, RemoteFetchError> {
+        remaining(until)?;
         let target = address.node_id();
-        let lookup = yami_dht::lookup_fresh(&self.service, target, &self.bootstrap)
-            .map_err(|error| RemoteFetchError::lookup(format!("signed lookup failed: {error}")))?;
+        let lookup = yami_dht::lookup_fresh_with_connector(
+            &self.service,
+            target,
+            &self.bootstrap,
+            &DeadlineConnector(until),
+        )
+        .map_err(|error| RemoteFetchError::lookup(format!("signed lookup failed: {error}")))?;
         let record = lookup
             .record
             .clone()
@@ -223,14 +283,15 @@ impl AuthenticatedFetcher {
         record
             .verify(self.network, now)
             .map_err(|error| RemoteFetchError::lookup(format!("invalid signed record: {error}")))?;
-        self.fetch_record(address, &record)
+        self.request_record(address, &record, until)
     }
 
-    fn fetch_record(
+    fn request_record(
         &self,
         address: &WebsiteAddress,
         record: &PeerRecord,
-    ) -> std::result::Result<Directory, RemoteFetchError> {
+        until: Instant,
+    ) -> std::result::Result<ynp::DocumentData, RemoteFetchError> {
         let now = yami_dht::now()
             .map_err(|error| RemoteFetchError::lookup(format!("cannot read clock: {error}")))?;
         record
@@ -244,7 +305,7 @@ impl AuthenticatedFetcher {
             record.verify(self.network, now).map_err(|error| {
                 RemoteFetchError::lookup(format!("invalid signed record: {error}"))
             })?;
-            match fetch_from_endpoint(address, (*endpoint).into()) {
+            match request_from_endpoint(address, (*endpoint).into(), remaining(until)?) {
                 Ok(directory) => return Ok(directory),
                 Err(error) => {
                     if direct_best
@@ -277,7 +338,7 @@ impl AuthenticatedFetcher {
             record.verify(self.network, now).map_err(|error| {
                 RemoteFetchError::lookup(format!("invalid signed record: {error}"))
             })?;
-            match fetch_from_relay(address, *relay, self.network) {
+            match request_from_relay(address, *relay, self.network, remaining(until)?) {
                 Ok(directory) => return Ok(directory),
                 Err(error) => {
                     if relay_best
@@ -302,10 +363,60 @@ impl AuthenticatedFetcher {
     }
 }
 
+impl AuthenticatedDocumentFetcher for AuthenticatedFetcher {
+    fn fetch_document(
+        &self,
+        address: &WebsiteAddress,
+    ) -> std::result::Result<ynp::DocumentData, RemoteFetchError> {
+        AuthenticatedFetcher::fetch_document(self, address)
+    }
+    fn fetch_document_before(
+        &self,
+        address: &WebsiteAddress,
+        until: Instant,
+    ) -> std::result::Result<ynp::DocumentData, RemoteFetchError> {
+        AuthenticatedFetcher::fetch_document_before(self, address, until)
+    }
+}
 impl RemoteDirectoryFetcher for AuthenticatedFetcher {
     fn fetch(&self, address: &WebsiteAddress) -> std::result::Result<Directory, RemoteFetchError> {
-        self.fetch_inner(address)
+        parse_directory(self.fetch_document(address)?)
     }
+}
+fn parse_directory(
+    document: ynp::DocumentData,
+) -> std::result::Result<Directory, RemoteFetchError> {
+    Directory::parse(&document.source).map_err(|error| {
+        RemoteFetchError::invalid_directory(format!(
+            "delivered document is not a valid version-1 directory: {error}"
+        ))
+    })
+}
+
+#[cfg(test)]
+impl AuthenticatedFetcher {
+    fn fetch_record(
+        &self,
+        address: &WebsiteAddress,
+        record: &PeerRecord,
+    ) -> std::result::Result<Directory, RemoteFetchError> {
+        parse_directory(self.request_record(
+            address,
+            record,
+            Instant::now() + Duration::from_secs(30),
+        )?)
+    }
+}
+#[cfg(test)]
+fn fetch_from_endpoint(
+    address: &WebsiteAddress,
+    endpoint: SocketAddr,
+) -> std::result::Result<Directory, RemoteFetchError> {
+    parse_directory(request_from_endpoint(
+        address,
+        endpoint,
+        yami_dht::RPC_TIMEOUT,
+    )?)
 }
 
 /// Reads the existing `peers.tsv` manual bootstrap store without modifying it.
@@ -437,15 +548,16 @@ fn lookup_failure_message(lookup: &yami_dht::Lookup) -> String {
     }
 }
 
-fn fetch_from_endpoint(
+fn request_from_endpoint(
     address: &WebsiteAddress,
     endpoint: SocketAddr,
-) -> std::result::Result<Directory, RemoteFetchError> {
+    budget: Duration,
+) -> std::result::Result<ynp::DocumentData, RemoteFetchError> {
     let transport = TlsTransport::new(address.node_id()).map_err(|error| {
         RemoteFetchError::configuration(format!("cannot initialize pinned TLS: {error}"))
     })?;
     let mut connection = transport
-        .connect_with_timeout(endpoint, yami_dht::RPC_TIMEOUT)
+        .connect_with_timeout(endpoint, budget)
         .map_err(classify_connect_error)?;
     if connection.protection() != Protection::Tls13PinnedServer {
         return Err(RemoteFetchError::identity(
@@ -454,26 +566,39 @@ fn fetch_from_endpoint(
     }
     let document = ynp::request(&mut *connection, address.key())
         .map_err(|error| classify_request_error(error, false))?;
-    Directory::parse(&document.source).map_err(|error| {
-        RemoteFetchError::invalid_directory(format!(
-            "delivered document is not a valid version-1 directory: {error}"
-        ))
-    })
+    Ok(document)
 }
 
-fn fetch_from_relay(
+fn request_from_relay(
     address: &WebsiteAddress,
     relay: RelayRoute,
     network: Network,
-) -> std::result::Result<Directory, RemoteFetchError> {
+    budget: Duration,
+) -> std::result::Result<ynp::DocumentData, RemoteFetchError> {
     let route = yami_relay::Route {
         relay: relay.relay,
         endpoint: relay.endpoint.into(),
         destination: address.node_id(),
     };
-    let mut connection = route
-        .connect_with_timeout(network == Network::Public, yami_dht::RPC_TIMEOUT)
-        .map_err(classify_relay_error)?;
+    // A host has one outbound slot and briefly re-registers after each
+    // document. Permit a few refused connections within the SAME deadline.
+    // Authentication/protocol failures are never retried or downgraded.
+    let until = Instant::now() + budget;
+    let mut attempts = 0;
+    let mut connection = loop {
+        match route.connect_with_timeout(network == Network::Public, remaining(until)?) {
+            Ok(connection) => break connection,
+            Err(error) if error.kind() == io::ErrorKind::ConnectionRefused && attempts < 3 => {
+                attempts += 1;
+                let delay = Duration::from_millis(100 * attempts);
+                if until.saturating_duration_since(Instant::now()) <= delay {
+                    return Err(classify_relay_error(error));
+                }
+                std::thread::sleep(delay);
+            }
+            Err(error) => return Err(classify_relay_error(error)),
+        }
+    };
     if connection.protection() != Protection::Tls13PinnedServer {
         return Err(RemoteFetchError::identity(
             "relay tunnel did not independently authenticate the destination over TLS 1.3",
@@ -481,11 +606,7 @@ fn fetch_from_relay(
     }
     let document = ynp::request(&mut *connection, address.key())
         .map_err(|error| classify_request_error(error, true))?;
-    Directory::parse(&document.source).map_err(|error| {
-        RemoteFetchError::invalid_directory(format!(
-            "delivered document is not a valid version-1 directory: {error}"
-        ))
-    })
+    Ok(document)
 }
 
 fn classify_request_error(error: io::Error, relayed: bool) -> RemoteFetchError {

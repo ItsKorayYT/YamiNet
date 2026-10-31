@@ -151,6 +151,15 @@ pub fn lookup_with_connector(
 pub fn lookup_fresh(service: &Service, target: NodeId, seeds: &[Contact]) -> io::Result<Lookup> {
     lookup_after(service, target, seeds, &PinnedTls, None, false)
 }
+/// Fresh signed lookup with an existing pinned connector and caller budget.
+pub fn lookup_fresh_with_connector(
+    service: &Service,
+    target: NodeId,
+    seeds: &[Contact],
+    connector: &dyn RpcConnector,
+) -> io::Result<Lookup> {
+    lookup_after(service, target, seeds, connector, None, false)
+}
 fn lookup_after(
     service: &Service,
     target: NodeId,

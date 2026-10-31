@@ -71,3 +71,47 @@ Export/build outputs must be new directories. For a subsequent generation use
 `provider build community-search --output published-next`, verify it, stop the
 node and switch its site directory. No unrelated site documents are overwritten.
 Publishing is a separate explicit action: export never opens network listeners.
+
+## Subscribe and search offline
+
+```sh
+yami-search subscribe search-state community yami://PROVIDER-FULL-ID/search-manifest
+yami-search subscriptions search-state
+yami-search refresh search-state community PATH-TO-EXISTING-PEER-STORE
+yami-search search search-state "decentralized networks"
+yami-search unsubscribe search-state community
+```
+
+Refresh uses existing manually pinned bootstrap peers, signed fresh DHT lookup,
+exact-node TLS 1.3 and YNP document requests. Public-network policy is the CLI
+default. `--relays` explicitly enables the existing signed relay fallback after
+direct endpoints fail. Brief relay registration gaps permit at most three
+connection-refusal retries within the same document budget. Identity failures
+are never downgraded. The browser uses its existing selected network/bootstrap
+policy instead. There is no plaintext fallback or server-side query endpoint.
+
+Search reads only local state. Subscribe, list, remove, startup and query never
+fetch anything. Refresh requests only the manifest key and its validated shard
+keys at the **same authenticated provider identity**. It cannot follow shard
+URLs to another host. No search terms, query telemetry or analytics are sent.
+Fetching an index reveals interest in that provider to network observers;
+this is not anonymous browsing. Independent providers may lie about titles,
+snippets or claimed website identities. Opening a result must separately
+authenticate its actual destination through normal browser navigation.
+
+The versioned `search-state.json` contains subscriptions, last-success times,
+bounded error messages and complete validated snapshots in one atomic file.
+Bounds: 8 providers, 512 cached pages and 8 MiB extracted text overall; 32 MiB
+serialized state. Invalid/corrupt state is reported, never silently overwritten.
+Use one local writer per state directory. Each refresh has a 120-second absolute
+network deadline propagated through existing DHT and TLS/relay connectors;
+document parsing and disk commits additionally have fixed byte/node budgets.
+Cancellation is cooperative between bounded requests. A failed, cancelled,
+corrupted or incomplete refresh retains the previous valid snapshot. Failed
+refreshes show cached/stale or unavailable status. A successful refresh is
+labelled cached with its timestamp, never as a current reachability guarantee.
+
+Cross-provider search deduplicates canonical destination addresses, picks the
+highest scoring claim (provider URL breaks ties), and retains every matching
+publisher's provenance. A provider's authenticated identity proves publication,
+not ownership of every site it references. It does not change bookmarks or trust.

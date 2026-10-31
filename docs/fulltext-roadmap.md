@@ -29,9 +29,27 @@ loopback; physical internet validation NOT RUN.
 
 ## Remaining phases
 
-3. Generalize existing authenticated document fetcher without weakening identity
-   checks; implement bounded subscriptions, atomic valid snapshots, offline
-   multi-provider merging and authenticated loopback/relay tests.
+## Phase 3 — authenticated cached search
+
+Implemented shared authenticated document retrieval through existing Discover
+transport, fresh signed DHT with propagated deadlines, bounded subscriptions,
+atomic complete cache/status transactions, explicit refresh/cancellation,
+offline cross-provider search, canonical deduplication and publisher provenance.
+The relay adapter handles its existing single-slot host registration gaps with
+bounded connection-refusal retries. No new TLS/resolver/relay protocol exists.
+CLI supports subscribe/unsubscribe/list/refresh/offline search.
+
+Validation PASS: `cargo test -p yami-search -p yami-discover --locked` and
+targeted Clippy with warnings denied; existing DHT suite also passed after the
+shared fresh-lookup adapter was added. Search has 12 passing tests. Direct,
+identity rejection, expired records, relay opt-in, invalid/incomplete refresh,
+outage/cache preservation, cancellation, multi-provider deduplication, offline
+query and privacy checks use real loopback sockets or explicit local-state
+assertions. Query privacy inspects document keys and request counts.
+Physical internet validation NOT RUN.
+
+## Remaining phase
+
 4. Add Pages mode and provider management to the existing native Discover UI;
    worker I/O/search, result provenance/status, normal authenticated navigation,
    UI tests and native smoke where supported.

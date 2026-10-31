@@ -15,9 +15,11 @@ unicode-normalization = "0.1"
 ylang = { path = "../ylang" }
 yami-discover = { path = "../yami-discover" }
 yami-identity = { path = "../yami-identity" }
+yami-dht = { path = "../yami-dht" }
 
 [dev-dependencies]
 yami-node = { path = "../../apps/yami-node" }
 ynp = { path = "../ynp" }
 ynp-tls = { path = "../ynp-tls" }
+yami-relay = { path = "../yami-relay" }
 

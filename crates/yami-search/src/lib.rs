@@ -3,6 +3,7 @@ mod engine;
 mod files;
 mod provider;
 mod publication;
+mod subscriptions;
 mod text;
 
 pub use engine::{Index, Page, SearchHit, Stats};
@@ -10,8 +11,10 @@ pub use provider::Provider;
 pub use publication::{
     Manifest, Publication, ShardRef, MANIFEST_KEY, MAX_PUBLICATION_BYTES, MAX_SHARDS,
 };
+pub use subscriptions::{CachedHit, ProviderStatus, SearchStore, Subscription, MAX_PROVIDERS};
 pub use text::{normalize, tokens};
 pub use yami_discover::WebsiteAddress;
+pub use yami_discover::{AuthenticatedDocumentFetcher, AuthenticatedFetcher};
 
 use std::io;
 pub type Result<T> = io::Result<T>;

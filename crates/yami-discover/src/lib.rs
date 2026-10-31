@@ -59,8 +59,8 @@ pub use registry::{
     SourceStatus,
 };
 pub use remote::{
-    load_bootstrap_peers, merge_bootstrap_peers, AuthenticatedFetcher, RemoteDirectoryFetcher,
-    RemoteFetchError, RemoteFetchErrorKind,
+    load_bootstrap_peers, merge_bootstrap_peers, AuthenticatedDocumentFetcher,
+    AuthenticatedFetcher, RemoteDirectoryFetcher, RemoteFetchError, RemoteFetchErrorKind,
 };
 
 use std::{fmt, io};
