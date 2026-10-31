@@ -9,7 +9,7 @@
 /// The result is lowercase, common Latin diacritics are reduced to an ASCII
 /// base letter and combining marks are removed. This is a search convenience,
 /// not a locale-aware collation or a substitute for Unicode normalization.
-pub(crate) fn fold(text: &str) -> String {
+pub fn fold(text: &str) -> String {
     let mut output = String::with_capacity(text.len());
     for character in text.chars() {
         for lower in character.to_lowercase() {

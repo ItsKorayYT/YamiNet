@@ -45,6 +45,13 @@ mod remote;
 mod store;
 
 pub use address::WebsiteAddress;
+pub use normalize::fold as fold_text;
+
+/// Atomically creates or replaces a regular local file using Discover's
+/// durable temporary-file writer. The parent directory must already exist.
+pub fn write_atomic_file(path: &std::path::Path, contents: &str) -> Result<()> {
+    store::write_atomic(path, contents, store::Mode::ReplaceOrCreate)
+}
 pub use catalog::{Catalog, Entry, ImportReport, SearchHit, SourceInfo};
 pub use directory::{Directory, DirectoryEntry};
 pub use registry::{
