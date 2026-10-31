@@ -167,6 +167,187 @@ fn loader(directory: &Path) -> (Arc<Resolver>, Loader) {
 }
 
 #[test]
+fn discover_refreshes_only_explicitly_and_opening_independently_authenticates() {
+    use yami_browser::discover::{Discover, Field};
+    use yami_discover::{Directory, DirectoryEntry, SourceState, WebsiteAddress};
+    fn settle(panel: &mut Discover) {
+        let deadline = Instant::now() + Duration::from_secs(30);
+        while panel.busy.is_some() {
+            panel.poll();
+            assert!(Instant::now() < deadline, "bounded directory refresh");
+            thread::sleep(Duration::from_millis(2));
+        }
+    }
+    let scratch = Scratch::new("discover");
+    let site_id = Arc::new(NodeIdentity::generate().unwrap());
+    let dir_id = Arc::new(NodeIdentity::generate().unwrap());
+    let impostor = NodeIdentity::generate().unwrap();
+    let website = format!("yami://{}/home", site_id.id());
+    let forged = format!("yami://{}/home", impostor.id());
+    let web_path = scratch.0.join("website");
+    page(&web_path, "home", "Actual website", "");
+    let web = Node::start(
+        site_id.clone(),
+        service(&scratch.0, "web", *site_id.id()),
+        &web_path,
+    );
+    let dir_path = scratch.0.join("directory");
+    fs::create_dir_all(&dir_path).unwrap();
+    let document = Directory::new(
+        "Untrusted source",
+        vec![
+            DirectoryEntry::new(
+                "Café Operator Title",
+                "Directory supplied description",
+                WebsiteAddress::parse(&website).unwrap(),
+                Some("Writing".into()),
+            )
+            .unwrap(),
+            DirectoryEntry::new(
+                "Trusted-looking fake title",
+                "This listing does not authenticate its endpoint",
+                WebsiteAddress::parse(&forged).unwrap(),
+                None,
+            )
+            .unwrap(),
+        ],
+    )
+    .unwrap();
+    document.save_new(dir_path.join("directory.ylang")).unwrap();
+    let directory = Node::start(
+        dir_id.clone(),
+        service(&scratch.0, "directory", *dir_id.id()),
+        &dir_path,
+    );
+    yami_dht::publish(&web.service, &web.record(), &[directory.contact]).unwrap();
+    let now = yami_dht::now().unwrap();
+    let false_location = PeerRecord::sign(
+        &impostor,
+        vec![web.contact.endpoint],
+        now + 120,
+        1,
+        Network::Loopback,
+        now,
+    )
+    .unwrap();
+    directory.service.accept(false_location, now).unwrap();
+    let peer_path = scratch.0.join("peers");
+    PeerStore::open(&peer_path)
+        .unwrap()
+        .add(directory.contact.id, directory.contact.endpoint.into())
+        .unwrap();
+    let (_, loader) = loader(&peer_path);
+    let state = scratch.0.join("discover-state");
+    let mut panel = Discover::new(Ok(state.clone()), Arc::new(|| {}));
+    panel.toggle();
+    settle(&mut panel);
+    panel.name = "community".into();
+    panel.address = format!("yami://{}/directory", dir_id.id());
+    panel.add();
+    settle(&mut panel);
+    panel.set_field(Field::Search, "cafe".into());
+    assert!(panel.listings.is_empty());
+    assert_eq!(
+        directory.requests.load(Ordering::SeqCst),
+        0,
+        "startup, add and search never fetch"
+    );
+    panel.select_source(0);
+    // The worker also rechecks the browser privacy mode before constructing
+    // a transport, even when callers bypass the disabled UI control.
+    loader.set_local_only(true);
+    panel.refresh_selected(loader.directory_fetcher(), false);
+    settle(&mut panel);
+    assert!(panel.error.as_deref().unwrap().contains("local-only"));
+    assert_eq!(directory.requests.load(Ordering::SeqCst), 0);
+    assert!(!state.join("dht-local-discover.cache").exists());
+    loader.set_local_only(false);
+    panel.refresh_selected(loader.directory_fetcher(), false);
+    settle(&mut panel);
+    assert!(panel.error.is_none(), "{:?}", panel.error);
+    assert_eq!(panel.listings.len(), 1);
+    assert_eq!(panel.listings[0].entry.title(), "Café Operator Title");
+    assert_eq!(panel.listings[0].state, SourceState::Fresh);
+    assert_eq!(directory.requests.load(Ordering::SeqCst), 1);
+    assert_eq!(
+        web.requests.load(Ordering::SeqCst),
+        0,
+        "refresh does not visit listed sites"
+    );
+    let mut browser = Browser::new();
+    browser.library =
+        Some(yami_browser::library::Library::open(scratch.0.join("library")).unwrap());
+    browser
+        .library
+        .as_mut()
+        .unwrap()
+        .save_bookmark(&website, "My bookmark", "")
+        .unwrap();
+    browser.navigate("local:welcome", &loader).unwrap();
+    wait(&mut browser, &loader);
+    browser.open_tab();
+    browser.navigate("local:about", &loader).unwrap();
+    wait(&mut browser, &loader);
+    panel.select_website(0);
+    assert_eq!(browser.tabs.len(), 2);
+    assert_eq!(browser.active().security(), Some(&Security::BuiltIn));
+    browser
+        .navigate(panel.selected_website.as_ref().unwrap(), &loader)
+        .unwrap();
+    ready(&mut browser, &loader, "Actual website", *site_id.id());
+    browser.back(&loader);
+    wait(&mut browser, &loader);
+    assert_eq!(browser.active().security(), Some(&Security::BuiltIn));
+    browser.forward(&loader);
+    ready(&mut browser, &loader, "Actual website", *site_id.id());
+    assert_eq!(browser.tabs.len(), 2);
+    assert_eq!(
+        browser.library.as_ref().unwrap().bookmarks()[0].title,
+        "My bookmark"
+    );
+    assert!(!browser.library.as_ref().unwrap().history_enabled());
+    assert!(browser.library.as_ref().unwrap().visits().is_empty());
+    panel.set_field(Field::Search, "fake".into());
+    panel.select_website(0);
+    let before = web.requests.load(Ordering::SeqCst);
+    browser
+        .navigate(panel.selected_website.as_ref().unwrap(), &loader)
+        .unwrap();
+    wait(&mut browser, &loader);
+    assert!(matches!(browser.active().state, PageState::Error(_)));
+    assert!(browser.active().security().is_none());
+    assert_eq!(
+        web.requests.load(Ordering::SeqCst),
+        before,
+        "wrong TLS identity never receives a document request"
+    );
+    // A later invalid directory is an error with snapshot-backed results.
+    fs::write(
+        dir_path.join("directory.ylang"),
+        "@page 0.1\n  title Not a directory\n= Wrong format\n",
+    )
+    .unwrap();
+    panel.refresh_selected(loader.directory_fetcher(), false);
+    settle(&mut panel);
+    assert!(panel.error.is_some());
+    assert!(matches!(
+        panel.listings[0].state,
+        SourceState::Cached { .. }
+    ));
+    let requests = directory.requests.load(Ordering::SeqCst);
+    let mut reopened = Discover::new(Ok(state), Arc::new(|| {}));
+    reopened.toggle();
+    settle(&mut reopened);
+    reopened.set_field(Field::Search, "cafe".into());
+    assert_eq!(reopened.listings.len(), 1);
+    assert!(matches!(
+        reopened.listings[0].state,
+        SourceState::Cached { .. }
+    ));
+    assert_eq!(directory.requests.load(Ordering::SeqCst), requests);
+}
+
+#[test]
 fn three_nodes_resolve_render_navigate_refresh_and_authenticate() {
     let scratch = Scratch::new("three");
     let mut ids: Vec<_> = (0..3)

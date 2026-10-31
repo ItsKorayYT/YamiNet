@@ -3,14 +3,17 @@
 YamiNet 0.4 starts **decentralized website discovery**. The `yami-discover`
 crate provides a standalone local directory engine, authoring tools, persistent
 catalogs and explicitly requested authenticated remote fetching, including
-opt-in fallback through existing signed relay routes. It is ready for browser
-integration but does not change the browser UI, networking implementations,
-TLS, DHT, relays, installers or GitHub Actions.
+opt-in fallback through existing signed relay routes. The native browser's
+**Discover websites** panel reuses this engine for offline search, subscription
+management and explicit authenticated refresh. See the [native Discover user
+guide](desktop-browser.md#discover-websites-and-directory-subscriptions). The
+networking implementations, TLS, DHT, relays, installers and GitHub Actions are
+unchanged.
 
 The normative format is
 [website directory format 1](specs/v0.4/website-directory.md). This page covers
-the user workflow, the sample data, the trust model and the API a later browser
-milestone can call.
+the user workflow, the sample data, the trust model and the API used by the
+native browser.
 
 ## Why a local directory engine
 
@@ -335,7 +338,7 @@ directory operator can list any identity, describe it inaccurately, omit sites
 or disagree with another operator. Version 1 defines no directory signatures or
 reputation.
 
-The canonical address still names a YamiNet identity. When a future browser
+The canonical address still names a YamiNet identity. When the browser
 opens an entry, the existing networking stack must authenticate that exact node
 ID over TLS 1.3, directly or through the existing relay path. Discovery must not
 weaken TLS, DHT, relay or browser security, and it must not bypass the normal
@@ -345,11 +348,11 @@ and never open a site automatically.
 This milestone also does not add crawling, automatic fetching, JavaScript,
 HTML, CSS, an external web engine, accounts, telemetry or query reporting.
 
-## API for the next browser milestone
+## API used by the native browser
 
 The crate is independent of the browser. It contains only the explicit remote
 refresh path, which reuses the existing `yami-dht`, `ynp-tls` and `ynp` crates
-rather than duplicating them. A later milestone can add it as a path dependency:
+rather than duplicating them. The browser uses it as a path dependency:
 
 ```toml
 yami-discover = { path = "../../crates/yami-discover" }
@@ -521,15 +524,15 @@ In scope for this milestone:
   the existing signed DHT lookup, pinned TLS 1.3 and YNP stack;
 - explicit, opt-in relay fallback over existing signed relay routes with
   independent outer relay and inner destination authentication;
-- documentation and unit tests.
+- a native browser Discover panel, subscription controls and explicit refresh;
+- documentation, integration and UI regression tests.
 
 Out of scope, deliberately:
 
-- browser UI integration;
 - automatic or background downloading/crawling of directory documents;
 - directory signatures or reputation;
 - a central search server;
-- changes to TLS, DHT, relays, installers, CI or the existing browser model.
+- new networking protocols or changes to TLS, DHT, relays, installers or CI.
 
 ## Related
 

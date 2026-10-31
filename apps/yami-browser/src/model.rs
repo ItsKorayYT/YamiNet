@@ -531,8 +531,21 @@ pub struct Loader {
     resources: mpsc::Receiver<ResourceCompletion>,
     relay_enabled: Arc<AtomicBool>,
     bootstrap: Arc<Bootstrap>,
+    directory_fetcher: Arc<crate::discover::FetcherFactory>,
 }
 impl Loader {
+    /// The returned factory is invoked on Discover's worker. Recheck privacy
+    /// there as well as at the UI action, including requests not yet started.
+    pub fn directory_fetcher(&self) -> Arc<crate::discover::FetcherFactory> {
+        let factory = self.directory_fetcher.clone();
+        let local_only = self.local_only.clone();
+        Arc::new(move |state, relays| {
+            if local_only.load(Ordering::SeqCst) {
+                return Err("Directory refresh is blocked by local-only mode.".into());
+            }
+            factory(state, relays)
+        })
+    }
     pub fn set_local_only(&self, enabled: bool) {
         self.local_only.store(enabled, Ordering::SeqCst);
         if enabled {
@@ -590,6 +603,7 @@ impl Loader {
     ) -> io::Result<Self> {
         let relay_enabled = resolver.relay_enabled.clone();
         let bootstrap_resolver = resolver.clone();
+        let directory_resolver = resolver.clone();
         let mut loader = Self::with_fetcher(
             wake,
             Arc::new(move |location, deadline| {
@@ -602,6 +616,8 @@ impl Loader {
         )?;
         loader.relay_enabled = relay_enabled;
         loader.bootstrap = Arc::new(move |pin| bootstrap_resolver.add_bootstrap(pin));
+        loader.directory_fetcher =
+            Arc::new(move |state, relays| directory_resolver.directory_fetcher(state, relays));
         Ok(loader)
     }
     pub fn add_bootstrap(&self, pin: &str) -> Result<(), String> {
@@ -621,6 +637,9 @@ impl Loader {
             resources,
             relay_enabled: Arc::new(AtomicBool::new(false)),
             bootstrap: Arc::new(native::add_bootstrap_from_environment),
+            directory_fetcher: Arc::new(|state, relays| {
+                Resolver::from_environment()?.directory_fetcher(state, relays)
+            }),
         };
         let image_cache = Arc::new(crate::image_cache::DecodeCache::default());
         for index in 0..WORKERS {

@@ -2339,6 +2339,7 @@ dependencies = [
  "winit",
  "yami-config",
  "yami-dht",
+ "yami-discover",
  "yami-identity",
  "yami-node",
  "yami-relay",

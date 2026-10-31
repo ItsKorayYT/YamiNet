@@ -41,6 +41,15 @@ See [installation](installation.md) for OS dependencies and data locations.
    If the library is locked, close the other browser instance. Invalid settings
    are preserved and reported. A failed first-run save keeps the dialog visible.
 
+To browse saved website directories, choose **Discover websites**. Search under
+**Websites · offline search**; queries stay local. In **Directory subscriptions**,
+add a label and a canonical `yami://FULL-NODE-ID/directory-key`, select the row,
+and explicitly refresh it after enabling network browsing. Adding a subscription
+or restarting never fetches it. Cached listings survive a failed refresh. Every
+listing remains untrusted: **Open selected website · verify identity** uses normal
+TLS-authenticated navigation. See the [Discover guide](desktop-browser.md#discover-websites-and-directory-subscriptions)
+for provenance, local-only behavior, relay opt-in and sharing a CLI store.
+
 ![First-run explanation](images/getting-started-031-onboarding.png)
 
 ![Native browser rendering image-heavy test content](images/getting-started-031-browser.png)

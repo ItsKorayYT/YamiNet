@@ -15,6 +15,7 @@ yami-config = { path = "../../crates/yami-config" }
 getrandom = "0.4.3"
 yami-relay = { path = "../../crates/yami-relay" }
 yami-dht = { path = "../../crates/yami-dht" }
+yami-discover = { path = "../../crates/yami-discover" }
 yami-node = { path = "../yami-node" }
 ynp-discovery = { path = "../../crates/ynp-discovery" }
 ylang = { path = "../../crates/ylang" }
