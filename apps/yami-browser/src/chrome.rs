@@ -6,6 +6,10 @@ use tiny_skia::{
     RadialGradient, SpreadMode, Stroke, Transform,
 };
 use yami_render::native::TextEngine;
+mod discover;
+#[cfg(test)]
+pub use discover::discover_rect;
+pub use discover::{discover_page_size, discover_panel};
 
 // Vertical sidebar design color palette
 pub const INK: [u8; 4] = [242, 236, 238, 255]; // Primary text #F2ECEE
@@ -38,6 +42,17 @@ impl Rect {
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Action {
+    Discover,
+    DiscoverView(bool),
+    DiscoverField(yami_browser::discover::Field),
+    DiscoverSearch,
+    DiscoverAdd,
+    DiscoverSource(String),
+    DiscoverWebsite(String),
+    DiscoverRefresh,
+    DiscoverRemove,
+    DiscoverOpen,
+    DiscoverPage(bool),
     Settings,
     FinishSetup,
     ToggleLocal,
@@ -576,6 +591,16 @@ pub fn paint(c: &mut Canvas<'_>, browser: &Browser, ui: &ChromeState<'_>) -> Sce
         inner - 16.0,
         11.0,
         MUTED,
+        true,
+    );
+    // Share the existing section heading so Discover does not consume tab space.
+    panel_button(
+        c,
+        &mut scene,
+        ui,
+        Rect::new(label.x + 58.0, label.y, label.w - 58.0, label.h),
+        "Discover websites",
+        Action::Discover,
         true,
     );
     let mut y = label.y + label.h + 2.0;
@@ -1130,10 +1155,16 @@ fn address_field(
     c.icon("search", r.x + 13.0, r.y + r.h / 2.0 + 1.0, MUTED);
 
     let label = if ui.value.is_empty() {
-        if action == Action::Find {
-            "Find text…"
-        } else {
-            "Search or Enter URL…"
+        match action {
+            Action::Find => "Find text…",
+            Action::DiscoverField(yami_browser::discover::Field::Search) => {
+                "Search saved listings…"
+            }
+            Action::DiscoverField(yami_browser::discover::Field::Name) => "Directory label",
+            Action::DiscoverField(yami_browser::discover::Field::Address) => {
+                "yami://<full-node-id>/<key>"
+            }
+            _ => "Search or Enter URL…",
         }
     } else {
         ui.value

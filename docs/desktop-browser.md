@@ -23,6 +23,64 @@ opens sites automatically or saves trust. There is no anonymity, HTTP support
 or DNS resolution. See [the security notes](../SECURITY.md) and
 [Windows discovery/firewall testing](discovery-testing.md).
 
+## Discover websites and directory subscriptions
+
+Select **Discover websites** in the sidebar. **Websites · offline search** searches
+only saved directory snapshots, using the existing bounded title, description,
+category and address matching. Type a query and press Enter or **Search**. No
+query leaves the browser. Starting the browser or opening the panel never
+refreshes a remote directory. Select a result to enable **Open selected website ·
+verify identity**. Previous/Next, Page Up/Page Down and the mouse wheel browse
+pages. Escape closes the panel without closing tabs.
+
+Each result shows its operator-supplied title, description, category, canonical
+address, directory label and provenance. **Fresh** means a successful read at the
+last explicit refresh, not a promise of current availability. **Cached** means
+a refresh failed and the last validated snapshot was retained. Directory rows
+include the reason. Loading, empty and error states leave browser navigation
+available.
+
+Under **Directory subscriptions**, enter a local label and a canonical
+`yami://FULL-NODE-ID/directory-key`, then **Add subscription (no fetch)**. An
+omitted/empty key canonicalizes to `home`. New subscriptions stay inactive until
+refreshed. Select a row for **Refresh selected directory** or **Remove selected**.
+Removal deletes its local cached contribution, without deleting the remote
+directory or other sources.
+
+Remote refresh requires network browsing in **Settings & first launch**.
+Local-only mode blocks new remote refreshes; offline search and local-file
+refreshes remain available. Refresh reuses the browser's network policy and
+bootstrap pins, signed DHT lookup and TLS pinned to the directory's exact
+identity. **Relay fallback: On** permits existing signed relay routes after
+direct endpoints fail, independently pinning relay and destination identities.
+Storage and refresh work run off the UI thread, one operation at a time. An
+already running refresh finishes using the transport's bounded timeouts;
+closing the panel does not cancel it or start another refresh.
+
+**Every listing remains untrusted, including listings in a freshly authenticated
+directory.** A title, label, subscription or cache status never authenticates a
+listed website. Opening a result uses normal browser navigation and independently
+verifies that website's identity over TLS. Tabs, Back/Forward, bookmarks, history
+opt-in and privacy preferences retain their existing behavior. Discover does not
+enable history, save search queries or mark destinations verified.
+
+The default registry/snapshot directory is `<browser-library-directory>/discover`.
+Set `YAMINET_DISCOVER_DIR` to an absolute directory before launching to share an
+existing `yami-discover` CLI store. The CLI's default `.yami-discover` directory
+is not imported automatically. For example:
+
+```sh
+export YAMINET_DISCOVER_DIR=/absolute/path/to/discover-state
+cargo run -p yami-discover -- source add community /absolute/path/to/community.ylang --state "$YAMINET_DISCOVER_DIR"
+cargo run -p yami-discover -- source refresh community --state "$YAMINET_DISCOVER_DIR"
+cargo run -p yami-browser
+```
+
+Local-file sources registered through the CLI also appear in the panel. Opening
+it loads snapshots without rereading source files. Close and reopen the panel to
+reload saved CLI changes. The store is independent of browser bookmarks/history;
+see [directory authoring and the CLI](discover.md) for source commands.
+
 ## Rich sites, bookmarks and local history
 
 Open a YLang 0.2 site using its canonical `yami://FULL-NODE-ID/home` or its

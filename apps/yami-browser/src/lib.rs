@@ -1,4 +1,5 @@
 //! Window-independent browser model and native address resolution.
+pub mod discover;
 pub mod model;
 pub mod native;
 

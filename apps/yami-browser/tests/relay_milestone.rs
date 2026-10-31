@@ -125,7 +125,57 @@ fn client(base: &Path) {
     resolver.set_relay_enabled(true);
     let loader = Loader::with_resolver(Arc::new(|| {}), resolver).unwrap();
     let mut browser = Browser::new();
-    browser.navigate(&address.url(), &loader).unwrap();
+    // The native Discover adapter must use this resolver's loopback peers and
+    // honor relay opt-in. Consume the fixture's initially registered serving
+    // slot before any browser page/asset request. After a tunnel consumes that
+    // slot, re-registration is asynchronous; an immediate one-shot refresh is
+    // correctly allowed to report unavailable during that gap. Navigation
+    // below already exercises the browser's bounded reconnect behavior.
+    let mut discover = yami_browser::discover::Discover::new(
+        Ok(base.join(format!("discover-C-{}", std::process::id()))),
+        Arc::new(|| {}),
+    );
+    discover.toggle();
+    wait(|| {
+        discover.poll();
+        discover.busy.is_none()
+    });
+    discover.name = "outbound-only-directory".into();
+    discover.address = format!("yami://{host}/directory");
+    discover.add();
+    wait(|| {
+        discover.poll();
+        discover.busy.is_none()
+    });
+    assert!(discover.listings.is_empty(), "adding must not fetch");
+    discover.select_source(0);
+    loader.set_relay_enabled(false);
+    discover.refresh_selected(loader.directory_fetcher(), loader.relay_enabled());
+    wait(|| {
+        discover.poll();
+        discover.busy.is_none()
+    });
+    assert!(
+        discover.error.is_some(),
+        "relay-only source cannot refresh without opt-in"
+    );
+    assert!(discover.listings.is_empty());
+    loader.set_relay_enabled(true);
+    discover.refresh_selected(loader.directory_fetcher(), loader.relay_enabled());
+    wait(|| {
+        discover.poll();
+        discover.busy.is_none()
+    });
+    assert!(discover.error.is_none(), "{:?}", discover.error);
+    assert_eq!(discover.listings.len(), 1);
+    assert_eq!(
+        discover.listings[0].state,
+        yami_discover::SourceState::Fresh
+    );
+    discover.select_website(0);
+    browser
+        .navigate(discover.selected_website.as_ref().unwrap(), &loader)
+        .unwrap();
     page_ready(&mut browser, &loader);
     assert_eq!(
         browser.active().security(),
@@ -350,6 +400,20 @@ fn four_process_outbound_host_dht_browser_render_navigation_and_reconnect() {
     }
     fs::create_dir_all(base.join("site")).unwrap();
     let host = *id(base, "A").id();
+    let directory = yami_discover::Directory::new(
+        "Outbound-only directory",
+        vec![yami_discover::DirectoryEntry::new(
+            "Operator supplied title",
+            "Still untrusted after source refresh",
+            yami_discover::WebsiteAddress::parse(&format!("yami://{host}/home")).unwrap(),
+            Some("Test".into()),
+        )
+        .unwrap()],
+    )
+    .unwrap();
+    directory
+        .save_new(base.join("site/directory.ylang"))
+        .unwrap();
     fs::write(base.join("site/home.ylang"),format!("@page 0.1\n  title NAT homepage\n= Home behind NAT\n:: Links\n  > yami://{host}/about | About\n")).unwrap();
     fs::write(
         base.join("site/about.ylang"),
