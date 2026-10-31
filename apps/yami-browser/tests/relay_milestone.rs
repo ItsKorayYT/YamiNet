@@ -125,18 +125,12 @@ fn client(base: &Path) {
     resolver.set_relay_enabled(true);
     let loader = Loader::with_resolver(Arc::new(|| {}), resolver).unwrap();
     let mut browser = Browser::new();
-    browser.navigate(&address.url(), &loader).unwrap();
-    page_ready(&mut browser, &loader);
-    assert_eq!(
-        browser.active().security(),
-        Some(&Security::Relayed {
-            destination: host,
-            relay
-        })
-    );
-    assert_eq!(browser.active().address, address.url());
     // The native Discover adapter must use this resolver's loopback peers and
-    // honor relay opt-in independently of the already loaded website.
+    // honor relay opt-in. Consume the fixture's initially registered serving
+    // slot before any browser page/asset request. After a tunnel consumes that
+    // slot, re-registration is asynchronous; an immediate one-shot refresh is
+    // correctly allowed to report unavailable during that gap. Navigation
+    // below already exercises the browser's bounded reconnect behavior.
     let mut discover = yami_browser::discover::Discover::new(
         Ok(base.join(format!("discover-C-{}", std::process::id()))),
         Arc::new(|| {}),
@@ -190,6 +184,7 @@ fn client(base: &Path) {
             relay
         })
     );
+    assert_eq!(browser.active().address, address.url());
     let PageState::Ready(page) = &browser.active().state else {
         panic!("{:?}", browser.active().state)
     };
