@@ -1,511 +1,189 @@
-# YamiNet 0.3.1-alpha.1
+<div align="center">
 
-## 0.3.1 stabilization
+# 🌌 YamiNet
 
-[Getting started with actual native-window captures](docs/getting-started-0.3.1.md) ·
-[Local diagnostic logs](docs/diagnostics-0.3.1.md) ·
-[Structured real-network trial runner](docs/network-trials-0.3.1.md) ·
-[Release candidate and rollback gate](docs/release-candidate-0.3.1.md) ·
-[Validation evidence and remaining blockers](docs/validation-0.3.1.md)
+**A different kind of web. Made for people, not platforms.**
 
-This alpha adds native package/installer lifecycle checks, fixes reproduced
-find/address focus and settings-save/reset bugs, and provides bounded opt-in
-local diagnostics. Native Windows MSVC CI and Linux virtual-X11 smoke tests are
-separate from physical keyboard/IME and VPS/home/independent-network validation.
-No release or tag is published automatically.
+Explore independent websites. Share your own corner of the internet. Stay in control.
 
-## Desktop alpha 0.3
+**Experimental alpha** · **Windows & Linux** · **[Free and open source](LICENSE)**
 
-Experimental native Rust desktop packages are built for Windows and Linux.
-See [installing and first launch](docs/installation.md),
-[release builds](docs/releases.md), [alpha checklist](docs/alpha-checklist.md)
-and [validation evidence](docs/validation-0.3.md).
-Packages include the browser, node, relay, fonts, examples and documentation;
-end users do not need Rust. Releases are unsigned and require explicit maintainer
-publication; CI artifacts are available only after successful jobs.
+[Get started](#-get-started) · [Explore YamiNet](#-explore-yaminet) · [Make a website](#-create-your-own-website) · [How it works](#-what-is-yaminet) · [Help](#-need-help)
 
-The alpha adds local-only onboarding/preferences, Unicode find-in-page, keyboard
-focus/navigation, bounded identity-scoped PNG decode reuse, guided offline
-`yami-node site setup` and explicit authenticated document/PNG probes. Existing
-YLang/YSL 0.1 and 0.2, YNP, DHT, TLS and relay architecture is retained.
-No telemetry, accounts, mandatory central peer, public autorun or firewall changes.
-This is not anonymous, production-secure or suitable for sensitive activity.
+<img src="docs/images/getting-started-031-browser.png" alt="Yami Browser rendering an image-heavy YLang page in a native desktop window with tabs and a sidebar" width="850">
 
+*Yami Browser renders YLang pages and images in its own native window—no Chromium, WebView or web engine.*
 
-An experimental Rust platform for an independent document web. YLang is content,
-YSL is presentation, YNP carries documents, and Yami Render performs native
-layout and software rasterization. Yami Browser now includes a native desktop
-interface with antialiased typography, tabs and an aqua glass theme.
+</div>
 
-**Not secure for sensitive use.** TLS supports numeric loopback, private LAN
-and public IPv4 endpoints, with exact Ed25519 identity pinning. Listening is
-loopback-only by default; `--lan` and the separate `--public` mode require an
-explicit opt-in. Public support is experimental and not security-reviewed.
-Privacy is a design goal, not a
-security guarantee. Nodes can have persistent Ed25519 identities that sign
-site metadata. An experimental TLS 1.3 transport encrypts YNP and
-authenticates a node against a node ID the client trusts in advance; the
-browser uses it for `ynps://` and native `yami://` addresses. The original
-`ynp://` transport remains plaintext, unauthenticated and loopback-only. There is no anonymity.
+---
 
-## Native websites in 0.2
+## ✨ What is YamiNet?
 
-YLang/YSL 0.2 add rich text, nested lists, sections/cards, responsive rows,
-modern typography and native PNGs. Original 0.1 documents keep their existing
-syntax and behavior. PNGs use an explicitly versioned YNP extension and the
-parent's exact authenticated node identity over TLS, directly or through a
-relay. Missing images retain alternative text; resource loading runs off the UI
-thread with strict budgets and cancellation. There are no third-party assets.
+YamiNet is an **experimental alternative web** where people can create and visit websites hosted by independent computers instead of relying on one big platform.
 
-Create and preview a complete site with the existing node:
+You browse it with **Yami Browser**, a desktop application built specifically for YamiNet. Websites have their own `yami://` addresses, and you can discover pages shared by other people.
 
-```sh
-cargo run -p yami-node -- site new my-site portfolio
-cargo run -p yami-node -- site check my-site
-cargo run -p yami-node -- site preview my-site --identity ./my-identity
-# Open the full ynps:// URL printed by preview in Yami Browser.
-cargo run -p yami-node -- site build my-site published-site
+| **Discover** | **Browse** | **Keep your favorites** |
+| :--- | :--- | :--- |
+| Explore saved website directories and search downloaded page indexes. | Read native pages with images, links and multiple tabs. | Save bookmarks and choose whether optional local history is kept—off by default. |
+
+**No YamiNet account required. No built-in ads or telemetry.** You choose when to connect to other computers. YamiNet is still young, so finding websites currently takes a little setup—see below.
+
+> [!IMPORTANT]
+> **YamiNet is an early experiment, not a secure anonymity network.** The apps are unsigned, public-network testing is incomplete, and connections can reveal network metadata. Don't use it for sensitive activity. [Read the security notes](SECURITY.md).
+
+## 🚀 Get started
+
+You don't need to know Rust or install programming tools to use a **prebuilt desktop package**.
+
+### 1. Get Yami Browser
+
+**There is no published GitHub release yet.** For testing, open the [build history](https://github.com/ItsKorayYT/YamiNet/actions/workflows/alpha.yml?query=branch%3Amain), choose the latest **successful** run from `main`, and scroll to **Artifacts** at the bottom of the run page. GitHub may ask you to sign in, and artifacts can expire. These are experimental CI builds, not certified releases.
+
+On GitHub, each artifact downloads as a ZIP, even on Linux.
+
+| Windows 10/11 (64-bit) | Linux (64-bit, X11/XWayland) |
+| :--- | :--- |
+| Download **YamiNet-alpha-Windows** and extract the artifact ZIP.<br><br>Then either run the included per-user `YamiNet-<version>-windows-x86_64-setup.exe` installer, or extract the portable `YamiNet-<version>-windows-x86_64.zip` and open **Launch Browser.cmd** (or `yami-browser.exe`). | Download **YamiNet-alpha-Linux** and extract the artifact ZIP.<br><br>Then extract `YamiNet-<version>-linux-x86_64.tar.gz`, keep the folder together, and run `./launch-browser.sh` from it. |
+
+Each package archive and installer has a matching `.sha256` file. Compare the hash before running anything; the [installation guide](docs/installation.md) has copy-paste commands. The packages are **not code-signed**. For OS dependencies and data locations, see the same guide.
+
+### 2. Open Yami Browser
+
+On first launch, leave **local only** selected (the default), read the short explanation, then choose **Save and start browsing**. This lets you explore the built-in **Welcome** and **About** pages without contacting other computers. You can reopen the explanation with **Settings & first launch**.
+
+![The Yami Browser first-launch panel set to local only](docs/images/getting-started-031-onboarding.png)
+
+*The first-launch panel defaults to local only, so you can look around without contacting other computers. Captured from the project's native Linux window tests.*
+
+### 3. Try a few things
+
+| Action | Shortcut |
+| :--- | :--- |
+| Open a new tab | `Ctrl + T` |
+| Focus the address bar | `Ctrl + L` |
+| Find a word on a page | `Ctrl + F` |
+| Bookmark the current page | `Ctrl + D` |
+| Go back / forward | `Alt + Left` / `Alt + Right` |
+
+You can find more controls in the [browser guide](docs/desktop-browser.md).
+
+## 🧭 Explore YamiNet
+
+YamiNet sites don't use ordinary `.com` addresses. A typical address looks like this:
+
+```text
+yami://yn1-…/home
 ```
 
-Templates: `personal`, `blog`, `portfolio`.
-[Complete example site](sites/showcase) · [Publishing and Windows walkthrough](docs/publishing-sites.md) ·
-[0.2 grammar, properties, asset protocol and exact limits](docs/websites-0.2.md).
-Publish the validated directory with the same existing direct/relay hosting
-commands and persistent identity/state. Preview never exposes a public listener.
+The long identifier tells the browser **which YamiNet site to connect to**, and the final part (`/home`) is the page. The `…` is a placeholder for the site's full public node identity.
 
-The native browser adds a small **Bookmarks & history** panel: custom bookmark
-titles/folders, saved Home, and optional bounded history (off by default).
-Identity addresses stay canonical when bookmarked; saved names confer no trust.
-Every new connection is still authenticated. Local history can be disabled and
-cleared; its on-disk privacy limits are documented in [browser controls](docs/desktop-browser.md).
+**To visit someone else's site today:**
 
-## Reliability and deployment milestone
+1. Get the site's complete `yami://` address and a trusted *bootstrap peer* pin from the site's operator or another trusted source. A bootstrap pin usually looks like `full-node-ID@IPv4:port`. A bootstrap peer helps your browser locate signed records; it is not proof that a site is safe.
+2. Open **Settings & first launch**, enable network browsing, and add the pin with **Add bootstrap peer** in the sidebar.
+3. Paste the website's `yami://` address into the address bar and press Enter.
 
-Native lookups now share bounded in-flight discovery across tabs and remember
-failing endpoints with exponential jittered cooldowns. Direct endpoints remain
-preferred when eligible; configured relay alternatives recover under outages.
-Same-owner browser transfers use deadline-aware permits for the relay's single
-host slot, while every new TLS connection still proves the exact destination.
-The thirty-second native navigation deadline includes queueing and retries.
+You can also open a direct `ynps://` link when a site operator gives you one. Always confirm shared identities through a trusted channel. YamiNet does not ship a verified public directory or connect to public peers automatically.
 
-DHT health maintenance republishes to recovering peers before the next global
-renewal. Persistent history reserves capacity for the local identity and explicit
-bootstrap pins without evicting rollback protection. Owner churn/Sybil attacks
-can still fill the finite untrusted partition; this is not a complete DHT or DoS
-defense. Relay health/status diagnostics report local samples and errors, never
-replace end-to-end authentication. Public control, STORE and identity-file bounds
-have additional regression coverage; this developer review is not an audit.
+### Find sites with Discover
 
-Use validated [node/relay/browser configuration files](docs/configuration.md),
-[example profiles and optional systemd service](deploy), and the Rust diagnostic
-command `yami-node diagnose --config FILE [--connect]`. Existing CLI commands
-remain compatible. Configured startup loads existing identities; public listeners
-require explicit opt-in. [The seven-process resilience scenario](docs/relay-integration-testing.md)
-covers independent relays/DHT peers, concurrent tabs, endpoint changes and restart.
+Discover is an early preview feature. Choose **Discover** in the sidebar:
 
-[Direct NAT traversal research](docs/nat-traversal.md) evaluates UDP discovery,
-punching and a future authenticated QUIC transport. Only tested socket-free
-mutual-consent/replay prerequisites are delivered: **no direct NAT traversal or
-QUIC document transport is implemented or enabled**. TCP/TLS relays remain the
-available NAT path. The [executable physical-network plan](docs/cross-network-validation.md)
-and [blank report](docs/validation-report-template.md) distinguish automated
-loopback/stream impairment results from still-unverified VPS/home-router,
-Windows-runtime, physical packet-loss and cross-network operation.
+| Mode | What it does |
+| :--- | :--- |
+| **Websites** | Search website directory listings you've already saved. Under **Directories**, add a subscription; nothing is fetched until you choose **Refresh selected directory**. |
+| **Pages** | Search page indexes you've downloaded. Under **Search providers**, add an independent provider; refresh is always explicit. |
 
-## Run
+Search queries run on your computer, and there is no central search server. Refreshing a source loads its data; your search terms stay local. Adding a source does not download anything until you refresh it.
 
-Install Rust 1.90.0 with rustfmt and Clippy (the toolchain is pinned). From this
-checkout:
+**Results are untrusted hints, not endorsements.** Opening a result still verifies the destination website's identity.
+
+[Learn more about Discover](docs/discover.md) · [Full-text search guide](docs/fulltext-search.md)
+
+## 🎨 Create your own website
+
+You can build a personal page, a blog or a portfolio with YamiNet's included site tools—**no HTML or JavaScript required**.
+
+1. Start from a template: **personal**, **blog**, or **portfolio**.
+2. Edit the page text and styling files.
+3. Preview it locally before deciding whether to share it.
+4. When you're ready, publish it using your own YamiNet node.
+
+Start with the [step-by-step website publishing guide](docs/publishing-sites.md). It covers creating a site, editing its files, previewing, identities and hosting.
+
+<details>
+<summary><strong>Already comfortable with a terminal? Try creating a site.</strong></summary>
+
+Open a terminal in the folder where you want to keep your site. Run the included `yami-node` program (on Windows, `yami-node.exe`; it sits beside the browser in the package). If it is not on your PATH, use its full file path:
+
+```sh
+yami-node site new my-site personal
+yami-node site check my-site
+```
+
+To preview and publish, follow the [full guide](docs/publishing-sites.md); it explains how to keep your private identity outside the public website folder.
+
+</details>
+
+## 💜 Why build another web?
+
+The regular web is powerful, but getting online often means depending on a handful of platforms. YamiNet explores another approach:
+
+- **Independent publishing** — people can host their own websites.
+- **A dedicated browser** — content is rendered by a native application, not a conventional web engine.
+- **User-controlled connections** — no automatic connection to public networks when you open the app.
+- **Local search** — search downloaded website directories and page indexes without sending queries to a search server.
+- **Room to grow** — richer interactive experiences and stronger privacy protections are future goals, **not current features or guarantees**.
+
+YamiNet is built in Rust with its own document and styling languages, **YLang** and **YSL**. You don't have to learn those technologies to explore the browser.
+
+## ❓ Need help?
+
+| I want to… | Start here |
+| :--- | :--- |
+| Install or launch the browser | [Installation guide](docs/installation.md) |
+| Follow a walkthrough with screenshots | [First steps](docs/getting-started-0.3.1.md) |
+| Understand how Discover works | [Website discovery](docs/discover.md) |
+| Search downloaded website pages | [Full-text search](docs/fulltext-search.md) |
+| Make and share my own website | [Create and publish websites](docs/publishing-sites.md) |
+| Understand privacy and limitations | [Security notes](SECURITY.md) |
+| Report a problem or suggest an idea | [GitHub issues](https://github.com/ItsKorayYT/YamiNet/issues) |
+
+<details>
+<summary><strong>🛠️ Developer documentation and building from source</strong></summary>
+
+YamiNet is a Rust workspace pinned to Rust 1.90 (see `rust-toolchain.toml`) with rustfmt and Clippy. Install the toolchain first.
 
 ```sh
 cargo run -p yami-browser
-cargo run -p yami-browser -- examples/welcome.ylang --style examples/default.ysl --ppm /tmp/yami.ppm
-cargo run -p yami-node -- demo
-cargo run -p yami-node -- serve-dir 127.0.0.1:7301 sites/alice
-```
-
-The default command opens the native desktop browser. Its new-tab page has
-local document shortcuts and sample-node bookmarks; the address bar accepts
-`yami://` identity addresses, `ynps://` addresses and localhost `ynp://` URLs.
-Tabs, Back, Forward, Reload, document links and scrolling operate on actual YLang documents. Network work runs in bounded
-background workers, with stale-response protection.
-
-See [Desktop browser and Windows launch instructions](docs/desktop-browser.md)
-for installation, controls, native rendering details and platform limitations.
-The terminal and PPM paths remain available: use `--terminal` for the built-in
-sample, or retain the original positional file/URL commands. `--desktop` opens
-a supplied YNP URL in the window. `--ppm` writes the original P6 bitmap output.
-No HTML, CSS, JavaScript, Chromium, WebView or web rendering engine is used.
-The viewer does not execute content or automatically follow links or download fonts.
-The native browser loads only bounded, same-identity PNG references on authenticated pages. A fetched YNP document includes its style as inert text in
-the same frame; the terminal viewer supports a local `--style` override.
-
-`demo` starts two loopback nodes on OS-assigned ports. Each node serves one
-sample document and fetches the other over YNP. It compares the received
-source and style with the expected documents, prints the result and exits.
-The links inside these unmodified samples point at the persistent demo ports
-below; the ephemeral demo does not rewrite documents or follow links.
-
-To run two persistent sample node processes, use separate terminals:
-
-```sh
-cargo run -p yami-node -- serve 127.0.0.1:7301 welcome examples/welcome.ylang examples/default.ysl
-```
-
-```sh
-cargo run -p yami-node -- serve 127.0.0.1:7302 about examples/about.ylang examples/default.ysl
-```
-
-Then request either document, and explicitly open a displayed link by giving
-its YNP URL to the viewer:
-
-```sh
-cargo run -p yami-browser -- --desktop ynp://127.0.0.1:7301/welcome
-cargo run -p yami-browser -- ynp://127.0.0.1:7302/about --ppm /tmp/yami-about.ppm
-cargo run -p yami-node -- fetch 127.0.0.1:7302 about
-```
-
-Stop persistent nodes with Ctrl-C. All application network messages use YNP,
-including missing-document replies. There is no HTTP endpoint or fallback.
-The single-document `serve` command keeps one in-memory document and handles
-connections sequentially; `serve-dir` (below) serves a whole site concurrently.
-Malformed connections are rejected without terminating the process.
-
-## Multi-page sites
-
-A node can serve a whole site from a directory: each `<key>.ylang` file is the
-page `ynp://<address>/<key>`, and `default.ysl` is the site's shared style.
-Files are read on each request, so edits appear on Reload without restarting
-the node. A fixed worker pool (default 4) serves concurrent requests. Keys never
-become arbitrary paths; traversal, symlink escapes, case aliases and device
-names are refused. Two linked sample sites are included; in two terminals run:
-
-```sh
-cargo run -p yami-node -- serve-dir 127.0.0.1:7301 sites/alice
-```
-
-```sh
-cargo run -p yami-node -- serve-dir 127.0.0.1:7302 sites/bob
-```
-
-Then open `ynp://127.0.0.1:7301/home` in the browser and follow the links
-between both nodes:
-
-```sh
-cargo run -p yami-browser -- --desktop ynp://127.0.0.1:7301/home
-```
-
-See [Creating and publishing a YamiNet site](docs/publishing-sites.md) for the
-directory layout, linking, updating and exactly what a node will serve.
-
-## Node identities
-
-Each node can have a persistent Ed25519 identity. Its node ID, such as
-`yn1-vitzizw2y2vq...`, is derived from the public key and stays the same across
-restarts. A node can sign its site so others can check that the pages are
-exactly what that node published:
-
-```sh
-cargo run -p yami-node -- identity new
-cargo run -p yami-node -- identity sign-site sites/alice
-cargo run -p yami-node -- identity verify-site sites/alice <node-id>
-cargo run -p yami-node -- serve-dir 127.0.0.1:7301 sites/alice --identity <identity-directory>
-```
-
-Signatures only attribute content to a key. They do not encrypt or anonymize
-anything, and fetched documents are not yet verified by the browser. The
-secret key stays in a per-user directory and is never printed or sent. See the
-[identity format and security limitations](docs/specs/v0.1/identity.md),
-including the Windows file-permission limitation.
-
-## Authenticated, encrypted connections (TLS 1.3)
-
-A node with an identity can serve its site over TLS 1.3 instead of plaintext.
-The node proves its persistent node identity in the handshake, and a client
-connects only to the node ID it was given in the `ynps://` URL:
-
-```sh
-cargo run -p yami-node -- tls-demo ./demo-ids/one ./demo-ids/two
-cargo run -p yami-node -- serve-dir 127.0.0.1:7443 sites/alice --identity ./demo-ids/alice --tls
-cargo run -p yami-node -- fetch ynps://<node-id>@127.0.0.1:7443/home
-```
-
-`tls-demo` runs two nodes with different persistent identities that fetch each
-other's document over TLS, and shows that a client expecting one node refuses
-the other. A `fetch` with the wrong node ID fails without printing anything.
-YNP frames are unchanged inside TLS and there is no plaintext fallback.
-Keep demo identity directories out of commits; they hold secret keys. See the
-[TLS transport, threat model and limitations](docs/specs/v0.1/ynp-tls.md).
-
-### On a private LAN, in Yami Browser
-
-With `--lan`, a TLS node listens on one private IPv4 address of its computer
-(never `0.0.0.0`, never plaintext) and prints its full `ynps://` address:
-
-```sh
-cargo run -p yami-node -- serve-dir 192.168.1.50:7443 sites/alice --identity ./node-identity --tls --lan
-```
-
-On another computer, open the printed `Open in Yami Browser:` address in the
-address field, or:
-
-```sh
-cargo run -p yami-browser -- --desktop ynps://<node-id>@192.168.1.50:7443/home
-```
-
-The browser connects only if the node proves exactly that node ID, then shows
-a padlock, **Verified node · TLS 1.3** and the node ID under the address field.
-Links on the page to the node's own address stay on the same verified node.
-A different node ID fails with `Authentication failed`, and plaintext pages
-are marked **Not encrypted · not verified**. The steps for two Windows
-computers, including the firewall, are in [LAN testing](docs/lan-testing.md);
-that two-machine procedure has not yet been run as part of development.
-
-To find nodes without entering their IP addresses, start the node with
-`--tls --lan --discoverable` (and its `--identity` directory). In the browser,
-click **Find local nodes**, choose your private LAN interface, then click
-**Search selected LAN**. Select a result to inspect its full claimed node ID,
-then **Open homepage (ynps://)** to verify that key over TLS 1.3 and load its
-homepage. Results stay marked untrusted; discovery does not recognize a node's
-owner or add it to saved identities. Sites never open automatically.
-
-Discovery uses one UDP multicast query per search to `239.255.89.78:39817`,
-TTL 1, and unicast responses. It has no periodic announcements. Nodes without
-`--discoverable` never answer. Configure `YAMINET_DISCOVERY_GROUP` and
-`YAMINET_DISCOVERY_PORT` identically on both computers if needed. Discovery
-metadata is visible to LAN observers and provides no anonymity. See
-[Windows discovery/firewall testing](docs/discovery-testing.md) and the
-[versioned discovery protocol](docs/specs/v0.1/lan-discovery.md).
-
-### Known remote nodes and manual bootstrap peers
-
-For a disposable site on a reachable IPv4 endpoint you own:
-
-```text
-yami-node serve-dir <specific-local-IPv4>:7443 <test-site> --identity <key-directory> --tls --public
-yami-node peer add <known-node-id> <known-public-IPv4>:7443
-yami-node peer list
-yami-node peer connect <known-node-id>
-yami-node peer remove <known-node-id>
-```
-
-Replace the placeholders. Public mode binds one specific IPv4 address and
-accepts internet clients with bounded admission and deadlines; it never
-configures forwarding or firewall rules. The node's pages are readable by
-every reachable client. Browser users enter the operator's known
-`ynps://<node-id>@<public-IPv4>:7443/home`; the existing TLS verifier must prove
-that exact key before any page request. Plaintext stays loopback-only.
-
-Peers are manually configured, persistent and initially unverified. Their
-last-attempt status and last successful handshake timestamp are historical;
-every connection authenticates again. Manual peer storage itself adds no automatic peer exchange or
-mandatory central service. Read [internet/VPS testing](docs/internet-testing.md)
-and [peer storage](docs/specs/v0.1/bootstrap-peers.md). Actual separate-network
-connectivity and a remote VPS have not been tested during development.
-
-### Decentralized peer lookup MVP
-
-The separate `yami-dht` crate adds opt-in Kademlia-inspired lookup by full node
-ID over the existing pinned TLS listener. Public DHT servers use
-`serve-dir ... --tls --public --dht`; the isolated simulator uses
-`--tls --dht --dht-local`. Records bind the owner's ID to up to four endpoints,
-expiration and monotonic sequence under its Ed25519 signature. There are no
-mandatory built-in servers, DNS, HTTP, automatic NAT traversal or anonymity.
-
-```text
-yami-node dht bootstrap <known-bootstrap-id> <public-IPv4:port> --dir <state-directory>
-yami-node dht lookup <target-node-id> --dir <state-directory> --identity <identity-directory>
-yami-node dht fetch <target-node-id> home --dir <state-directory> --identity <identity-directory>
-yami-node dht peers --dir <state-directory>
-```
-
-Bootstrap configuration reuses the existing manual peer store. Lookup validates
-signed records and prints unconfirmed `ynps://` locations; fetch resolves the
-ID and then authenticates the actual endpoint before requesting the document.
-The browser also resolves `yami://<full-node-id>/home` directly using this same
-crate, without CLI subprocesses or a browser private key. It keeps that identity
-address visible and pins every document connection to the requested ID. Configure
-ordinary bootstrap peers through the existing `YAMINET_PEER_DIR` / manual peer
-store; public and explicit localhost-test caches remain separate. See
-[native browser addressing and configuration](docs/native-addressing.md). Routing,
-records, frames, timeouts and query counts are bounded. Expired locations are
-ignored while bounded sequence history is retained to reject rollback.
-
-Run `cargo test -p yami-node --test dht -- --nocapture` to reproduce the
-three-process A→B→C publication/lookup/TLS-fetch simulation and wrong-key checks.
-`cargo test -p yami-browser --test native_dht --locked` additionally exercises
-native addressing through the real browser model, workers, navigation and renderer.
-This is loopback validation, **not real internet validation**. Read
-[DHT testing](docs/dht-testing.md) and the
-[versioned protocol/security limits](docs/specs/v0.1/dht.md), including the
-unsolved Sybil/eclipse, cache-filling and routing-metadata risks.
-
-### Automatic DHT maintenance
-
-DHT-serving nodes may opt into `--dht-maintain` alongside `--dht --tls`.
-One background worker renews signed records before expiry, persists increasing
-sequences across restarts, checks a bounded rotation of peers, and retries
-outages with jittered exponential backoff. Learned ordinary peers can carry
-renewals when a bootstrap goes offline. Existing limits and exact-ID TLS remain.
-
-Use `--dht-renew-secs` / `--dht-health-secs` to configure timing,
-`--dht-endpoints-file` for explicit advertised endpoint updates, and
-`yami-node dht status --dir <peer-directory>` for diagnostics (`--local` for
-simulation). Ctrl-C and Unix termination signals stop maintained nodes cleanly.
-Without the extra opt-in, the existing initial publication behavior remains.
-See [operations, bounds and controlled-clock tests](docs/dht-maintenance.md).
-This is experimental loopback-tested maintenance, not a guarantee of internet
-availability, production security or anonymity.
-
-### Relay-aware native browsing
-
-A host behind NAT can publish `yami://<full-node-ID>/home` without an inbound
-listener or home-router port forwarding. It registers outbound with one or two
-explicitly trusted relays and publishes destination-signed routes into the
-existing DHT. The browser tries direct endpoints first, then eligible relays
-when relay fallback is enabled. It pins the relay's key, then independently
-pins the exact destination key over end-to-end TLS 1.3 inside the tunnel.
-The relay cannot decrypt YNP document traffic.
-
-Build once, then use the executables (`.exe` on Windows):
-
-```sh
-yami-relay serve LOCAL_IPV4:17550 --identity RELAY_KEYS --public --advertise PUBLIC_IPV4:17550
-yami-node dht bootstrap DHT_PEER_ID PUBLIC_IPV4:17444 --dir HOST_PEERS
-yami-node host-relay SITE --identity HOST_KEYS --relay RELAY_ID@PUBLIC_IPV4:17550 --dht-dir HOST_PEERS
-yami-browser --bootstrap DHT_PEER_ID@PUBLIC_IPV4:17444 --enable-relays --desktop yami://HOST_ID/home
-```
-
-Replace the uppercase values; create persistent identities first. Public relay
-listening is never the default. Bootstrap peers are ordinary independently
-operated nodes, not a mandatory central directory. **Relay fallback** and
-**Add bootstrap peer** are also in the existing browser sidebar. Verified
-relayed pages show the destination and relay IDs separately. Tabs, history,
-links, reload, scrolling, native rendering and direct `ynps://` remain available.
-
-Follow the complete [VPS, Windows hosting and cross-network testing guide](docs/public-relay.md)
-for DHT peer startup, firewall rules, identity verification and diagnostics.
-The [four-process integration test](docs/relay-integration-testing.md) demonstrates
-outbound registration, signed DHT discovery, browser authentication/rendering,
-navigation and outage recovery on loopback. **Physical cross-network and Windows
-runtime validation remain unverified.** This is experimental, not independently
-security-reviewed, production-secure or anonymous. Application quotas do not
-prevent Internet-scale DoS. The [relay protocol](docs/specs/v0.1/relay.md) specifies
-bounds. Original isolated [relay commands/tests](docs/relay-testing.md) still work.
-
-## Full-text page search (0.4 foundation)
-
-Native **Discover → Pages** searches downloaded YLang page contents locally.
-Independent providers publish bounded inert YLang indexes over existing
-YNP/TLS/DHT and optional signed relays. Queries never leave the device. Provider
-claims remain untrusted; opening a result independently authenticates its actual
-website through normal navigation. Refresh is explicit and cached search works
-without a provider connection.
-
-Use `cargo run -p yami-search -- index SITE --output INDEX`, optionally supplying
-`--identity FULL-ID` for canonical publication addresses. See the
-[full-text guide](docs/fulltext-search.md), [normative publication format](docs/specs/v0.4/fulltext-index.md)
-and [implementation/validation roadmap](docs/fulltext-roadmap.md).
-
-## Workspace
-
-| Package | Responsibility |
-| --- | --- |
-| `ylang` | Bounded document parser, typed AST, byte spans and line/column errors |
-| `ysl` | Bounded original style parser and typed presentation settings |
-| `ynp` | Binary frame codec, strict limits, transport traits, legacy plaintext loopback TCP client/listener |
-| `ynp-tls` | YNP over pinned TLS 1.3, local/public IPv4 clients and separately opted-in LAN/public listeners |
-| `ynp-discovery` | Opt-in IPv4 LAN multicast queries, bounded untrusted advertisements and rate-limited responses |
-| `yami-search` | Bounded YLang full-text indexing, portable provider publications, authenticated index refresh and offline page search |
-| `yami-discover` | Independent website directories, persistent subscriptions and native Discover |
-| `yami-config` | Bounded versioned local profiles, explicit listener/pin policy and read-only relay status |
-| `yami-dht` | Bounded XOR routing, signed expiring peer records, iterative pinned-TLS lookup and persistent sequence history |
-| `yami-render` | Original terminal/bitmap renderer plus rich native layout, PNG decoding and antialiased text |
-| `yami-browser` | Native tabs/navigation, bookmarks, optional local history and bounded authenticated assets |
-| `yami-identity` | Persistent Ed25519 node identities, node IDs, domain-separated metadata signatures |
-| `yami-relay` / `yami-relay-cli` | Explicit local/public reverse relays with signed host registration, opaque bounded tunnels and independently pinned end-to-end TLS |
-| `yami-node` | Validated site templates/check/build/preview, directory-backed documents/PNGs, existing host and identity CLI |
-
-Versioned normative drafts: [YLang 0.2](docs/specs/v0.2/ylang.md),
-[YSL 0.2](docs/specs/v0.2/ysl.md), [YNP PNG extension](docs/specs/v0.2/ynp-assets.md),
-[legacy YLang](docs/specs/v0.1/ylang.md), [legacy YSL](docs/specs/v0.1/ysl.md), [YNP v1 documents](docs/specs/v0.1/ynp.md),
-[node identity](docs/specs/v0.1/identity.md),
-[YNP over TLS](docs/specs/v0.1/ynp-tls.md), [DHT lookup](docs/specs/v0.1/dht.md)
-and [rendering and architecture](docs/specs/v0.1/architecture.md).
-See [SECURITY.md](SECURITY.md) for the experimental trust boundary.
-
-## Validate
-
-[0.2 validation record](docs/validation-0.2.md): 225 automated tests passed;
-eight manual/environment-dependent tests remain ignored. Windows interactive
-runtime and physical cross-network 0.2 validation remain unexecuted.
-
-```sh
 cargo fmt --all -- --check
-cargo clippy --workspace --all-targets -- -D warnings
+cargo clippy --workspace --all-targets --locked -- -D warnings
 cargo test --workspace --locked
 cargo build --workspace --locked
 ```
 
-See the [current desktop validation status](docs/desktop-browser.md#current-cloud-validation-status)
-for tested Linux window interactions and remaining platform checks.
+- [Project architecture and principles](docs/vision.md)
+- [YLang / YSL and website specifications](docs/websites-0.2.md)
+- [Discover and website directory format](docs/discover.md)
+- [Full-text search guide](docs/fulltext-search.md) and [validation](docs/fulltext-validation.md)
+- [Node, network and relay configuration](docs/configuration.md)
+- [Release engineering and packaging](docs/releases.md)
+- [0.3.1 validation and remaining manual tests](docs/validation-0.3.1.md)
 
-The first desktop build downloads native Rust library dependencies. After
-those dependencies have been cached, `--offline` also works.
-The integration tests require permission to bind and connect loopback sockets.
-They use ephemeral ports and include real subprocesses, two-node exchange,
-malformed-client recovery, missing documents, and fetch/parse/style/raster output.
-Site tests cover multi-page serving, live updates, NotFound replies, invalid
-keys, traversal and symlink escapes, concurrent clients, and browser
-navigation across two directory-backed nodes.
-Identity tests cover persistence across restarts, refusal to overwrite or
-silently replace keys, corrupted and mismatched key files, node ID checksums,
-valid signatures, modified content, wrong keys, purpose separation, site
-signing through the CLI, and that secret keys never appear in output.
-TLS tests cover pinned fetches, wrong identities, expired and altered
-certificates, copied certificates, tampering in transit, maximum-size
-documents, no plaintext fallback, failed handshakes, reconnection and restarts,
-and the two-node CLI demonstration. LAN tests bind a real private IPv4 address
-of the test machine (client and node on that one machine) for encrypted
-fetches, wrong identities, refused plaintext and refused addresses, and the
-browser tests navigate verified sites and recover from failed authentication.
-Unit tests cover parser locations and limits, nested ASTs, wrapping and pixels,
-golden wire bytes, all truncated prefixes of representative frames, malformed
-headers and payload lengths, Unicode, size boundaries and response correlation.
+Current release engineering still requires physical-device and independently connected network validation. Automated tests, including simulated or loopback networking, are **not** a substitute.
 
-## MVP limitations
+</details>
 
-The desktop interface is a software-rendered native window with tabs,
-navigation, shaped text and vertical scrolling. Its glass effect is drawn
-inside the window; it does not blur other applications behind it. Linux uses
-X11/XWayland. Windows build instructions are documented separately.
+---
 
-Static PNG images are supported in the native renderer; a full accessibility
-tree and document editing remain out of scope.
-Sites are validated plain directories with native authoring/export tools; there is
-no persistent document cache or upload service. The debugging terminal/PPM backend still counts
-Unicode scalars as fixed-width cells. Its original 5x7 bitmap font maps lowercase
-to uppercase and unsupported characters to a box; this limitation does not
-describe the desktop font renderer. Oversized layouts and bitmaps fail with
-an error rather than allocating without bounds.
+<div align="center">
 
-Multicast discovery is limited to explicitly selected private IPv4 LAN interfaces.
-Distributed lookup is an opt-in experimental MVP with finite routing/cache
-budgets; it is not a complete or production DHT. There is no anonymous routing, production-safe networking,
-UDP hole punching, ICE/STUN, protocol negotiation, multiplexing, compression
-or document cache. Reverse relays provide the explicitly configured NAT path.
-Public IPv4 connectivity is experimental and requires identity/bootstrap pins;
-internet deployment has not been security-reviewed or validated across providers.
-TLS has no revocation or client authentication: anyone who can reach a node
-can read its pages. The plaintext transport has no
-authentication, encryption or replay protection and stays on loopback.
-See the versioned specs before extending them.
+**An independent web starts with people making things.**
 
-## Project vision
+[Explore the code](https://github.com/ItsKorayYT/YamiNet) · [Get started](#-get-started) · [Share an idea](https://github.com/ItsKorayYT/YamiNet/issues)
 
-The [original project vision and roadmap](docs/vision.md) is preserved from the
-initial GitHub README. The workspace, document/style parser, native renderer
-and loopback YNP demo implement its first three milestones. Pinned TLS, signed
-DHT lookup and explicit reverse relays now extend the networking prototype;
-production security and robust global availability remain future work. This MVP uses `.ylang` sample files;
-the original vision used the provisional extension `.yl`.
+Free and open source under [GPL-3.0-only](LICENSE).
+
+</div>
