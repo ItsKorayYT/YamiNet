@@ -1,0 +1,18 @@
+# Independent nested workspace. Keeping it separate from the repository workspace
+# means the language server can be built, tested, formatted and linted without
+# touching the root Cargo.toml/Cargo.lock.
+[workspace]
+members = ["crates/yami-lsp"]
+resolver = "2"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.90"
+license = "GPL-3.0-only"
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
+[workspace.lints.clippy]
+all = "warn"

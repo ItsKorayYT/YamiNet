@@ -1,0 +1,9 @@
+{
+  "name": "yami-lsp",
+  "command": ["/absolute/path/to/yami-lsp"],
+  "args": [],
+  "filetypes": ["ylang", "ysl"],
+  "initializationOptions": {
+    "siteRoot": "/absolute/path/to/website"
+  }
+}
