@@ -45,6 +45,7 @@ impl Smoke {
         match self.phase {
             0 => {
                 self.check(!app.settings_open, "startup-without-settings-popup")?;
+                self.capture(app, "new-tab.png")?;
                 app.act(Action::Settings);
                 app.render().map_err(|error| error.to_string())?;
                 if !self.reopened {
@@ -83,6 +84,7 @@ impl Smoke {
                     matches!(app.browser.active().state, PageState::Ready(_)),
                     "built-in-document",
                 )?;
+                self.capture(app, "welcome.png")?;
                 let _ = app
                     .window
                     .as_ref()
@@ -208,7 +210,7 @@ impl Smoke {
                 app.discover
                     .set_field(yami_browser::discover::Field::Search, "cafe".into());
             }
-            _ => {
+            9 => {
                 if app.discover.pages.busy.is_some() {
                     return Ok(false);
                 }
@@ -228,15 +230,51 @@ impl Smoke {
                         .save_png(self.output.with_file_name("fulltext-smoke.png"))
                         .map_err(|_| "fulltext screenshot save failed")?;
                 }
+                // An unavailable loopback address exercises the real loader,
+                // the error view and its recovery controls without the network.
+                app.discover.open = false;
+                let listener =
+                    std::net::TcpListener::bind("127.0.0.1:0").map_err(|e| e.to_string())?;
+                let address = listener.local_addr().map_err(|e| e.to_string())?;
+                drop(listener);
+                app.browser
+                    .navigate(&format!("ynp://{address}/missing"), &app.loader)?;
+            }
+            10 => {
+                self.check(
+                    matches!(app.browser.active().state, PageState::Error(_)),
+                    "designed-error-state",
+                )?;
+                self.capture(app, "error.png")?;
+                let retry = app.scene.hits.iter().any(|h| h.action == Action::Reload);
+                let start = app
+                    .scene
+                    .hits
+                    .iter()
+                    .any(|h| h.action == Action::Navigate(""));
+                self.check(retry && start, "error-recovery-controls")?;
+                app.act(Action::Navigate(""));
+                self.check(
+                    matches!(app.browser.active().state, PageState::Home),
+                    "error-start-page-recovery",
+                )?;
                 self.write("PASS", app.frames)?;
                 events.exit();
                 return Ok(true);
             }
+            _ => unreachable!("smoke phase"),
         }
         self.last_frame = app.frames;
         self.phase += 1;
         app.redraw();
         Ok(false)
+    }
+    fn capture(&self, app: &Desktop, name: &str) -> Result<(), String> {
+        app.frame
+            .as_ref()
+            .ok_or("missing native frame")?
+            .save_png(self.output.with_file_name(name))
+            .map_err(|_| format!("cannot capture {name}"))
     }
     pub(super) fn write(&self, result: &str, frames: u64) -> Result<(), String> {
         use std::io::Write;

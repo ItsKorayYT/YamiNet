@@ -11,20 +11,24 @@ mod discover;
 pub use discover::discover_rect;
 pub use discover::{discover_page_size, discover_panel};
 
-// Vertical sidebar design color palette
-pub const INK: [u8; 4] = [242, 236, 238, 255]; // Primary text #F2ECEE
-const MUTED: [u8; 4] = [184, 170, 175, 255]; // Muted text #B8AAAF
-const SIDEBAR_BG: [u8; 4] = [33, 27, 29, 255]; // #211B1D
-const MAIN_BG: [u8; 4] = [73, 68, 71, 255]; // #494447
-const PLUM_GLOW: [u8; 4] = [117, 80, 93, 255]; // #75505D
-const HOVER_BG: [u8; 4] = [53, 43, 48, 255]; // #352B30
-const ACTIVE_TAB: [u8; 4] = [70, 57, 64, 255]; // #463940
-const VERIFIED: [u8; 4] = [156, 204, 170, 255]; // Pinned node proved #9CCCAA
-const PLAINTEXT: [u8; 4] = [222, 164, 150, 255]; // No protection #DEA496
+// Shared native palette: charcoal surfaces, plum accents and warm, readable ink.
+pub const INK: [u8; 4] = [242, 236, 238, 255];
+const MUTED: [u8; 4] = [184, 170, 180, 255];
+const SIDEBAR_BG: [u8; 4] = [25, 22, 29, 255];
+const MAIN_BG: [u8; 4] = [32, 28, 37, 255];
+const PLUM_GLOW: [u8; 4] = [117, 80, 110, 255];
+const HOVER_BG: [u8; 4] = [41, 35, 47, 255];
+const ACTIVE_TAB: [u8; 4] = [64, 47, 65, 255];
+const EDGE: [u8; 4] = [66, 55, 73, 255];
+const ACCENT: [u8; 4] = [218, 177, 207, 255];
+const VERIFIED: [u8; 4] = [156, 204, 170, 255];
+const PLAINTEXT: [u8; 4] = [238, 174, 151, 255];
 
-pub const SIDEBAR_WIDTH: f32 = 230.0;
-pub const MARGIN: f32 = 8.0;
-const RADIUS: f32 = 10.0;
+pub const SIDEBAR_WIDTH: f32 = 248.0;
+pub const MARGIN: f32 = 10.0;
+const RADIUS: f32 = 14.0;
+mod pages;
+pub use pages::{error_details_rect, error_page, error_scroll_limit, home};
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Rect {
     pub x: f32,
@@ -497,14 +501,14 @@ pub struct ChromeState<'a> {
     pub focus: Option<&'a Action>,
 }
 
-/// Pinned sites shown as compact tiles under the address field.
+/// Built-in shortcuts and the explicit local demo, never fetched automatically.
 const PINS: [(&str, &str); 3] = [
     ("yami", "local:welcome"),
     ("node", "ynp://127.0.0.1:7301/welcome"),
     ("info", "local:about"),
 ];
 const PAD: f32 = 12.0;
-const ROW: f32 = 30.0;
+const ROW: f32 = 34.0;
 
 /// The content surface: everything right of the sidebar, inset by the window margin.
 pub fn viewport(width: f32, height: f32) -> Rect {
@@ -543,8 +547,17 @@ pub fn paint(c: &mut Canvas<'_>, browser: &Browser, ui: &ChromeState<'_>) -> Sce
     let inner = SIDEBAR_WIDTH - 2.0 * PAD;
 
     // Top row: Yami mark on the left, compact navigation on the right.
-    let top = Rect::new(left, MARGIN + 6.0, inner, 28.0);
+    let top = Rect::new(left, MARGIN + 6.0, inner, 32.0);
     c.icon("yami", top.x + 9.0, top.y + top.h / 2.0, INK);
+    c.text(
+        "Yami",
+        top.x + 25.0,
+        text_y(top, 15.0),
+        65.0,
+        15.0,
+        INK,
+        true,
+    );
     for (i, (action, icon, enabled)) in [
         (Action::Back, "back", browser.active().can_back()),
         (Action::Forward, "forward", browser.active().can_forward()),
@@ -553,18 +566,14 @@ pub fn paint(c: &mut Canvas<'_>, browser: &Browser, ui: &ChromeState<'_>) -> Sce
     .into_iter()
     .enumerate()
     {
-        let r = Rect::new(top.x + top.w - 84.0 + i as f32 * 28.0, top.y, 26.0, 26.0);
+        let r = Rect::new(top.x + top.w - 102.0 + i as f32 * 34.0, top.y, 32.0, 32.0);
         ghost(
             c,
             r,
             false,
             enabled && (hover(r) || ui.focus == Some(&action)),
         );
-        let ink = if enabled {
-            MUTED
-        } else {
-            [MUTED[0], MUTED[1], MUTED[2], 90]
-        };
+        let ink = if enabled { MUTED } else { [86, 76, 91, 255] };
         let ix = if icon == "back" {
             r.x + 10.0
         } else {
@@ -596,9 +605,9 @@ pub fn paint(c: &mut Canvas<'_>, browser: &Browser, ui: &ChromeState<'_>) -> Sce
     }
 
     // Open tabs.
-    let label = Rect::new(left, pins_y + 36.0 + 14.0, inner, 20.0);
+    let label = Rect::new(left, pins_y + 36.0 + 14.0, inner, 26.0);
     c.text(
-        "Tabs",
+        "OPEN TABS",
         label.x + 8.0,
         text_y(label, 11.0),
         inner - 16.0,
@@ -611,17 +620,34 @@ pub fn paint(c: &mut Canvas<'_>, browser: &Browser, ui: &ChromeState<'_>) -> Sce
         c,
         &mut scene,
         ui,
-        Rect::new(label.x + 58.0, label.y, label.w - 58.0, label.h),
+        Rect::new(label.x + 102.0, label.y, label.w - 102.0, label.h),
         "Discover",
         Action::Discover,
         true,
     );
     let mut y = label.y + label.h + 2.0;
-    for (index, tab) in browser.tabs.iter().enumerate() {
+    // Page a crowded tab list around the active tab. Keep full-sized rows and
+    // reserve space for the new-tab button, games and fixed utility group.
+    let visible = (((h - 202.0 - y - 96.0) / (ROW + 4.0)).floor() as usize).max(1);
+    let first = browser.active / visible * visible;
+    let end = (first + visible).min(browser.tabs.len());
+    for (index, tab) in browser.tabs.iter().enumerate().take(end).skip(first) {
         let r = Rect::new(left, y, inner, ROW);
         let active = index == browser.active;
         let focused = ui.focus == Some(&Action::Tab(index));
         ghost(c, r, active, hover(r) || focused);
+        if active {
+            c.round(
+                Rect::new(r.x, r.y + 5.0, 3.0, r.h - 10.0),
+                1.5,
+                ACCENT,
+                ACCENT,
+                None,
+            );
+        }
+        if focused {
+            c.round(r, 7.0, ACTIVE_TAB, ACTIVE_TAB, Some(ACCENT));
+        }
         let dot = if matches!(tab.state, PageState::Loading) {
             [196, 150, 166, 255]
         } else if active {
@@ -637,16 +663,16 @@ pub fn paint(c: &mut Canvas<'_>, browser: &Browser, ui: &ChromeState<'_>) -> Sce
         c.text(
             tab.title(),
             r.x + 26.0,
-            text_y(r, 12.5),
-            r.w - 52.0,
-            12.5,
+            text_y(r, 13.0_f32.min(r.h / 1.5)),
+            r.w - 58.0,
+            13.0_f32.min(r.h / 1.5),
             if active { INK } else { MUTED },
             false,
         );
         scene.add(r, Action::Tab(index));
         // The close control only appears where it is useful, but stays hit-testable
         // so keyboard focus can still reach it.
-        let close = Rect::new(r.x + r.w - 24.0, r.y + 7.0, 16.0, 16.0);
+        let close = Rect::new(r.x + r.w - 28.0, r.y + (r.h - 16.0) / 2.0, 24.0, 16.0);
         let close_focused = ui.focus == Some(&Action::Close(index));
         if hover(close) || close_focused {
             c.round(close, 4.0, HOVER_BG, HOVER_BG, None);
@@ -655,7 +681,30 @@ pub fn paint(c: &mut Canvas<'_>, browser: &Browser, ui: &ChromeState<'_>) -> Sce
             c.icon("close", close.x + 5.0, close.y + 8.0, MUTED);
         }
         scene.add(close, Action::Close(index));
-        y += ROW + 2.0;
+        y += ROW + 4.0;
+    }
+
+    if browser.tabs.len() > visible {
+        let bw = (inner - 8.0) / 2.0;
+        panel_button(
+            c,
+            &mut scene,
+            ui,
+            Rect::new(left, y, bw, 24.0),
+            "Earlier tabs",
+            Action::Tab(first.saturating_sub(1)),
+            first > 0,
+        );
+        panel_button(
+            c,
+            &mut scene,
+            ui,
+            Rect::new(left + bw + 8.0, y, bw, 24.0),
+            "Later tabs",
+            Action::Tab(end),
+            end < browser.tabs.len(),
+        );
+        y += 28.0;
     }
 
     // New tab.
@@ -684,13 +733,14 @@ pub fn paint(c: &mut Canvas<'_>, browser: &Browser, ui: &ChromeState<'_>) -> Sce
         c,
         &mut scene,
         ui,
-        Rect::new(left, y + ROW + 4.0, inner, 26.0),
+        Rect::new(left, y + ROW + 4.0, inner, 30.0),
         "Open local game",
         Action::OpenGame,
         true,
     );
 
-    // Bottom utility: return the current tab to its empty start page.
+    c.line(&[(left, h - 188.0), (left + inner, h - 188.0)], EDGE, 1.0);
+    // Fixed utility group, separate from browsing and tabs.
     let home = Rect::new(left, h - MARGIN - 32.0, 26.0, 26.0);
     ghost(
         c,
@@ -725,7 +775,7 @@ pub fn paint(c: &mut Canvas<'_>, browser: &Browser, ui: &ChromeState<'_>) -> Sce
 /// Explicit relay opt-in beside the existing local-discovery utility.
 pub fn relay_setting(c: &mut Canvas<'_>, scene: &mut Scene, ui: &ChromeState<'_>, enabled: bool) {
     let r = Rect::new(
-        MARGIN + PAD,
+        PAD,
         ui.height - MARGIN - 64.0,
         SIDEBAR_WIDTH - 2.0 * PAD,
         26.0,
@@ -1037,17 +1087,21 @@ pub(crate) fn panel_button(
     };
     c.round(
         rect,
-        5.0,
+        7.0,
         fill,
         fill,
-        (enabled && ui.focus == Some(&action)).then_some(VERIFIED),
+        Some(if enabled && ui.focus == Some(&action) {
+            ACCENT
+        } else {
+            EDGE
+        }),
     );
     c.text(
         label,
         rect.x + 7.0,
-        text_y(rect, 11.0),
+        text_y(rect, 12.0),
         rect.w - 14.0,
-        11.0,
+        12.0,
         if enabled { INK } else { MUTED },
         false,
     );
@@ -1135,7 +1189,13 @@ fn address_field(
     focused: bool,
 ) {
     let fill = if focused { ACTIVE_TAB } else { HOVER_BG };
-    c.round(r, 8.0, fill, fill, focused.then_some([117, 80, 93, 160]));
+    c.round(
+        r,
+        9.0,
+        fill,
+        fill,
+        Some(if focused { ACCENT } else { EDGE }),
+    );
     c.icon("search", r.x + 13.0, r.y + r.h / 2.0 + 1.0, MUTED);
 
     let label = if ui.value.is_empty() {
@@ -1148,13 +1208,14 @@ fn address_field(
             Action::DiscoverField(yami_browser::discover::Field::Address) => {
                 "yami://<full-node-id>/<key>"
             }
-            _ => "Search or Enter URL…",
+            _ if r.h >= 44.0 => "Enter a YamiNet address…",
+            _ => "Enter an address…",
         }
     } else {
         ui.value
     };
-    let size = 12.5;
-    let x = r.x + 26.0;
+    let size = if r.h >= 44.0 { 15.0 } else { 13.0 };
+    let x = r.x + 28.0;
     let y = text_y(r, size);
     let text_width = r.w - 34.0;
 
@@ -1215,43 +1276,6 @@ fn address_field(
         c.line(&[(cx, r.y + 8.0), (cx, r.y + r.h - 8.0)], INK, 1.2);
     }
     scene.add(r, action);
-}
-
-/// The new-tab page: an intentionally empty, muted gradient surface.
-pub fn home(c: &mut Canvas<'_>, _scene: &mut Scene, ui: &ChromeState<'_>) {
-    let area = viewport(ui.width, ui.height);
-    // Base: smoky purple-charcoal at the top left settling into warm grey.
-    if let Some(shader) = LinearGradient::new(
-        Point::from_xy(area.x, area.y),
-        Point::from_xy(area.x + area.w, area.y + area.h),
-        vec![
-            GradientStop::new(0.0, color([62, 52, 57, 255])),
-            GradientStop::new(0.55, color(MAIN_BG)),
-            GradientStop::new(1.0, color([66, 63, 65, 255])),
-        ],
-        SpreadMode::Pad,
-        Transform::identity(),
-    ) {
-        c.fill_shader(area, RADIUS, shader);
-    }
-    // Two diffuse glows: dusty rose low-left, plum toward the centre.
-    let reach = area.w.max(area.h);
-    c.glow(
-        area,
-        RADIUS,
-        area.x + area.w * 0.32,
-        area.y + area.h * 0.62,
-        reach * 0.42,
-        [150, 98, 114, 110],
-    );
-    c.glow(
-        area,
-        RADIUS,
-        area.x + area.w * 0.55,
-        area.y + area.h * 0.40,
-        reach * 0.38,
-        [PLUM_GLOW[0], PLUM_GLOW[1], PLUM_GLOW[2], 70],
-    );
 }
 
 /// Neutral surface under loading and error states; YLang documents paint their own paper.
@@ -1494,7 +1518,12 @@ mod tests {
     use super::*;
     #[test]
     fn sidebar_layout_hit_areas_are_within_bounds() {
-        for (width, height, scale) in [(1440, 900, 1.0), (1920, 1080, 1.0), (2880, 1800, 2.0)] {
+        for (width, height, scale) in [
+            (900, 600, 1.0),
+            (1440, 900, 1.0),
+            (1920, 1080, 1.0),
+            (1800, 1200, 2.0),
+        ] {
             let mut pix = Pixmap::new(width, height).unwrap();
             let mut text = TextEngine::new();
             let browser = Browser::new();
@@ -1511,7 +1540,7 @@ mod tests {
             };
             let mut c = Canvas::new(&mut pix, &mut text, scale);
             let mut scene = paint(&mut c, &browser, &ui);
-            home(&mut c, &mut scene, &ui);
+            home(&mut c, &mut scene, &ui, &browser);
             for hit in &scene.hits {
                 assert!(
                     hit.rect.x >= 0.0

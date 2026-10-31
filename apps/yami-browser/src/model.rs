@@ -848,8 +848,8 @@ fn load_page(location: &Location) -> Result<Page, String> {
     let (source, style, security) = match location {
         Location::Home => return Err("The start page does not require document loading.".into()),
         Location::Welcome => (
-            include_str!("../../../examples/welcome.ylang").to_string(),
-            include_str!("../../../examples/default.ysl").to_string(),
+            include_str!("../assets/welcome.ylang").to_string(),
+            include_str!("../assets/welcome.ysl").to_string(),
             Security::BuiltIn,
         ),
         Location::About => (

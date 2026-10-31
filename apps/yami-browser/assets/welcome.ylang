@@ -1,0 +1,23 @@
+@page 0.2
+  title Welcome to YamiNet
+  language en
+= Welcome to YamiNet
+A small, independent document web. Explore at your own pace.
+
+:: row Start exploring
+  :: card 01 / Find your way
+    Open [strong: Discover] in the sidebar to explore saved listings and search cached pages. Add a directory when you are ready.
+  :: card 02 / Open a place
+    Paste a [code: yami://] address into the address field. A node's full identity tells the browser who you want to reach.
+:: row Make it yours
+  :: card 03 / Keep what matters
+    Press [strong: Ctrl+D] on an open page to save a bookmark. Your library and optional history stay on this device.
+  :: card 04 / Start locally
+    Built-in pages work offline. Use [strong: Find local nodes] to look for nearby hosts, or open a local game from New Tab.
+:: card A web with fewer distractions
+  Pages use YLang for content and YSL for presentation. No page scripts, third-party assets or tracking. Network browsing is controlled in Settings; relay fallback is optional.
+  YamiNet is experimental and is not anonymous. Do not use it for sensitive information.
+:: Try the local demo
+  If the example nodes are running on this device, follow a native document link:
+  > ynp://127.0.0.1:7301/welcome | Open the first example node →
+  > ynp://127.0.0.1:7302/about | Read about the second node →
