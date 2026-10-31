@@ -44,6 +44,9 @@ impl Smoke {
         }
         match self.phase {
             0 => {
+                self.check(!app.settings_open, "startup-without-settings-popup")?;
+                app.act(Action::Settings);
+                app.render().map_err(|error| error.to_string())?;
                 if !self.reopened {
                     if let Some(frame) = &app.frame {
                         frame

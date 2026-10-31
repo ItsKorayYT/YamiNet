@@ -8,9 +8,9 @@ See [installation](installation.md) for OS dependencies and data locations.
 1. Windows: extract the ZIP or run the per-user installer; use **Launch Browser**.
    Linux: extract the bundle, run `./launch-browser.sh`; optionally run
    `./install-desktop.sh`. No Cargo is needed at runtime.
-2. Leave **local only** selected for a first look. Read the identity/bootstrap/
-   relay explanation, then select **Save and start browsing**. Optional history
-   is disabled. Reopen the explanation through **Settings & first launch**.
+2. The browser opens directly without a welcome popup. **Local only** is enabled
+   by default, and optional history is disabled. Open **Settings** in the sidebar
+   to change browsing preferences.
 3. Open the built-in Welcome/About pages. For a bundled rich example, from the
    package run `yami-node site preview sites/personal --identity PRIVATE-DIRECTORY`
    (PowerShell: `.\yami-node.exe ...`). Keep that directory outside the package.
@@ -39,7 +39,7 @@ See [installation](installation.md) for OS dependencies and data locations.
 7. Close and reopen the browser. Use **Bookmarks & history** to reopen the saved
    site. No remote tabs or search terms are restored automatically on startup.
    If the library is locked, close the other browser instance. Invalid settings
-   are preserved and reported. A failed first-run save keeps the dialog visible.
+   are preserved and reported. A failed settings save keeps the settings panel visible.
 
 To browse saved website directories, choose **Discover websites**. Search under
 **Websites · offline search**; queries stay local. In **Directory subscriptions**,
@@ -49,8 +49,6 @@ or restarting never fetches it. Cached listings survive a failed refresh. Every
 listing remains untrusted: **Open selected website · verify identity** uses normal
 TLS-authenticated navigation. See the [Discover guide](desktop-browser.md#discover-websites-and-directory-subscriptions)
 for provenance, local-only behavior, relay opt-in and sharing a CLI store.
-
-![First-run explanation](images/getting-started-031-onboarding.png)
 
 ![Native browser rendering image-heavy test content](images/getting-started-031-browser.png)
 

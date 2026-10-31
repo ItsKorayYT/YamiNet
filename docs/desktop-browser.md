@@ -47,7 +47,7 @@ refreshed. Select a row for **Refresh selected directory** or **Remove selected*
 Removal deletes its local cached contribution, without deleting the remote
 directory or other sources.
 
-Remote refresh requires network browsing in **Settings & first launch**.
+Remote refresh requires network browsing in **Settings**.
 Local-only mode blocks new remote refreshes; offline search and local-file
 refreshes remain available. Refresh reuses the browser's network policy and
 bootstrap pins, signed DHT lookup and TLS pinned to the directory's exact
@@ -375,8 +375,8 @@ See [Windows outbound-only hosting and public testing](public-relay.md).
 
 For installation without Rust, first launch, data locations and upgrades, see
 [installation.md](installation.md). The UI retains its existing native design.
-Settings provides local-only mode, explicit network browsing, relay preferences,
-reset and reopening onboarding. Config/bootstrap management remains local.
+Settings provides local-only mode, explicit network browsing, relay preferences
+and preference reset. It opens only from the sidebar. Config/bootstrap management remains local.
 
 Ctrl+L focuses/selects the address; Ctrl+T opens a tab; Ctrl+W closes it;
 Ctrl+R/F5 reload; Alt+Left/Right navigate; Ctrl+Tab/Shift+Ctrl+Tab switch tabs;

@@ -51,11 +51,7 @@ Each package archive and installer has a matching `.sha256` file. Compare the ha
 
 ### 2. Open Yami Browser
 
-On first launch, leave **local only** selected (the default), read the short explanation, then choose **Save and start browsing**. This lets you explore the built-in **Welcome** and **About** pages without contacting other computers. You can reopen the explanation with **Settings & first launch**.
-
-![The Yami Browser first-launch panel set to local only](docs/images/getting-started-031-onboarding.png)
-
-*The first-launch panel defaults to local only, so you can look around without contacting other computers. Captured from the project's native Linux window tests.*
+The browser opens directly without a welcome popup. **Local only** is enabled by default, so you can explore the built-in **Welcome** and **About** pages without contacting other computers. Open **Settings** in the sidebar to change browsing preferences.
 
 ### 3. Try a few things
 
@@ -82,7 +78,7 @@ The long identifier tells the browser **which YamiNet site to connect to**, and 
 **To visit someone else's site today:**
 
 1. Get the site's complete `yami://` address and a trusted *bootstrap peer* pin from the site's operator or another trusted source. A bootstrap pin usually looks like `full-node-ID@IPv4:port`. A bootstrap peer helps your browser locate signed records; it is not proof that a site is safe.
-2. Open **Settings & first launch**, enable network browsing, and add the pin with **Add bootstrap peer** in the sidebar.
+2. Open **Settings**, enable network browsing, and add the pin with **Add bootstrap peer** in the sidebar.
 3. Paste the website's `yami://` address into the address bar and press Enter.
 
 You can also open a direct `ynps://` link when a site operator gives you one. Always confirm shared identities through a trusted channel. YamiNet does not ship a verified public directory or connect to public peers automatically.

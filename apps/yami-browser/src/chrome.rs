@@ -768,15 +768,7 @@ pub fn relay_setting(c: &mut Canvas<'_>, scene: &mut Scene, ui: &ChromeState<'_>
         true,
     );
     let r = Rect::new(r.x, r.y - 28.0, r.w, r.h);
-    panel_button(
-        c,
-        scene,
-        ui,
-        r,
-        "Settings & first launch",
-        Action::Settings,
-        true,
-    );
+    panel_button(c, scene, ui, r, "Settings", Action::Settings, true);
 }
 
 pub fn settings_panel(
@@ -790,50 +782,19 @@ pub fn settings_panel(
         SIDEBAR_WIDTH + 24.0,
         32.0,
         (ui.width - SIDEBAR_WIDTH - 48.0).min(750.0),
-        530.0,
+        275.0,
     );
     c.round(r, 10.0, SIDEBAR_BG, SIDEBAR_BG, Some(MUTED));
     // Modal hit scene prevents clicks and Tab traversal into covered controls.
     scene.hits.clear();
     scene.add(r, Action::DiscoveryPanel);
     let x = r.x + 20.0;
-    c.text(
-        "Welcome to YamiNet — experimental desktop alpha",
-        x,
-        r.y + 16.0,
-        r.w - 40.0,
-        17.0,
-        INK,
-        true,
-    );
-    let lines = [
-        "Browse static YLang websites shared by independent nodes.",
-        "A yami:// address names a cryptographic node identity and page.",
-        "TLS proves possession of that identity's private key; it does not prove safety.",
-        "Compare full identities through a trusted channel before adding peers.",
-        "A bootstrap peer helps locate signed records. No peers are bundled.",
-        "Relay fallback uses a configured route; the destination still proves its identity.",
-        "YamiNet is not anonymous or production-secure. Avoid sensitive activity.",
-        "No accounts, telemetry or automatic discovery. History defaults to off.",
-        "Keys, bookmarks and network state stay outside the application directory.",
-        "Add bootstrap: paste a trusted full node-ID@IPv4:port in the sidebar.",
-    ];
-    for (i, line) in lines.iter().enumerate() {
-        c.text(
-            line,
-            x,
-            r.y + 57.0 + i as f32 * 24.0,
-            r.w - 40.0,
-            12.0,
-            INK,
-            false,
-        );
-    }
+    c.text("Settings", x, r.y + 16.0, r.w - 40.0, 17.0, INK, true);
     panel_button(
         c,
         scene,
         ui,
-        Rect::new(x, r.y + 310.0, r.w - 40.0, 30.0),
+        Rect::new(x, r.y + 55.0, r.w - 40.0, 30.0),
         if settings.local_only {
             "Mode: local only — click to enable network browsing"
         } else {
@@ -846,7 +807,7 @@ pub fn settings_panel(
         c,
         scene,
         ui,
-        Rect::new(x, r.y + 350.0, r.w - 40.0, 30.0),
+        Rect::new(x, r.y + 95.0, r.w - 40.0, 30.0),
         if settings.relays {
             "Relay fallback: on"
         } else {
@@ -859,7 +820,7 @@ pub fn settings_panel(
         c,
         scene,
         ui,
-        Rect::new(x, r.y + 390.0, r.w - 40.0, 30.0),
+        Rect::new(x, r.y + 135.0, r.w - 40.0, 30.0),
         "Reset preferences and optional history (retain bookmarks and keys)",
         Action::ResetSettings,
         true,
@@ -868,13 +829,13 @@ pub fn settings_panel(
         c,
         scene,
         ui,
-        Rect::new(x, r.y + 435.0, r.w - 40.0, 32.0),
-        "Save and start browsing",
+        Rect::new(x, r.y + 180.0, r.w - 40.0, 32.0),
+        "Save and close",
         Action::FinishSetup,
         true,
     );
     if let Some(error) = error {
-        c.text(error, x, r.y + 480.0, r.w - 40.0, 12.0, PLAINTEXT, false);
+        c.text(error, x, r.y + 225.0, r.w - 40.0, 12.0, PLAINTEXT, false);
     }
 }
 

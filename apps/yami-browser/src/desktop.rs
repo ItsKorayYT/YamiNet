@@ -56,13 +56,11 @@ pub fn run(
     {
         Ok(library) => {
             app.settings = library.settings();
-            app.settings_open = !app.settings.onboarded;
             app.browser.library = Some(library);
         }
         Err(error) => {
             eprintln!("Browser library unavailable: {error}");
             app.browser.library_error = Some(error.to_string());
-            app.settings_open = true;
         }
     }
     if explicit_network {
