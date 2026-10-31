@@ -1,0 +1,12 @@
+# TEMPLATE ONLY. Replace every placeholder before use.
+# Website host behind a router: outbound connections only, no inbound listener.
+yaminet-config 1
+role node
+network public
+identity /var/lib/yaminet/testnet/host/identity
+state /var/lib/yaminet/testnet/host/state
+site /var/lib/yaminet/testnet/host/site
+relay RELAY_ID@PUBLIC_IPV4:17550
+bootstrap BOOTSTRAP_ID@PUBLIC_IPV4:17444
+renew-secs 21600
+health-secs 300

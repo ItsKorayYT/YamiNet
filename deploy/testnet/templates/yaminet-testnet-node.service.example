@@ -1,0 +1,33 @@
+# TEMPLATE ONLY. Prefer: yami-testnet render-unit --role bootstrap --config FILE
+# Replace @BINARY@, @CONFIG@, @STATE@, @USER@ and @GROUP@ before installing.
+[Unit]
+Description=YamiNet public testnet DHT bootstrap node
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User=@USER@
+Group=@GROUP@
+ExecStart=@BINARY@ --config @CONFIG@
+Restart=on-failure
+RestartSec=5s
+TimeoutStopSec=20s
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=@STATE@
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+LimitNOFILE=512
+TasksMax=80
+MemoryMax=256M
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=yaminet-testnet-bootstrap
+
+[Install]
+WantedBy=multi-user.target

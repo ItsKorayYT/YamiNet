@@ -1,0 +1,3 @@
+# Operator scripts and templates are consumed on Linux; keep their exact LF
+# line endings even when the repository is checked out on Windows.
+deploy/testnet/** text eol=lf
