@@ -294,7 +294,9 @@ mod tests {
         let directory =
             std::env::temp_dir().join(format!("yami-testnet-malformed-{}", std::process::id()));
         let _ = fs::remove_dir_all(&directory);
-        fs::create_dir_all(&directory).unwrap();
+        // Keep valid private-file permissions while corrupting the contents,
+        // so a permissive umask cannot make the permission gate mask this check.
+        NodeIdentity::create(&directory).unwrap();
         let mut key = fs::File::create(directory.join(KEY_FILE)).unwrap();
         key.write_all(b"not a key").unwrap();
         drop(key);
