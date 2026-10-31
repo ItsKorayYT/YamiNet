@@ -1,5 +1,10 @@
 # Website discovery (YamiNet 0.4 preview)
 
+The native **Discover** panel now also has a **Pages** mode for full-text
+search of cached website content. **Websites** and **Directories** preserve the
+directory workflow below. Full-text indexes have separate provider subscriptions
+and explicit refresh controls; see the [full-text guide](fulltext-search.md).
+
 YamiNet 0.4 starts **decentralized website discovery**. The `yami-discover`
 crate provides a standalone local directory engine, authoring tools, persistent
 catalogs and explicitly requested authenticated remote fetching, including

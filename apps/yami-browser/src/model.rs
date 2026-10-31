@@ -532,6 +532,7 @@ pub struct Loader {
     relay_enabled: Arc<AtomicBool>,
     bootstrap: Arc<Bootstrap>,
     directory_fetcher: Arc<crate::discover::FetcherFactory>,
+    search_fetcher: Arc<crate::page_search::FetcherFactory>,
 }
 impl Loader {
     /// The returned factory is invoked on Discover's worker. Recheck privacy
@@ -542,6 +543,16 @@ impl Loader {
         Arc::new(move |state, relays| {
             if local_only.load(Ordering::SeqCst) {
                 return Err("Directory refresh is blocked by local-only mode.".into());
+            }
+            factory(state, relays)
+        })
+    }
+    pub fn search_fetcher(&self) -> Arc<crate::page_search::FetcherFactory> {
+        let factory = self.search_fetcher.clone();
+        let local_only = self.local_only.clone();
+        Arc::new(move |state, relays| {
+            if local_only.load(Ordering::SeqCst) {
+                return Err("Search refresh is blocked by local-only mode.".into());
             }
             factory(state, relays)
         })
@@ -604,6 +615,7 @@ impl Loader {
         let relay_enabled = resolver.relay_enabled.clone();
         let bootstrap_resolver = resolver.clone();
         let directory_resolver = resolver.clone();
+        let search_resolver = resolver.clone();
         let mut loader = Self::with_fetcher(
             wake,
             Arc::new(move |location, deadline| {
@@ -618,6 +630,8 @@ impl Loader {
         loader.bootstrap = Arc::new(move |pin| bootstrap_resolver.add_bootstrap(pin));
         loader.directory_fetcher =
             Arc::new(move |state, relays| directory_resolver.directory_fetcher(state, relays));
+        loader.search_fetcher =
+            Arc::new(move |state, relays| search_resolver.search_fetcher(state, relays));
         Ok(loader)
     }
     pub fn add_bootstrap(&self, pin: &str) -> Result<(), String> {
@@ -637,6 +651,9 @@ impl Loader {
             resources,
             relay_enabled: Arc::new(AtomicBool::new(false)),
             bootstrap: Arc::new(native::add_bootstrap_from_environment),
+            search_fetcher: Arc::new(|state, relays| {
+                Resolver::from_environment()?.search_fetcher(state, relays)
+            }),
             directory_fetcher: Arc::new(|state, relays| {
                 Resolver::from_environment()?.directory_fetcher(state, relays)
             }),

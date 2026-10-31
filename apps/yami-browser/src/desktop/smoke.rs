@@ -186,11 +186,45 @@ impl Smoke {
                 }
                 app.act(Action::Navigate("local:welcome"));
             }
-            _ => {
+            7 => {
                 self.check(
                     app.browser.active().title() == "Welcome to YamiNet",
                     "rapid-navigation-recovery",
                 )?;
+                app.act(Action::Discover);
+                app.act(Action::DiscoverMode(true));
+            }
+            8 => {
+                if app.discover.pages.busy.is_some() {
+                    return Ok(false);
+                }
+                self.check(
+                    app.discover.open && app.discover.pages_mode,
+                    "native-pages-mode",
+                )?;
+                app.discover
+                    .set_field(yami_browser::discover::Field::Search, "cafe".into());
+            }
+            _ => {
+                if app.discover.pages.busy.is_some() {
+                    return Ok(false);
+                }
+                if std::env::var("YAMINET_SMOKE_FULLTEXT").as_deref() == Ok("1") {
+                    self.check(
+                        !app.discover.pages.hits.is_empty(),
+                        "cached-fulltext-results",
+                    )?;
+                    app.keyboard(&Key::Named(NamedKey::ArrowDown), None, None);
+                    self.check(
+                        app.discover.pages.selected_page.is_some(),
+                        "fulltext-keyboard-selection",
+                    )?;
+                }
+                if let Some(frame) = &app.frame {
+                    frame
+                        .save_png(self.output.with_file_name("fulltext-smoke.png"))
+                        .map_err(|_| "fulltext screenshot save failed")?;
+                }
                 self.write("PASS", app.frames)?;
                 events.exit();
                 return Ok(true);

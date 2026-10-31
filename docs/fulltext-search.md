@@ -115,3 +115,41 @@ Cross-provider search deduplicates canonical destination addresses, picks the
 highest scoring claim (provider URL breaks ties), and retains every matching
 publisher's provenance. A provider's authenticated identity proves publication,
 not ownership of every site it references. It does not change bookmarks or trust.
+
+## Native browser
+
+Open **Discover** in Yami Browser and select **Pages**. **Websites** retains
+directory metadata search; its **Directories** view retains existing directory
+subscriptions. Pages has a separate **Search providers** view and state under
+`<Discover state>/pages`. There is no mandatory or preinstalled provider.
+
+In **Search providers**, enter a name and canonical manifest address. Add saves
+only the subscription. Select it and choose **Refresh selected provider** to
+download an authenticated index. Local-only mode blocks refresh; change that
+setting explicitly if you want network access. Relay fallback follows the
+existing explicit browser setting. Cancel stops between bounded requests and
+retains the old cache. Failure, corrupt-cache and authentication errors appear
+in the panel; failed refreshes retain searchable cached/stale data.
+
+Return to **Pages**, enter a query and press Enter or Search. Search runs on a
+worker against all saved providers. Results show original-text snippets,
+relevance, claimed destination address, source provider, source count and cache
+age/status. Arrow keys select results; Enter opens the selection. Tab/Shift-Tab
+move through native controls and Enter activates them. Mouse selection, wheel,
+Previous/Next and Page Up/Down work with bounded pagination. Opening uses the
+existing navigation, DHT, TLS/relay, tab, history and bookmark machinery. Indexed
+text never substitutes for the authenticated destination document.
+
+Index loading, validation, disk I/O, local full-text search and network refresh
+run outside the UI thread. One bounded worker runs at a time; query changes
+coalesce to the latest text and stale completions cannot replace newer results.
+No network operations occur on startup, mode switching or query submission.
+
+Validation includes real loopback provider-to-browser-to-destination tests,
+native control tests at multiple sizes/scales and an actual Linux X11 window
+smoke under Xvfb. The native smoke uses an explicitly prepared local cache
+fixture for rendering; transport authentication is tested separately using real
+TLS/DHT/relay sockets. Physical input/IME, physical internet, multiple computers
+and Windows/macOS native runtime validation are NOT RUN for this milestone.
+Non-Latin text is preserved and searched safely; displayed glyphs depend on
+available system fonts (the minimal Linux smoke environment lacks CJK fonts).

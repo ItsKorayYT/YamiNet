@@ -127,6 +127,18 @@ impl Resolver {
             .map(|fetcher| Box::new(fetcher) as Box<dyn yami_discover::RemoteDirectoryFetcher>)
             .map_err(|error| error.to_string())
     }
+    /// Full-text indexes use the exact existing bootstrap/network/TLS policy.
+    pub fn search_fetcher(
+        &self,
+        state: &std::path::Path,
+        relays: bool,
+    ) -> Result<Box<dyn yami_search::AuthenticatedDocumentFetcher>, String> {
+        let peers = yami_discover::load_bootstrap_peers(&self.directory, self.network)
+            .map_err(|e| e.to_string())?;
+        yami_discover::AuthenticatedFetcher::open_with_relays(state, self.network, peers, relays)
+            .map(|fetcher| Box::new(fetcher) as Box<dyn yami_search::AuthenticatedDocumentFetcher>)
+            .map_err(|e| e.to_string())
+    }
     pub(crate) fn public_network(&self) -> bool {
         self.network == Network::Public
     }

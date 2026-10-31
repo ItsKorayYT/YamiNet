@@ -16,6 +16,7 @@ getrandom = "0.4.3"
 yami-relay = { path = "../../crates/yami-relay" }
 yami-dht = { path = "../../crates/yami-dht" }
 yami-discover = { path = "../../crates/yami-discover" }
+yami-search = { path = "../../crates/yami-search" }
 yami-node = { path = "../yami-node" }
 ynp-discovery = { path = "../../crates/ynp-discovery" }
 ylang = { path = "../../crates/ylang" }

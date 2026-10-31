@@ -297,14 +297,14 @@ impl Index {
             .take(limit.min(MAX_RESULTS))
             .map(|(i, score)| {
                 let page = self.pages()[i].clone();
-                let snippet = text::snippet(
-                    if page.text.is_empty() {
-                        &page.title
-                    } else {
-                        &page.text
-                    },
-                    &terms,
-                );
+                let context = [&page.text, &page.headings, &page.title]
+                    .into_iter()
+                    .find(|field| {
+                        let folded = text::normalize(field);
+                        terms.iter().any(|term| folded.contains(term))
+                    })
+                    .unwrap_or(&page.title);
+                let snippet = text::snippet(context, &terms);
                 SearchHit {
                     page,
                     snippet,

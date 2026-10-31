@@ -27,8 +27,6 @@ publication through the real existing TLS/YNP node. Targeted Clippy with warning
 denied; index/provider/create/add/build/verify CLI smoke. All networking used
 loopback; physical internet validation NOT RUN.
 
-## Remaining phases
-
 ## Phase 3 — authenticated cached search
 
 Implemented shared authenticated document retrieval through existing Discover
@@ -48,11 +46,48 @@ query and privacy checks use real loopback sockets or explicit local-state
 assertions. Query privacy inspects document keys and request counts.
 Physical internet validation NOT RUN.
 
-## Remaining phase
+## Phase 4 — native Discover Pages
 
-4. Add Pages mode and provider management to the existing native Discover UI;
-   worker I/O/search, result provenance/status, normal authenticated navigation,
-   UI tests and native smoke where supported.
+Implemented Websites/Pages modes in the existing native panel, independent
+search-provider management, explicit refresh/cancel with local-only and relay
+settings, loading/error/cache-age states, snippets/relevance/provider provenance,
+keyboard/mouse selection and existing authenticated destination navigation.
+Full-text store I/O, validation, local query and networking run on one bounded
+worker; query generations discard stale completions. Directory subscriptions,
+tabs, bookmarks and navigation retain their existing behavior. Fixed title-only
+matches to show a matching original title snippet rather than unrelated body text.
 
-Final required checks: fmt, workspace Clippy, tests and build with `--locked`.
-Physical internet and cross-platform/manual accessibility checks have NOT RUN.
+Validation PASS: browser library/control/integration suites, including three
+full-text worker-state tests, native Pages controls at three sizes/scales,
+existing Discover compatibility, and real provider-to-browser-to-destination
+loopback tests with forged destination identity rejection. An actual X11 window
+smoke under Xvfb passed with cached results, keyboard selection, clipboard,
+resize and rendering. Its cache is a deliberate local UI fixture; transport
+validation separately uses real authenticated sockets.
+
+## Final verification and next milestone
+
+Final workspace fmt, Clippy (warnings denied), locked tests and locked build
+all PASS. Cargo summaries: 322 passed, 0 failed, 8 ignored. Native X11 first-run
+and reopened-profile full-text smokes both PASS. See `fulltext-validation.md`
+for precise scope and unrun tests. Git push dry run was blocked by missing HTTPS
+Git credentials; the committed branch is prepared locally for review.
+Implementation commits: phase 1 `f594d10`, phase 2 `1cee9b5`, phase 3 `f8d692e`;
+phase 4 is the commit introducing native Discover Pages and this status.
+
+No requested implementation phase remains intentionally deferred. This is a
+bounded experimental foundation, with flat website layouts, explicit imports,
+new-directory publication generations and one local writer per state directory.
+Providers can lie about sites; index retrieval reveals interest in that provider.
+No anonymity, remote query submission, crawling or automatic refresh is claimed.
+
+NOT RUN: physical internet/two-computer validation, physical keyboard/IME,
+Windows/macOS native runtime, and manual accessibility review. Existing ignored
+platform/network/capture tests remain opt-in. The minimal smoke environment
+lacks CJK fonts; Unicode storage/search is tested but glyph display needs fonts.
+
+Exact next milestone: validate this branch on Windows and two independent
+physical networks using independent website/provider nodes, exercise direct and
+signed-relay refresh plus outages/offline search, capture destination identity
+rejection and privacy observations, and record results before release review.
+Review and merge remain explicit; no main rewrite or release publication occurs.

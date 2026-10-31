@@ -25,7 +25,7 @@ or DNS resolution. See [the security notes](../SECURITY.md) and
 
 ## Discover websites and directory subscriptions
 
-Select **Discover websites** in the sidebar. **Websites · offline search** searches
+Select **Discover** in the sidebar. **Websites** searches
 only saved directory snapshots, using the existing bounded title, description,
 category and address matching. Type a query and press Enter or **Search**. No
 query leaves the browser. Starting the browser or opening the panel never
@@ -40,7 +40,7 @@ a refresh failed and the last validated snapshot was retained. Directory rows
 include the reason. Loading, empty and error states leave browser navigation
 available.
 
-Under **Directory subscriptions**, enter a local label and a canonical
+Under **Directories**, enter a local label and a canonical
 `yami://FULL-NODE-ID/directory-key`, then **Add subscription (no fetch)**. An
 omitted/empty key canonicalizes to `home`. New subscriptions stay inactive until
 refreshed. Select a row for **Refresh selected directory** or **Remove selected**.

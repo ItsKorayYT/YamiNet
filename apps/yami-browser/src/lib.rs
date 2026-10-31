@@ -2,6 +2,7 @@
 pub mod discover;
 pub mod model;
 pub mod native;
+pub mod page_search;
 
 mod reliability;
 

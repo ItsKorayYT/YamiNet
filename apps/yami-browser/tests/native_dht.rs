@@ -167,6 +167,141 @@ fn loader(directory: &Path) -> (Arc<Resolver>, Loader) {
 }
 
 #[test]
+fn fulltext_provider_claims_open_via_independent_destination_authentication() {
+    use yami_browser::{
+        discover::{Discover, Field},
+        page_search::PageSearch,
+    };
+    use yami_search::{Index, Publication};
+    fn settle(panel: &mut PageSearch) {
+        let until = Instant::now() + Duration::from_secs(25);
+        while panel.busy.is_some() {
+            panel.poll();
+            assert!(Instant::now() < until);
+            thread::sleep(Duration::from_millis(2));
+        }
+    }
+    let scratch = Scratch::new("fulltext");
+    let owner = Arc::new(NodeIdentity::generate().unwrap());
+    let publisher = Arc::new(NodeIdentity::generate().unwrap());
+    let bootstrap_id = Arc::new(NodeIdentity::generate().unwrap());
+    let forged = NodeIdentity::generate().unwrap();
+    let site_dir = scratch.0.join("site");
+    page(
+        &site_dir,
+        "home",
+        "Actual Café",
+        "  Actual content loaded from destination\n",
+    );
+    let destination = Node::start(
+        owner.clone(),
+        service(&scratch.0, "destination", *owner.id()),
+        &site_dir,
+    );
+    let bootstrap = Node::start(
+        bootstrap_id.clone(),
+        service(&scratch.0, "bootstrap", *bootstrap_id.id()),
+        &site_dir,
+    );
+    let mut pages = Index::build(&site_dir, Some(*owner.id()))
+        .unwrap()
+        .pages()
+        .to_vec();
+    pages[0].title = "Provider Café Claim".into();
+    let mut forged_page = pages[0].clone();
+    forged_page.title = "Forged Café Claim".into();
+    forged_page.address = Some(format!("yami://{}/home", forged.id()));
+    pages.push(forged_page);
+    let publication = Publication::build(&Index::from_pages(pages).unwrap()).unwrap();
+    let published = scratch.0.join("published");
+    publication.export(&published).unwrap();
+    let provider = Node::start(
+        publisher.clone(),
+        service(&scratch.0, "publisher", *publisher.id()),
+        &published,
+    );
+    let now = yami_dht::now().unwrap();
+    bootstrap.service.accept(destination.record(), now).unwrap();
+    bootstrap.service.accept(provider.record(), now).unwrap();
+    bootstrap
+        .service
+        .accept(
+            PeerRecord::sign(
+                &forged,
+                vec![destination.contact.endpoint],
+                now + 120,
+                1,
+                Network::Loopback,
+                now,
+            )
+            .unwrap(),
+            now,
+        )
+        .unwrap();
+    let browser_dir = scratch.0.join("browser");
+    PeerStore::open(&browser_dir)
+        .unwrap()
+        .add(bootstrap.contact.id, bootstrap.contact.endpoint.into())
+        .unwrap();
+    let (_resolver, loader) = loader(&browser_dir);
+    let state = scratch.0.join("discover");
+    let mut panel = Discover::new(Ok(state), Arc::new(|| {}));
+    panel.set_mode(true);
+    settle(&mut panel.pages);
+    panel.set_field(Field::Name, "Independent provider".into());
+    panel.set_field(
+        Field::Address,
+        format!("yami://{}/search-manifest", publisher.id()),
+    );
+    panel.pages.add();
+    settle(&mut panel.pages);
+    assert_eq!(provider.requests.load(Ordering::SeqCst), 0);
+    panel.pages.selected_source = Some("Independent provider".into());
+    panel.pages.refresh_selected(loader.search_fetcher(), false);
+    settle(&mut panel.pages);
+    assert!(panel.pages.error.is_none(), "{:?}", panel.pages.error);
+    let requests = provider.requests.load(Ordering::SeqCst);
+    assert_eq!(requests, publication.shards().len() + 1);
+    loader.set_local_only(true);
+    panel.set_field(Field::Search, "CAFÉ".into());
+    settle(&mut panel.pages);
+    assert_eq!(panel.pages.hits.len(), 2);
+    assert_eq!(provider.requests.load(Ordering::SeqCst), requests);
+    assert_eq!(destination.requests.load(Ordering::SeqCst), 0);
+    let url = panel
+        .pages
+        .hits
+        .iter()
+        .find(|h| h.hit.page.title == "Provider Café Claim")
+        .unwrap()
+        .hit
+        .page
+        .address
+        .clone()
+        .unwrap();
+    assert_ne!(panel.pages.hits[0].hit.source, url);
+    drop(provider); // cached queries still work after publisher disconnects
+    panel.set_field(Field::Search, "cafe".into());
+    settle(&mut panel.pages);
+    assert_eq!(panel.pages.hits.len(), 2);
+    loader.set_local_only(false);
+    let mut browser = Browser::new();
+    browser.open_tab();
+    let tabs = browser.tabs.len();
+    browser.navigate(&url, &loader).unwrap();
+    ready(&mut browser, &loader, "Actual Café", *owner.id());
+    assert_eq!(browser.tabs.len(), tabs);
+    browser.reload(&loader);
+    ready(&mut browser, &loader, "Actual Café", *owner.id());
+    browser
+        .navigate(&format!("yami://{}/home", forged.id()), &loader)
+        .unwrap();
+    error(&mut browser, &loader, "identity mismatch");
+    assert!(browser.back(&loader));
+    ready(&mut browser, &loader, "Actual Café", *owner.id());
+}
+
+#[test]
 fn discover_refreshes_only_explicitly_and_opening_independently_authenticates() {
     use yami_browser::discover::{Discover, Field};
     use yami_discover::{Directory, DirectoryEntry, SourceState, WebsiteAddress};

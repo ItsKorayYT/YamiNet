@@ -402,71 +402,121 @@ impl Desktop {
                 self.find_open = false;
                 self.pressed_link = None;
             }
+            Action::DiscoverMode(pages) => {
+                self.clear_focus();
+                self.discover.set_mode(pages);
+            }
+            Action::DiscoverCancel => {
+                self.clear_focus();
+                self.discover.pages.cancel();
+            }
             Action::DiscoverView(directories) => {
                 self.clear_focus();
                 self.discover.directories = directories;
                 self.discover.page = 0;
+                self.discover.pages.page = 0;
             }
             Action::DiscoverField(field) => {
                 self.clear_focus();
-                let value = match field {
-                    yami_browser::discover::Field::Search => &self.discover.query,
-                    yami_browser::discover::Field::Name => &self.discover.name,
-                    yami_browser::discover::Field::Address => &self.discover.address,
-                };
-                self.editor.activate(value);
+                self.editor.activate(self.discover.field(field));
                 self.discover_edit = Some(field);
             }
             Action::DiscoverSearch => {
                 self.clear_focus();
-                self.discover.set_field(
-                    yami_browser::discover::Field::Search,
-                    self.discover.query.clone(),
-                );
+                let query = self
+                    .discover
+                    .field(yami_browser::discover::Field::Search)
+                    .to_owned();
+                self.discover
+                    .set_field(yami_browser::discover::Field::Search, query);
             }
             Action::DiscoverAdd => {
                 self.clear_focus();
-                self.discover.add();
+                if self.discover.pages_mode {
+                    self.discover.pages.add();
+                } else {
+                    self.discover.add();
+                }
             }
             Action::DiscoverSource(name) => {
                 self.clear_focus();
-                self.discover.selected_source = self
-                    .discover
-                    .sources
-                    .iter()
-                    .any(|source| source.name() == name)
-                    .then_some(name);
+                if self.discover.pages_mode {
+                    self.discover.pages.selected_source = self
+                        .discover
+                        .pages
+                        .sources
+                        .iter()
+                        .any(|s| s.name == name)
+                        .then_some(name);
+                } else {
+                    self.discover.selected_source = self
+                        .discover
+                        .sources
+                        .iter()
+                        .any(|s| s.name() == name)
+                        .then_some(name);
+                }
             }
             Action::DiscoverWebsite(url) => {
                 self.clear_focus();
-                self.discover.selected_website = self
-                    .discover
-                    .listings
-                    .iter()
-                    .any(|listing| listing.entry.address().url() == url)
-                    .then_some(url);
+                if self.discover.pages_mode {
+                    self.discover.pages.selected_page = self
+                        .discover
+                        .pages
+                        .hits
+                        .iter()
+                        .any(|h| h.hit.page.address.as_deref() == Some(&url))
+                        .then_some(url);
+                } else {
+                    self.discover.selected_website = self
+                        .discover
+                        .listings
+                        .iter()
+                        .any(|h| h.entry.address().url() == url)
+                        .then_some(url);
+                }
             }
             Action::DiscoverRefresh => {
                 self.clear_focus();
-                let remote = self.discover.sources.iter().any(|source| {
-                    Some(source.name()) == self.discover.selected_source.as_deref()
-                        && source.remote_address().is_some()
-                });
-                if remote && self.settings.local_only {
-                    self.discover.error = Some("Directory refresh is blocked by local-only mode. Change it in Settings to allow an explicit refresh.".into());
+                if self.discover.pages_mode {
+                    if self.settings.local_only {
+                        self.discover.pages.error = Some("Search refresh is blocked by local-only mode. Change it in Settings to allow an explicit refresh.".into());
+                    } else {
+                        self.discover.pages.refresh_selected(
+                            self.loader.search_fetcher(),
+                            self.loader.relay_enabled(),
+                        );
+                    }
                 } else {
-                    self.discover.refresh_selected(
-                        self.loader.directory_fetcher(),
-                        self.loader.relay_enabled(),
-                    );
+                    let remote = self.discover.sources.iter().any(|s| {
+                        Some(s.name()) == self.discover.selected_source.as_deref()
+                            && s.remote_address().is_some()
+                    });
+                    if remote && self.settings.local_only {
+                        self.discover.error = Some("Directory refresh is blocked by local-only mode. Change it in Settings to allow an explicit refresh.".into());
+                    } else {
+                        self.discover.refresh_selected(
+                            self.loader.directory_fetcher(),
+                            self.loader.relay_enabled(),
+                        );
+                    }
                 }
             }
             Action::DiscoverRemove => {
                 self.clear_focus();
-                self.discover.remove_selected();
+                if self.discover.pages_mode {
+                    self.discover.pages.remove_selected();
+                } else {
+                    self.discover.remove_selected();
+                }
             }
             Action::DiscoverOpen => {
-                if let Some(url) = self.discover.selected_website.clone() {
+                let selected = if self.discover.pages_mode {
+                    self.discover.pages.selected_page.clone()
+                } else {
+                    self.discover.selected_website.clone()
+                };
+                if let Some(url) = selected {
                     self.record("navigation-start");
                     let _ = self.browser.navigate(&url, &self.loader);
                     self.discover.open = false;
@@ -476,7 +526,13 @@ impl Desktop {
             Action::DiscoverPage(next) => {
                 self.clear_focus();
                 let size = chrome::discover_page_size(self.size().1, self.discover.directories);
-                self.discover.change_page(next, size);
+                if self.discover.pages_mode {
+                    self.discover
+                        .pages
+                        .change_page(next, size, self.discover.directories);
+                } else {
+                    self.discover.change_page(next, size);
+                }
             }
             Action::Follow(target) => {
                 let _ = self.browser.follow(&target, &self.loader);
@@ -697,6 +753,9 @@ impl Desktop {
         self.redraw();
     }
     fn apply_local_only(&mut self, enabled: bool) {
+        if enabled {
+            self.discover.pages.cancel();
+        }
         self.loader.set_local_only(enabled);
         if enabled {
             for tab in &mut self.browser.tabs {
@@ -1221,6 +1280,7 @@ impl Desktop {
         }
         match key {
             Key::Named(NamedKey::Escape) => {
+                self.discover.pages.cancel();
                 self.discover.open = false;
                 self.discovery.open = false;
                 self.library_open = false;
@@ -1261,6 +1321,13 @@ impl Desktop {
             Key::Named(NamedKey::Enter) => {
                 if self.editor.focus.is_some() {
                     self.commit();
+                } else if self.discover.open
+                    && self.discover.pages_mode
+                    && !self.discover.directories
+                    && self.discover.pages.selected_page.is_some()
+                    && self.keyboard_focus.is_none()
+                {
+                    self.act(Action::DiscoverOpen);
                 } else if let Some(hit) = self.keyboard_focus.and_then(|i| self.scene.hits.get(i)) {
                     self.act(hit.action.clone());
                 }
@@ -1291,6 +1358,17 @@ impl Desktop {
             Key::Named(NamedKey::End) if self.editor.focus.is_some() => {
                 self.editor
                     .move_caret(self.editor.value.len(), self.modifiers.shift_key());
+            }
+            Key::Named(NamedKey::ArrowDown) | Key::Named(NamedKey::ArrowUp)
+                if self.discover.open
+                    && self.discover.pages_mode
+                    && !self.discover.directories
+                    && self.editor.focus.is_none() =>
+            {
+                let next = key == &Key::Named(NamedKey::ArrowDown);
+                let size = chrome::discover_page_size(self.size().1, false);
+                self.discover.pages.move_selection(next, size);
+                self.keyboard_focus = None;
             }
             Key::Named(NamedKey::PageDown) | Key::Named(NamedKey::ArrowDown)
                 if self.discover.open && self.editor.focus.is_none() =>
@@ -1700,6 +1778,150 @@ mod tests {
             assert!(Instant::now() < until);
             std::thread::sleep(Duration::from_millis(1));
         }
+    }
+    fn settle_pages(app: &mut Desktop) {
+        let until = Instant::now() + Duration::from_secs(10);
+        while app.discover.pages.busy.is_some() {
+            app.discover.poll();
+            assert!(Instant::now() < until);
+            std::thread::sleep(Duration::from_millis(1));
+        }
+    }
+    #[test]
+    fn pages_mode_native_controls_cached_results_and_directory_compatibility() {
+        use yami_browser::discover::Field;
+        use yami_search::{Index, Page, Publication, SearchStore, WebsiteAddress};
+        let (mut app, fixture) = discover_fixture("pages");
+        let state = fixture.0.join("state/pages");
+        let id = "yn1-tiqub4vxm4zslzlrhlfhc5k6b7vvkealot25nodtcixooe6xfzmxfsm6re";
+        let pages = (0..6)
+            .map(|i| Page {
+                key: format!("p{i}"),
+                title: format!("Café page {i}"),
+                headings: String::new(),
+                text: "Searchable original text".into(),
+                address: Some(format!("yami://{id}/p{i}")),
+            })
+            .collect();
+        let publication = Publication::build(&Index::from_pages(pages).unwrap()).unwrap();
+        struct CachedFixture(Publication);
+        impl yami_search::AuthenticatedDocumentFetcher for CachedFixture {
+            fn fetch_document(
+                &self,
+                address: &WebsiteAddress,
+            ) -> Result<ynp::DocumentData, yami_discover::RemoteFetchError> {
+                let source = if address.key() == "search-manifest" {
+                    self.0.manifest()
+                } else {
+                    &self
+                        .0
+                        .shards()
+                        .iter()
+                        .find(|(k, _)| k == address.key())
+                        .unwrap()
+                        .1
+                };
+                Ok(ynp::DocumentData {
+                    key: address.key().into(),
+                    source: source.into(),
+                    style: String::new(),
+                })
+            }
+        }
+        let mut store = SearchStore::open(&state).unwrap();
+        store
+            .add(
+                "Independent",
+                WebsiteAddress::parse(&format!("yami://{id}/search-manifest")).unwrap(),
+            )
+            .unwrap();
+        store
+            .refresh(
+                "Independent",
+                &CachedFixture(publication),
+                &std::sync::atomic::AtomicBool::new(false),
+            )
+            .unwrap();
+        app.act(Action::Navigate("local:welcome"));
+        settle(&mut app);
+        let tabs = app.browser.tabs.len();
+        app.act(Action::Discover);
+        settle_discover(&mut app);
+        assert_eq!(app.discover.listings.len(), 4);
+        app.act(Action::DiscoverMode(true));
+        settle_pages(&mut app);
+        app.act(Action::DiscoverField(Field::Search));
+        app.editor.replace("CAFÉ");
+        app.keyboard(&Key::Named(NamedKey::Enter), None, None);
+        settle_pages(&mut app);
+        assert_eq!(app.discover.pages.hits.len(), 6);
+        assert_eq!(app.discover.pages.query, "CAFÉ");
+        assert_eq!(app.browser.tabs.len(), tabs);
+        app.keyboard(&Key::Named(NamedKey::ArrowDown), None, None);
+        assert!(app.discover.pages.selected_page.is_some());
+        for (width, height, scale) in [
+            (800.0, 600.0, 1.0),
+            (1000.0, 700.0, 1.0),
+            (1440.0, 900.0, 2.0),
+        ] {
+            app.headless = Some((width, height, scale));
+            for directories in [false, true] {
+                app.act(Action::DiscoverView(directories));
+                let mut pix = Pixmap::new((width * scale) as u32, (height * scale) as u32).unwrap();
+                app.compose(&mut pix);
+                let panel = chrome::discover_rect(width, height);
+                for hit in app
+                    .scene
+                    .hits
+                    .iter()
+                    .filter(|h| h.rect.x >= chrome::SIDEBAR_WIDTH)
+                {
+                    assert!(
+                        hit.rect.y >= panel.y
+                            && hit.rect.x + hit.rect.w <= panel.x + panel.w
+                            && hit.rect.y + hit.rect.h <= panel.y + panel.h,
+                        "{:?} outside Pages panel",
+                        hit.action
+                    );
+                }
+                if let Some(capture) = std::env::var_os("YAMINET_DISCOVER_CAPTURE") {
+                    let path = std::path::PathBuf::from(capture);
+                    std::fs::create_dir_all(&path).unwrap();
+                    pix.save_png(path.join(format!("pages-{width}-{directories}.png")))
+                        .unwrap();
+                }
+            }
+        }
+        app.act(Action::DiscoverSource("Independent".into()));
+        app.act(Action::DiscoverRefresh);
+        assert!(app
+            .discover
+            .pages
+            .error
+            .as_deref()
+            .unwrap()
+            .contains("local-only"));
+        assert!(app.discover.pages.busy.is_none());
+        app.act(Action::DiscoverView(false));
+        frame(&mut app);
+        let action = app
+            .scene
+            .hits
+            .iter()
+            .find_map(|h| matches!(h.action, Action::DiscoverWebsite(_)).then(|| h.action.clone()))
+            .unwrap();
+        app.act(action);
+        assert!(app.discover.pages.selected_page.is_some());
+        app.keyboard(&Key::Named(NamedKey::Enter), None, None);
+        assert!(!app.discover.open);
+        assert_eq!(app.browser.tabs.len(), tabs);
+        assert!(app.browser.active().address.starts_with("yami://"));
+        app.act(Action::Discover);
+        settle_pages(&mut app);
+        app.act(Action::DiscoverMode(false));
+        settle_discover(&mut app);
+        assert_eq!(app.discover.listings.len(), 4);
+        assert_eq!(app.discover.sources.len(), 2);
     }
     #[test]
     fn discover_search_editor_selection_and_open_preserve_tabs_and_privacy() {

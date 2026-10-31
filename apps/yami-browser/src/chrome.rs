@@ -44,6 +44,8 @@ impl Rect {
 pub enum Action {
     Discover,
     DiscoverView(bool),
+    DiscoverMode(bool),
+    DiscoverCancel,
     DiscoverField(yami_browser::discover::Field),
     DiscoverSearch,
     DiscoverAdd,
@@ -599,7 +601,7 @@ pub fn paint(c: &mut Canvas<'_>, browser: &Browser, ui: &ChromeState<'_>) -> Sce
         &mut scene,
         ui,
         Rect::new(label.x + 58.0, label.y, label.w - 58.0, label.h),
-        "Discover websites",
+        "Discover",
         Action::Discover,
         true,
     );

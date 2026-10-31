@@ -40,6 +40,8 @@ enum Operation {
 
 pub struct Discover {
     pub open: bool,
+    pub pages_mode: bool,
+    pub pages: crate::page_search::PageSearch,
     pub directories: bool,
     pub query: String,
     pub name: String,
@@ -62,6 +64,11 @@ impl Discover {
     pub fn new(directory: Result<PathBuf, String>, wake: Arc<dyn Fn() + Send + Sync>) -> Self {
         Self {
             open: false,
+            pages_mode: false,
+            pages: crate::page_search::PageSearch::new(
+                directory.clone().map(|p| p.join("pages")),
+                wake.clone(),
+            ),
             directories: false,
             query: String::new(),
             name: String::new(),
@@ -94,18 +101,55 @@ impl Discover {
             .map_err(|error| error.to_string())
     }
     pub fn set_wake(&mut self, wake: Arc<dyn Fn() + Send + Sync>) {
+        self.pages.set_wake(wake.clone());
         self.wake = wake;
     }
     pub fn toggle(&mut self) {
         self.open = !self.open;
         if self.open {
+            if self.pages_mode {
+                self.pages.load();
+            } else {
+                self.load();
+            }
+        } else {
+            self.pages.cancel();
+        }
+    }
+    pub fn set_mode(&mut self, pages: bool) {
+        self.pages_mode = pages;
+        self.directories = false;
+        self.page = 0;
+        self.pages.page = 0;
+        if pages {
+            self.pages.load();
+        } else {
             self.load();
+        }
+    }
+    pub fn field(&self, field: Field) -> &str {
+        if self.pages_mode {
+            match field {
+                Field::Search => &self.pages.query,
+                Field::Name => &self.pages.name,
+                Field::Address => &self.pages.address,
+            }
+        } else {
+            match field {
+                Field::Search => &self.query,
+                Field::Name => &self.name,
+                Field::Address => &self.address,
+            }
         }
     }
     pub fn load(&mut self) {
         self.start(Operation::Load, "Loading saved listings…");
     }
     pub fn set_field(&mut self, field: Field, text: String) {
+        if self.pages_mode {
+            self.pages.set_field(field, text);
+            return;
+        }
         match field {
             Field::Search => {
                 self.query = text;
@@ -221,6 +265,10 @@ impl Discover {
         }
     }
     pub fn poll(&mut self) -> bool {
+        let pages_changed = self.pages.poll();
+        self.poll_directories() || pages_changed
+    }
+    fn poll_directories(&mut self) -> bool {
         let Some(receiver) = &self.pending else {
             return false;
         };

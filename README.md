@@ -393,6 +393,20 @@ security-reviewed, production-secure or anonymous. Application quotas do not
 prevent Internet-scale DoS. The [relay protocol](docs/specs/v0.1/relay.md) specifies
 bounds. Original isolated [relay commands/tests](docs/relay-testing.md) still work.
 
+## Full-text page search (0.4 foundation)
+
+Native **Discover → Pages** searches downloaded YLang page contents locally.
+Independent providers publish bounded inert YLang indexes over existing
+YNP/TLS/DHT and optional signed relays. Queries never leave the device. Provider
+claims remain untrusted; opening a result independently authenticates its actual
+website through normal navigation. Refresh is explicit and cached search works
+without a provider connection.
+
+Use `cargo run -p yami-search -- index SITE --output INDEX`, optionally supplying
+`--identity FULL-ID` for canonical publication addresses. See the
+[full-text guide](docs/fulltext-search.md), [normative publication format](docs/specs/v0.4/fulltext-index.md)
+and [implementation/validation roadmap](docs/fulltext-roadmap.md).
+
 ## Workspace
 
 | Package | Responsibility |
@@ -402,6 +416,8 @@ bounds. Original isolated [relay commands/tests](docs/relay-testing.md) still wo
 | `ynp` | Binary frame codec, strict limits, transport traits, legacy plaintext loopback TCP client/listener |
 | `ynp-tls` | YNP over pinned TLS 1.3, local/public IPv4 clients and separately opted-in LAN/public listeners |
 | `ynp-discovery` | Opt-in IPv4 LAN multicast queries, bounded untrusted advertisements and rate-limited responses |
+| `yami-search` | Bounded YLang full-text indexing, portable provider publications, authenticated index refresh and offline page search |
+| `yami-discover` | Independent website directories, persistent subscriptions and native Discover |
 | `yami-config` | Bounded versioned local profiles, explicit listener/pin policy and read-only relay status |
 | `yami-dht` | Bounded XOR routing, signed expiring peer records, iterative pinned-TLS lookup and persistent sequence history |
 | `yami-render` | Original terminal/bitmap renderer plus rich native layout, PNG decoding and antialiased text |

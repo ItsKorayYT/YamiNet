@@ -36,6 +36,9 @@ fn ranking_unicode_snippets_and_explicit_rebuild_persist() {
     fs::write(site.0.join("default.ysl"), "never-index-style").unwrap();
     let index = Index::build(&site.0, None).unwrap();
     assert_eq!(index.search("CAFE", 10).unwrap()[0].page.key, "title");
+    assert!(index.search("CAFE", 10).unwrap()[0]
+        .snippet
+        .contains("Café"));
     let hits = index.search("cafe networks", 10).unwrap();
     assert_eq!(hits.len(), 2);
     assert_eq!(index.search("日本", 10).unwrap().len(), 1);
