@@ -17,6 +17,10 @@ struct Data {
     registry: Vec<String>,
     records: BTreeMap<String, Record>,
     history: History,
+    #[serde(default)]
+    providers: Vec<crate::network::Provider>,
+    #[serde(default)]
+    refreshed: BTreeMap<String, u64>,
 }
 impl Default for Data {
     fn default() -> Self {
@@ -26,6 +30,8 @@ impl Default for Data {
             registry: Vec::new(),
             records: BTreeMap::new(),
             history: History::default(),
+            providers: Vec::new(),
+            refreshed: BTreeMap::new(),
         }
     }
 }
@@ -86,6 +92,8 @@ impl Store {
                     || data.aliases.len() > MAX_ENTRIES
                     || data.records.len() > MAX_ENTRIES
                     || data.registry.len() > 32
+                    || data.providers.len() > crate::network::MAX_CONTACTS
+                    || data.refreshed.len() > MAX_ENTRIES
                 {
                     return Err(Error::Invalid("unsupported or oversized state"));
                 }
@@ -144,6 +152,139 @@ impl Store {
         self.data = data;
         #[cfg(unix)]
         File::open(&self.dir)?.sync_all()?;
+        Ok(())
+    }
+    pub fn providers(&self) -> &[crate::network::Provider] {
+        &self.data.providers
+    }
+    pub fn configure_providers(
+        &mut self,
+        peers: Vec<crate::network::Provider>,
+        network: yami_dht::Network,
+    ) -> Result<()> {
+        if peers.len() > crate::network::MAX_CONTACTS {
+            return Err(Error::Invalid("too many initial providers"));
+        }
+        for peer in &peers {
+            peer.contact(network)?;
+        }
+        let mut next = self.data.clone();
+        next.providers = peers;
+        next.refreshed.clear();
+        self.commit(next)
+    }
+    pub fn refreshed_at(&self, name: &Name) -> Option<u64> {
+        self.data.refreshed.get(&name.to_string()).copied()
+    }
+    pub fn mark_refreshed(&mut self, name: &Name, now: u64) -> Result<()> {
+        if self.data.refreshed.len() >= MAX_ENTRIES
+            && !self.data.refreshed.contains_key(&name.to_string())
+        {
+            return Err(Error::Invalid("refresh history full"));
+        }
+        let mut next = self.data.clone();
+        next.refreshed.insert(name.to_string(), now);
+        self.commit(next)
+    }
+    pub fn export_bundle(&self, name: &Name, now: u64) -> Result<Option<crate::Bundle>> {
+        let namespace = name
+            .namespace()
+            .ok_or(Error::Invalid("aliases cannot be exported"))?;
+        let mut bundle = crate::Bundle {
+            name: name.to_string(),
+            records: Vec::new(),
+        };
+        for path in crate::bundle::paths(name)? {
+            let Some(record) = self.data.lookup(&namespace, &path)? else {
+                break;
+            };
+            bundle.records.push(record);
+            let valid = bundle.verify(&self.registry_keys()?, now).and_then(|_| {
+                authenticate(
+                    &bundle,
+                    &record_name(bundle.records.last().ok_or(Error::NotFound)?)?,
+                    &self.registry_keys()?,
+                    &mut self.data.history.clone(),
+                    now,
+                )
+                .map(|_| ())
+            });
+            if valid.is_err() {
+                bundle.records.pop();
+                break;
+            }
+            if !matches!(
+                bundle.records.last().map(Record::action),
+                Some(crate::RecordKind::Delegate(_))
+            ) {
+                break;
+            }
+        }
+        if bundle.records.is_empty() {
+            Ok(None)
+        } else {
+            Ok(Some(bundle))
+        }
+    }
+    pub fn import_bundle(&mut self, bundle: &crate::Bundle, now: u64) -> Result<()> {
+        bundle.verify(&self.registry_keys()?, now)?;
+        for record in &bundle.records {
+            self.import(record.clone(), now)?;
+        }
+        Ok(())
+    }
+    /// Select records only after comparing all independently authenticated
+    /// replies. Equal-sequence conflicts fail closed; a mirror cannot invent
+    /// ownership or win by responding first. Existing history remains enforced.
+    pub fn refresh(&mut self, name: &Name, bundles: &[crate::Bundle], now: u64) -> Result<()> {
+        let registry = self.registry_keys()?;
+        for bundle in bundles {
+            if bundle.name != name.to_string() {
+                return Err(Error::Invalid("refresh selector mismatch"));
+            }
+            bundle.verify(&registry, now)?;
+        }
+        let namespace = name
+            .namespace()
+            .ok_or(Error::Invalid("aliases cannot be refreshed"))?;
+        let mut authority = match name {
+            Name::Scoped { owner, .. } => Some(*owner),
+            _ => None,
+        };
+        for path in crate::bundle::paths(name)? {
+            let mut candidates: Vec<Record> = bundles
+                .iter()
+                .flat_map(|b| b.records.iter())
+                .filter(|r| r.path() == path)
+                .cloned()
+                .collect();
+            if let Some(old) = self.data.lookup(&namespace, &path)? {
+                if old.verify(now).is_ok() {
+                    candidates.push(old);
+                }
+            }
+            candidates.retain(|r| {
+                r.signer()
+                    .is_ok_and(|id| authority.map_or_else(|| registry.contains(&id), |a| a == id))
+            });
+            let Some(sequence) = candidates.iter().map(Record::sequence).max() else {
+                break;
+            };
+            let mut latest = candidates.into_iter().filter(|r| r.sequence() == sequence);
+            let chosen = latest.next().ok_or(Error::NotFound)?;
+            if latest.any(|r| r.digest() != chosen.digest()) {
+                let mut next = self.data.clone();
+                next.history.conflict(&namespace, &path, sequence);
+                self.commit(next)?;
+                return Err(Error::Rollback);
+            }
+            self.import(chosen.clone(), now)?;
+            if matches!(chosen.action(), crate::RecordKind::Delegate(_)) {
+                authority = Some(chosen.target()?);
+            } else {
+                break;
+            }
+        }
         Ok(())
     }
     pub fn aliases(&self) -> &BTreeMap<String, String> {
@@ -220,9 +361,40 @@ impl Store {
         let mut history = next.history.clone();
         // Validate the complete chain, including updates to delegations and
         // tombstones. Unrelated signers cannot poison the local record cache.
-        authenticate(&next, &name, &self.registry_keys()?, &mut history, now)?;
+        let validation = authenticate(&next, &name, &self.registry_keys()?, &mut history, now);
+        if let Err(error) = validation {
+            if history != self.data.history {
+                let mut rejected = self.data.clone();
+                rejected.history = history;
+                self.commit(rejected)?;
+            }
+            return Err(error);
+        }
         next.history = history;
-        self.commit(next)
+        if next == self.data {
+            Ok(())
+        } else {
+            self.commit(next)
+        }
+    }
+    /// Preview without establishing a new binding. The browser uses this only
+    /// to schedule refresh; it still calls resolve and persists trust before I/O.
+    pub fn cached_resolution(&self, name: &Name, now: u64) -> Result<NodeId> {
+        if let Name::Alias(alias) = name {
+            return self
+                .data
+                .aliases
+                .get(alias)
+                .ok_or(Error::NotFound)
+                .and_then(|s| parse_id(s));
+        }
+        crate::resolve(
+            &self.data,
+            name,
+            &self.registry_keys()?,
+            &mut self.data.history.clone(),
+            now,
+        )
     }
     pub fn resolve(&mut self, name: &Name, now: u64) -> Result<NodeId> {
         if Name::parse(&name.to_string())? != *name {
@@ -283,7 +455,7 @@ fn parse_id(s: &str) -> Result<NodeId> {
     s.parse()
         .map_err(|_| Error::Invalid("invalid full identity in state"))
 }
-fn record_name(record: &Record) -> Result<Name> {
+pub(crate) fn record_name(record: &Record) -> Result<Name> {
     let suffix = if record.namespace() == "yami" {
         "yami"
     } else {

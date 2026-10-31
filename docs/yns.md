@@ -26,12 +26,13 @@ identity. Anyone can create an owner key and namespace without project approval.
 Two owners can both have `blog`: their full names differ by owner key. A bare
 `blog` is deliberately unsupported; it has no globally agreed owner.
 
-YNS 0.1's browser source is an explicitly imported local cache of signed records.
-There is no automatic name discovery/publication in this milestone. The reusable
-`RecordSource` interface permits future peer/file/DHT distribution; every source
-remains untrusted and must pass the same verification. The existing DHT continues
-to distribute signed **node location** records only. Export/import the public
-record JSON to share a name; never share the owner's secret key directory.
+YNS 0.2 adds authenticated publication, mirrors, provider discovery and persistent
+remote caching of these same v1 records. See the [network guide](yns-network.md)
+for bootstrap requirements, network commands and the independent-process demo.
+Explicit import remains available for offline workflows. Every source remains
+untrusted and must pass the same verification. The existing DHT continues to
+distribute signed **node location** records only. Never share an owner's secret
+key directory.
 
 ## Browser management
 

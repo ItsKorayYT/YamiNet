@@ -9,6 +9,7 @@ license.workspace = true
 workspace = true
 
 [dependencies]
+yami-yns = { path = "../../crates/yami-yns" }
 yami-games = { path = "../../crates/yami-games" }
 yami-config = { path = "../../crates/yami-config" }
 yami-relay = { path = "../../crates/yami-relay" }

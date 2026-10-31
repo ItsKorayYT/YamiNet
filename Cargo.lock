@@ -2566,6 +2566,7 @@ dependencies = [
  "yami-identity",
  "yami-relay",
  "yami-render",
+ "yami-yns",
  "ylang",
  "ynp",
  "ynp-discovery",
@@ -2649,7 +2650,10 @@ version = "0.3.1-alpha.1"
 dependencies = [
  "serde",
  "serde_json",
+ "yami-dht",
  "yami-identity",
+ "ynp",
+ "ynp-tls",
 ]
 
 [[package]]

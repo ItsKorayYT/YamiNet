@@ -95,20 +95,30 @@ impl Resolver {
     pub fn naming_path(&self) -> PathBuf {
         self.directory.join("yns")
     }
+    pub fn naming_network(&self) -> Network {
+        self.network
+    }
     pub fn resolve_name(&self, name: &yami_yns::Name) -> Result<NodeId, String> {
+        self.resolve_name_until(
+            name,
+            Instant::now() + yami_yns::network::DISCOVERY_BUDGET,
+            false,
+        )
+    }
+    pub fn resolve_name_until(
+        &self,
+        name: &yami_yns::Name,
+        deadline: Instant,
+        force: bool,
+    ) -> Result<NodeId, String> {
         let _guard = self
             .naming_lock
             .lock()
             .map_err(|_| "YNS state lock unavailable")?;
-        yami_yns::Store::open(self.naming_path())
-            .and_then(|mut store| {
-                store.resolve(
-                    name,
-                    crate::naming::now()
-                        .map_err(|_| yami_yns::Error::Invalid("clock unavailable"))?,
-                )
-            })
-            .map_err(|e| e.to_string())
+        if Instant::now() >= deadline {
+            return Err("YNS navigation deadline exceeded".into());
+        }
+        crate::naming::resolve_remote(self, name, deadline, force).map_err(|e| e.to_string())
     }
     pub fn resolve_address(&self, text: &str) -> Result<Address, String> {
         Address::parse(text).or_else(|_| crate::naming::ReadableAddress::parse(text)?.resolve(self))

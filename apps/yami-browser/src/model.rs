@@ -967,7 +967,7 @@ fn load_native_page(
 ) -> Result<Page, String> {
     let address = match location {
         Location::Yami(address) => address.clone(),
-        Location::Named(address) => address.resolve(resolver)?,
+        Location::Named(address) => address.resolve_until(resolver, deadline)?,
         _ => unreachable!(),
     };
     let (data, info) = resolver.fetch_until(&address, deadline)?;

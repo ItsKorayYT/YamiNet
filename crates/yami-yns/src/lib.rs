@@ -1,7 +1,10 @@
-//! YNS 0.1: permissionless key-scoped names, explicit local aliases, and a
+//! YNS 0.2: authenticated distribution of v1 records, permissionless key-scoped names, explicit local aliases, and a
 //! separately configured official registry. Resolution returns a full NodeId;
 //! the transport must still authenticate that exact identity. See docs/yns.md.
+mod bundle;
+pub mod network;
 mod record;
+pub use bundle::Bundle;
 mod store;
 mod trust;
 
@@ -20,6 +23,7 @@ pub enum Error {
     Rollback,
     NotFound,
     UntrustedRegistry,
+    NoProviders,
     IdentityChanged {
         name: String,
         previous: NodeId,
@@ -35,6 +39,7 @@ impl fmt::Display for Error {
             Self::Expired => f.write_str("YNS record is expired or not yet valid"),
             Self::Rollback => f.write_str("YNS rollback or conflicting sequence rejected"),
             Self::NotFound => f.write_str("YNS name or delegation not found"),
+            Self::NoProviders => f.write_str("No YNS providers configured; remote naming needs an independently verified provider ID and endpoint"),
             Self::UntrustedRegistry => f.write_str("No matching configured trusted .yami registry key"),
             Self::IdentityChanged { name, previous, proposed } => write!(f, "YNS identity change blocked for {name}: trusted {previous}; proposed {proposed}. Review and explicitly approve both identities before continuing."),
             Self::Io(e) => write!(f, "YNS state unavailable: {e}"),

@@ -26,6 +26,12 @@ pub const MAX_WORKERS: usize = 32;
 /// Anything that can answer a YNP Get. `Ok(None)` becomes a NotFound reply;
 /// an error closes the connection without a reply.
 pub trait Documents: Sync {
+    fn naming(&self, _request: &[u8]) -> io::Result<Vec<u8>> {
+        Err(io::Error::new(
+            io::ErrorKind::Unsupported,
+            "YNS service is not enabled",
+        ))
+    }
     fn game(&self, _key: &str, _resource: ynp::GameResource) -> io::Result<Option<Vec<u8>>> {
         Ok(None)
     }
@@ -43,6 +49,29 @@ impl Documents for Site {
     }
     fn lookup(&self, key: &str) -> io::Result<Option<DocumentData>> {
         Site::lookup(self, key)
+    }
+}
+
+/// Opt-in naming service alongside the same document/game/asset source. The
+/// existing TLS listener, worker pool and absolute I/O deadlines are reused.
+pub struct NamingDocuments<'a, D> {
+    pub documents: &'a D,
+    pub naming: &'a yami_yns::network::Service,
+}
+impl<D: Documents> Documents for NamingDocuments<'_, D> {
+    fn naming(&self, request: &[u8]) -> io::Result<Vec<u8>> {
+        self.naming
+            .handle(request, yami_dht::now()?)
+            .map_err(io::Error::other)
+    }
+    fn lookup(&self, key: &str) -> io::Result<Option<DocumentData>> {
+        self.documents.lookup(key)
+    }
+    fn asset(&self, key: &str) -> io::Result<Option<Vec<u8>>> {
+        self.documents.asset(key)
+    }
+    fn game(&self, key: &str, resource: ynp::GameResource) -> io::Result<Option<Vec<u8>>> {
+        self.documents.game(key, resource)
     }
 }
 
@@ -71,6 +100,7 @@ impl Documents for Store {
 /// What a node sent back for one request.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Reply {
+    Naming,
     Document(String),
     NotFound(String),
     Dht,
@@ -147,6 +177,20 @@ pub fn serve_connection(
     };
     let request = ynp::read_frame(&mut connection)?;
     let (message, reply) = match request.message {
+        Message::NamingRequest { bytes } => {
+            if connection.inner.protection() != ynp::Protection::Tls13PinnedServer {
+                return Err(io::Error::new(
+                    io::ErrorKind::PermissionDenied,
+                    "naming requires authenticated TLS",
+                ));
+            }
+            (
+                Message::NamingResponse {
+                    bytes: documents.naming(&bytes)?,
+                },
+                Reply::Naming,
+            )
+        }
         Message::Get { key } => match documents.lookup(&key)? {
             Some(doc) if doc.key == key => (Message::Document(doc), Reply::Document(key)),
             Some(_) => return Err(io::Error::other("document source returned another key")),
