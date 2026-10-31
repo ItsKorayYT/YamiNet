@@ -24,15 +24,17 @@ pub enum Purpose {
     RoutedPeerRecord,
     RelayRegistration,
     RendezvousConsent,
+    NamingRecord,
 }
 impl Purpose {
-    pub const ALL: [Self; 6] = [
+    pub const ALL: [Self; 7] = [
         Self::DocumentMetadata,
         Self::SiteManifest,
         Self::PeerRecord,
         Self::RoutedPeerRecord,
         Self::RelayRegistration,
         Self::RendezvousConsent,
+        Self::NamingRecord,
     ];
     /// The domain separation prefix of every message signed for this purpose.
     pub fn tag(self) -> &'static [u8] {
@@ -43,6 +45,7 @@ impl Purpose {
             Self::RoutedPeerRecord => b"yaminet.peer-record.v2\0",
             Self::RelayRegistration => b"yaminet.relay-registration.v1\0",
             Self::RendezvousConsent => b"yaminet.rendezvous-consent.v1\0",
+            Self::NamingRecord => b"yaminet.yns-record.v1\0",
         }
     }
     pub fn name(self) -> &'static str {
@@ -62,6 +65,18 @@ mod sealed {
 pub trait Signable: sealed::Sealed {
     const PURPOSE: Purpose;
     fn canonical_bytes(&self) -> Vec<u8>;
+}
+
+/// SHA-256 of the canonical YNS v1 record payload, defined by `yami-yns`.
+/// A dedicated domain prevents naming signatures being reused for TLS or DHT.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NamingRecordDigest(pub Digest);
+impl sealed::Sealed for NamingRecordDigest {}
+impl Signable for NamingRecordDigest {
+    const PURPOSE: Purpose = Purpose::NamingRecord;
+    fn canonical_bytes(&self) -> Vec<u8> {
+        self.0.to_vec()
+    }
 }
 
 fn message(purpose: Purpose, body: &[u8]) -> Vec<u8> {

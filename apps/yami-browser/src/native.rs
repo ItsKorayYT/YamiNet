@@ -73,6 +73,7 @@ pub struct Resolver {
     directory: PathBuf,
     network: Network,
     service: OnceLock<Result<Service, String>>,
+    naming_lock: std::sync::Mutex<()>,
     failures: Failures,
     transfers: Transfers,
     lookups: Lookups,
@@ -87,8 +88,30 @@ impl Resolver {
             transfers: Transfers::default(),
             lookups: Lookups::default(),
             service: OnceLock::new(),
+            naming_lock: std::sync::Mutex::new(()),
             relay_enabled: Arc::new(AtomicBool::new(false)),
         }
+    }
+    pub fn naming_path(&self) -> PathBuf {
+        self.directory.join("yns")
+    }
+    pub fn resolve_name(&self, name: &yami_yns::Name) -> Result<NodeId, String> {
+        let _guard = self
+            .naming_lock
+            .lock()
+            .map_err(|_| "YNS state lock unavailable")?;
+        yami_yns::Store::open(self.naming_path())
+            .and_then(|mut store| {
+                store.resolve(
+                    name,
+                    crate::naming::now()
+                        .map_err(|_| yami_yns::Error::Invalid("clock unavailable"))?,
+                )
+            })
+            .map_err(|e| e.to_string())
+    }
+    pub fn resolve_address(&self, text: &str) -> Result<Address, String> {
+        Address::parse(text).or_else(|_| crate::naming::ReadableAddress::parse(text)?.resolve(self))
     }
     pub fn from_environment() -> Result<Self, String> {
         let network = match std::env::var("YAMINET_BROWSER_DHT_NETWORK") {

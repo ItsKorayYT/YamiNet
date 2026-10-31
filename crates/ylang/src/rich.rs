@@ -140,6 +140,39 @@ fn inline(line: &Line<'_>, text: &str) -> Result<Vec<Inline>, SyntaxError> {
     span.column += line.text[..prefix].chars().count();
     parse_inline(text, &span)
 }
+// Syntax only. Yami Browser performs complete checksum, signature, ownership
+// and persistent binding checks before following any native address.
+fn native_authority(s: &str) -> bool {
+    let identity = |id: &str| {
+        id.starts_with("yn1-")
+            && id.len() == 62
+            && id[4..]
+                .bytes()
+                .all(|b| b.is_ascii_lowercase() || matches!(b, b'2'..=b'7'))
+    };
+    let label = |s: &str| {
+        !s.is_empty()
+            && s.len() <= 32
+            && !s.starts_with("xn--")
+            && s.as_bytes()[0].is_ascii_lowercase()
+            && s.as_bytes()[s.len() - 1].is_ascii_alphanumeric()
+            && s.bytes()
+                .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
+    };
+    let path = |s: &str| s.split('.').count() <= 8 && s.split('.').all(label);
+    if identity(s) {
+        return true;
+    }
+    if let Some(alias) = s.strip_prefix('@') {
+        return label(alias);
+    }
+    if let Some(body) = s.strip_suffix(".yns") {
+        let (p, owner) = body.rsplit_once('.').unwrap_or(("", body));
+        return identity(owner) && (p.is_empty() || path(p));
+    }
+    s.strip_suffix(".yami").is_some_and(path)
+}
+
 fn link_target(target: &str) -> bool {
     if let Some(key) = target.strip_prefix("game:") {
         return valid_key(key) && key.len() <= 64;
@@ -152,12 +185,7 @@ fn link_target(target: &str) -> bool {
     }
     if let Some(rest) = target.strip_prefix("yami://") {
         let (id, key) = rest.split_once('/').unwrap_or((rest, "home"));
-        return id.starts_with("yn1-")
-            && id.len() == 62
-            && id[4..]
-                .bytes()
-                .all(|b| b.is_ascii_lowercase() || matches!(b, b'2'..=b'7'))
-            && valid_key(key);
+        return native_authority(id) && valid_key(key);
     }
     ["ynp://", "ynps://"].iter().any(|scheme| {
         target.strip_prefix(scheme).is_some_and(|v| {
@@ -445,5 +473,39 @@ mod game_tests {
             );
         }
         assert!(crate::parse("@page 0.1\n  title Arcade\n> game:prism | Launch\n").is_err());
+    }
+}
+
+#[cfg(test)]
+mod naming_tests {
+    #[test]
+    fn readable_native_links_are_inert_and_syntactically_scoped() {
+        let owner = "yn1-lbtgmztgmztgmztgmztgmztgmztgmztgmztgmztgmztgmztgmztfk4s3km";
+        for authority in [
+            "@blog".into(),
+            "welcome.yami".into(),
+            format!("blog.{owner}.yns"),
+            format!("{owner}.yns"),
+        ] {
+            let target = format!("yami://{authority}/home");
+            let document =
+                crate::parse(&format!("@page 0.2\n  title Names\n> {target} | Open\n")).unwrap();
+            assert!(
+                matches!(&document.nodes[0].kind,crate::NodeKind::Link { target: found, .. } if found==&target)
+            );
+        }
+        for authority in [
+            "@Blog",
+            "@xn--blog",
+            "blog",
+            "welcome.YAMI",
+            "welcоme.yami",
+            "blog.yn1-short.yns",
+        ] {
+            assert!(crate::parse(&format!(
+                "@page 0.2\n  title Names\n> yami://{authority}/home | Open\n"
+            ))
+            .is_err());
+        }
     }
 }

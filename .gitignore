@@ -23,3 +23,8 @@ __pycache__/
 
 # Independent Wasm guest build output; only the reviewed module is checked in.
 /games/breakout/target/
+
+# Local YNS aliases, registry trust, destination pins and rollback history.
+yns.json
+yns.lock
+yns.tmp

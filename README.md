@@ -33,6 +33,16 @@ You browse it with **Yami Browser**, a desktop application built specifically fo
 > [!IMPORTANT]
 > **YamiNet is an early experiment, not a secure anonymity network.** The apps are unsigned, public-network testing is incomplete, and connections can reveal network metadata. Don't use it for sensitive activity. [Read the security notes](SECURITY.md).
 
+### Native readable names (experimental YNS 0.1)
+
+Direct `yami://yn1-…/home` identities remain supported. Yami Browser also resolves
+explicit local aliases (`yami://@blog/home`) and signed, permissionless namespaces
+(`yami://blog.FULL-OWNER-ID.yns/home`). Records are shared by explicit import in
+this milestone. `.yami` is reserved for a separately trusted official authority;
+no production registry key is shipped. Global permissionless name uniqueness is
+still deferred pending an approved consensus design. See the [YNS guide](docs/yns.md)
+for creation, delegation, persistence, identity-change warnings and security limits.
+
 ## 🚀 Get started
 
 You don't need to know Rust or install programming tools to use a **prebuilt desktop package**.

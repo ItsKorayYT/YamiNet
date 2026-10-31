@@ -1158,7 +1158,7 @@ impl Desktop {
                 chrome::document_viewport(&mut c, &mut scene, &ui);
                 let verifying = matches!(
                     self.browser.active().location(),
-                    Location::Ynps(_) | Location::Yami(_)
+                    Location::Ynps(_) | Location::Yami(_) | Location::Named(_)
                 );
                 c.text(
                     if verifying {

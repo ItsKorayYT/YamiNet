@@ -301,7 +301,9 @@ pub fn error_page(
     let tab = browser.active();
     let remote = matches!(
         tab.location(),
-        crate::model::Location::Yami(_) | crate::model::Location::Ynps(_)
+        crate::model::Location::Yami(_)
+            | crate::model::Location::Named(_)
+            | crate::model::Location::Ynps(_)
     );
     let badge = Rect::new(r.x, r.y, 144.0, 28.0);
     c.round(badge, 14.0, [64, 40, 42, 255], [64, 40, 42, 255], None);
