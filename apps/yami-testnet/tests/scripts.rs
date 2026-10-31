@@ -83,6 +83,35 @@ fn documentation_and_templates_are_linked_from_the_kit() {
     }
 }
 
+#[cfg(unix)]
+#[test]
+fn rehearsal_finds_the_repository_from_an_unrelated_working_directory() {
+    let root = repo_root().canonicalize().unwrap();
+    let script = root.join("deploy/testnet/scenarios/loopback-rehearsal.sh");
+    let text = fs::read_to_string(&script).unwrap();
+    // Execute only the real path-resolution prefix, before binary lookup or
+    // process creation. No services are started by this regression.
+    let prefix = text.split_once("BIN_DIR=").unwrap().0;
+    let output = Command::new("bash")
+        .args([
+            "-c",
+            &format!("{prefix}\nprintf '%s' \"$REPO_ROOT\""),
+            script.to_str().unwrap(),
+        ])
+        .current_dir(std::env::temp_dir())
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        PathBuf::from(String::from_utf8(output.stdout).unwrap()),
+        root
+    );
+}
+
 #[test]
 fn bash_syntax_check_runs_when_bash_is_usable() {
     let root = repo_root();

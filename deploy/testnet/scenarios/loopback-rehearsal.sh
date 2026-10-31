@@ -8,7 +8,7 @@
 set -euo pipefail
 
 SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
-REPO_ROOT=$(CDPATH= cd -- "$SCRIPT_DIR/../.." && pwd)
+REPO_ROOT=$(CDPATH= cd -- "$SCRIPT_DIR/../../.." && pwd)
 BIN_DIR=${YAMINET_BIN_DIR:-"$REPO_ROOT/target/release"}
 EXE=""
 case "$(uname -s 2>/dev/null || echo unknown)" in
