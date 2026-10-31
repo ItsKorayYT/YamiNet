@@ -945,14 +945,44 @@ impl Desktop {
             })
             .and_then(|cache| cache.document.as_ref().ok())
     }
-    fn scroll_limit(&self) -> f64 {
-        let (_, _, scale) = self.size();
+    fn scroll_limit(&mut self) -> f64 {
+        let (width, height, scale) = self.size();
+        let error = match &self.browser.active().state {
+            PageState::Error(message) => Some(message.as_str()),
+            PageState::Ready(_) => self
+                .native
+                .as_ref()
+                .and_then(|cache| cache.document.as_ref().err())
+                .map(String::as_str),
+            _ => None,
+        };
+        if let Some(message) = error {
+            return chrome::error_scroll_limit(
+                &mut self.text,
+                width,
+                height,
+                scale,
+                &self.browser.active().address,
+                message,
+            );
+        }
         let height = self.viewport().h;
         self.current_layout()
             .map_or(0.0, |doc| (f64::from(doc.height / scale - height)).max(0.0))
     }
     fn scroll_to_mouse(&mut self) {
-        let area = self.viewport();
+        let area = if matches!(self.browser.active().state, PageState::Error(_))
+            || self
+                .native
+                .as_ref()
+                .is_some_and(|cache| cache.document.is_err())
+        {
+            let (width, height, _) = self.size();
+            let r = chrome::error_details_rect(width, height);
+            Rect::new(r.x, r.y + 38.0, r.w, r.h - 50.0)
+        } else {
+            self.viewport()
+        };
         let limit = self.scroll_limit();
         let fraction = ((self.mouse.1 - area.y) / area.h).clamp(0.0, 1.0);
         let tab = self.browser.active_mut();
@@ -1126,7 +1156,7 @@ impl Desktop {
                 &mut self.game_presentation,
                 immersive,
             ),
-            PageState::Home => chrome::home(&mut c, &mut scene, &ui),
+            PageState::Home => chrome::home(&mut c, &mut scene, &ui, &self.browser),
             PageState::Loading => {
                 chrome::document_viewport(&mut c, &mut scene, &ui);
                 let verifying = matches!(
@@ -1148,24 +1178,7 @@ impl Desktop {
                 );
             }
             PageState::Error(message) => {
-                chrome::document_viewport(&mut c, &mut scene, &ui);
-                let x = viewport.x + 40.0;
-                c.text(
-                    "Could not open page",
-                    x,
-                    viewport.y + 40.0,
-                    viewport.w - 80.0,
-                    16.0,
-                    INK,
-                    true,
-                );
-                let mut y = viewport.y + 76.0;
-                let chars: Vec<char> = message.chars().take(700).collect();
-                for part in chars.chunks(90) {
-                    let line: String = part.iter().collect();
-                    c.text(&line, x, y, viewport.w - 80.0, 13.0, INK, false);
-                    y += 21.0;
-                }
+                chrome::error_page(&mut c, &mut scene, &ui, &self.browser, message)
             }
             PageState::Ready(_) => {
                 let tab = self.browser.active();
@@ -1236,16 +1249,7 @@ impl Desktop {
                         }
                     }
                     Some(Err(error)) => {
-                        chrome::document_viewport(&mut c, &mut scene, &ui);
-                        c.text(
-                            error,
-                            viewport.x + 40.0,
-                            viewport.y + 40.0,
-                            viewport.w - 80.0,
-                            13.0,
-                            INK,
-                            false,
-                        );
+                        chrome::error_page(&mut c, &mut scene, &ui, &self.browser, error)
                     }
                     None => chrome::document_viewport(&mut c, &mut scene, &ui),
                 }
@@ -2166,11 +2170,12 @@ mod tests {
         app.editor.replace("café");
         frame(&mut app);
         assert_eq!(app.find.matches.len(), 2);
+        let scroll_limit = app.scroll_limit();
         assert!(
             app.browser.active().target_scroll > 500.0,
             "target={} limit={} rect={:?}",
             app.browser.active().target_scroll,
-            app.scroll_limit(),
+            scroll_limit,
             app.find.selected()
         );
         app.modifiers = ModifiersState::empty();
@@ -2230,6 +2235,153 @@ mod tests {
         let mut pix = Pixmap::new(w as u32, h as u32).unwrap();
         app.compose(&mut pix);
         pix
+    }
+
+    fn click_action(app: &mut Desktop, action: Action, in_page: bool) {
+        frame(app);
+        let hit = app
+            .scene
+            .hits
+            .iter()
+            .find(|hit| hit.action == action && (!in_page || hit.rect.x >= chrome::SIDEBAR_WIDTH))
+            .expect("visible control")
+            .rect;
+        let action = app
+            .scene
+            .hit(hit.x + hit.w / 2.0, hit.y + hit.h / 2.0)
+            .unwrap();
+        app.act(action);
+    }
+
+    #[test]
+    fn start_page_actions_use_the_existing_editor_and_local_workflows() {
+        let mut app = headless(900.0, 600.0);
+        click_action(&mut app, Action::Address, true);
+        app.editor.replace("local:welcome");
+        app.commit();
+        settle(&mut app);
+        assert_eq!(app.browser.active().title(), "Welcome to YamiNet");
+        assert!(frame(&mut app).width() > 0);
+        assert!(app.current_layout().is_some());
+        app.act(Action::Navigate(""));
+        click_action(&mut app, Action::Discover, true);
+        assert!(app.discover.open);
+        app.act(Action::Navigate(""));
+        click_action(&mut app, Action::OpenGame, true);
+        assert!(app.game_open);
+        assert_eq!(app.browser.tabs.len(), 1);
+    }
+
+    #[test]
+    fn error_diagnostics_scroll_and_recovery_uses_hit_tested_controls() {
+        let mut app = headless(900.0, 600.0);
+        app.act(Action::Navigate("local:welcome"));
+        settle(&mut app);
+        app.act(Action::Navigate("not-an-address"));
+        app.browser.active_mut().state = PageState::Error(format!(
+            "{}\nFINAL DIAGNOSTIC",
+            "Long café diagnostic with a full node identity. ".repeat(100)
+        ));
+        frame(&mut app);
+        let limit = app.scroll_limit();
+        assert!(limit > 0.0);
+        app.browser.active_mut().target_scroll = limit;
+        app.browser.active_mut().scroll = limit;
+        frame(&mut app);
+        assert_eq!(app.browser.active().scroll, limit);
+        click_action(&mut app, Action::Back, true);
+        // Invalid address input never adds a history entry. Start-page recovery
+        // is always available, regardless of whether back has somewhere to go.
+        app.act(Action::Navigate("not-an-address"));
+        click_action(&mut app, Action::Navigate(""), true);
+        assert!(matches!(app.browser.active().state, PageState::Home));
+        app.act(Action::Navigate("not-an-address"));
+        click_action(&mut app, Action::Reload, true);
+        assert!(matches!(app.browser.active().state, PageState::Error(_)));
+        assert_eq!(app.browser.active().address, "not-an-address");
+    }
+
+    #[test]
+    fn crowded_sidebar_keeps_tabs_and_utilities_separate_at_minimum_size() {
+        let mut app = headless(900.0, 600.0);
+        for _ in 1..crate::model::MAX_TABS {
+            app.browser.open_tab();
+        }
+        for _ in 0..crate::model::MAX_TABS {
+            frame(&mut app);
+            for hit in app
+                .scene
+                .hits
+                .iter()
+                .filter(|h| matches!(h.action, Action::Tab(_) | Action::Close(_)))
+            {
+                assert!(hit.rect.y + hit.rect.h < 600.0 - 188.0);
+                assert_eq!(
+                    app.scene.hit(hit.rect.x + 1.0, hit.rect.y + 1.0),
+                    Some(hit.action.clone())
+                );
+            }
+            if app.browser.active == 0 {
+                break;
+            }
+            let earlier = app
+                .scene
+                .hits
+                .iter()
+                .find(|h| matches!(h.action, Action::Tab(i) if i < app.browser.active))
+                .unwrap()
+                .action
+                .clone();
+            app.act(earlier);
+        }
+        assert_eq!(app.browser.active, 0);
+    }
+
+    #[test]
+    fn full_verified_identities_leave_room_for_tab_controls() {
+        let mut app = headless(900.0, 600.0);
+        let destination = *yami_identity::NodeIdentity::generate().unwrap().id();
+        let relay = *yami_identity::NodeIdentity::generate().unwrap().id();
+        for _ in 1..crate::model::MAX_TABS {
+            app.browser.open_tab();
+        }
+        app.act(Action::Navigate("local:welcome"));
+        settle(&mut app);
+        for security in [
+            crate::model::Security::Verified(destination),
+            crate::model::Security::Relayed { destination, relay },
+        ] {
+            if let PageState::Ready(page) = &mut app.browser.active_mut().state {
+                page.security = security;
+            }
+            frame(&mut app);
+            for hit in app.scene.hits.iter().filter(|h| {
+                matches!(
+                    h.action,
+                    Action::Tab(_) | Action::Close(_) | Action::OpenGame
+                )
+            }) {
+                assert!(
+                    hit.rect.y + hit.rect.h < 600.0 - 188.0,
+                    "{:?} at {:?}",
+                    hit.action,
+                    hit.rect
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn document_layout_errors_use_the_same_scrollable_recovery_view() {
+        let mut app = headless(900.0, 600.0);
+        app.act(Action::Navigate("local:welcome"));
+        settle(&mut app);
+        frame(&mut app);
+        app.native.as_mut().unwrap().document = Err("Detailed layout failure. ".repeat(100));
+        frame(&mut app);
+        assert!(app.scroll_limit() > 0.0);
+        click_action(&mut app, Action::Navigate(""), true);
+        assert!(matches!(app.browser.active().state, PageState::Home));
     }
 
     struct DiscoverFixture(std::path::PathBuf);
