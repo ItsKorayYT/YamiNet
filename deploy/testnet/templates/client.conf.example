@@ -1,0 +1,8 @@
+# TEMPLATE ONLY. Replace every placeholder before use.
+# No identity or listener: this is the independent client profile.
+yaminet-config 1
+role browser
+network public
+state /home/YOUR_USER/.local/share/yaminet/testnet-client
+bootstrap BOOTSTRAP_ID@PUBLIC_IPV4:17444
+relay-fallback yes

@@ -1,0 +1,16 @@
+# TEMPLATE ONLY. Replace every placeholder before use.
+# `yami-testnet init --mode public` generates a complete, validated profile;
+# prefer that over editing this file unless you need a custom layout.
+yaminet-config 1
+role node
+network public
+public-listen yes
+identity /var/lib/yaminet/testnet/bootstrap/identity
+state /var/lib/yaminet/testnet/bootstrap/state
+site /var/lib/yaminet/testnet/bootstrap/site
+listen BIND_IPV4:17444
+advertise PUBLIC_IPV4:17444
+dht yes
+workers 4
+renew-secs 21600
+health-secs 300

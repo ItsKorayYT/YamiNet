@@ -1,0 +1,448 @@
+#!/usr/bin/env bash
+# YamiNet public-testnet operator wrapper.
+#
+# This script never edits a firewall, never creates a service account, never
+# starts a listener during init, and never enables a unit without --start.
+# Review every command and configuration before using root.
+set -euo pipefail
+umask 022
+
+SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+REPO_ROOT=$(CDPATH= cd -- "$SCRIPT_DIR/../.." && pwd)
+UNIT_DIR=${YAMINET_SYSTEMD_DIR:-/etc/systemd/system}
+SYSTEMCTL=${YAMINET_SYSTEMCTL:-systemctl}
+EXE=""
+case "$(uname -s 2>/dev/null || echo unknown)" in
+    MINGW*|MSYS*|CYGWIN*) EXE=".exe" ;;
+esac
+
+info() { printf '%s\n' "$*"; }
+warn() { printf 'warning: %s\n' "$*" >&2; }
+die() { printf 'error: %s\n' "$*" >&2; exit 1; }
+
+run_systemctl() {
+    if [ "${YAMINET_DRY_RUN:-0}" = "1" ]; then
+        printf 'DRY RUN: %s' "$SYSTEMCTL"
+        printf ' %q' "$@"
+        printf '\n'
+    else
+        "$SYSTEMCTL" "$@"
+    fi
+}
+
+need_root() {
+    [ "$(id -u)" -eq 0 ] || die "this action changes system units; run it with sudo/root explicitly"
+}
+
+confirm() {
+    local prompt=$1 answer
+    if [ "${YES:-0}" = "1" ]; then
+        return 0
+    fi
+    printf '%s [y/N] ' "$prompt"
+    if ! read -r answer; then
+        return 1
+    fi
+    [ "$answer" = "y" ] || [ "$answer" = "Y" ]
+}
+
+resolve_bin() {
+    if [ -n "${YAMINET_TESTNET_BIN:-}" ]; then
+        [ -x "$YAMINET_TESTNET_BIN" ] || die "YAMINET_TESTNET_BIN is not executable: $YAMINET_TESTNET_BIN"
+        printf '%s\n' "$YAMINET_TESTNET_BIN"
+        return 0
+    fi
+    local candidate
+    for candidate in \
+        "$REPO_ROOT/target/release/yami-testnet$EXE" \
+        "$REPO_ROOT/target/debug/yami-testnet$EXE" \
+        "/opt/yaminet/yami-testnet" \
+        "$(command -v "yami-testnet$EXE" 2>/dev/null || true)"
+    do
+        if [ -n "$candidate" ] && [ -x "$candidate" ]; then
+            printf '%s\n' "$candidate"
+            return 0
+        fi
+    done
+    die "yami-testnet binary not found; build it with: cargo build --release -p yami-testnet"
+}
+
+need_bin() {
+    BIN=$(resolve_bin)
+}
+
+usage() {
+    cat <<'EOF'
+YamiNet public-testnet operator wrapper
+
+Usage:
+  yaminet-testnet init ...                 Create an offline profile with identities, demo site and unit files
+  yaminet-testnet check-config ...         Validate configuration, identity and site files
+  yaminet-testnet preflight ...            Run signed DHT, pinned TLS, document and PNG checks
+  yaminet-testnet render-unit ...          Render one systemd unit from a reviewed configuration
+  yaminet-testnet install --profile DIR [--user ACCOUNT] [--start] [--yes]
+                                           Copy rendered units into /etc/systemd/system (root, explicit)
+  yaminet-testnet uninstall [--yes]        Stop/disable and remove only YamiNet testnet units (root, explicit)
+  yaminet-testnet stop --profile DIR       Stop installed units
+  yaminet-testnet status --profile DIR     Show unit state and configured listeners
+  yaminet-testnet logs --profile DIR [--lines N]
+  yaminet-testnet firewall-plan --profile DIR
+                                           Print exact firewall commands; never executes them
+  yaminet-testnet remove ...               Delete a profile only with --confirm --purge-data
+  yaminet-testnet --version | --help
+
+Install does not start units unless --start is supplied. Init does not install,
+start, publish or firewall anything. No command performs port forwarding.
+EOF
+}
+
+require_profile() {
+    [ -n "${PROFILE:-}" ] || die "--profile is required"
+    case "$PROFILE" in
+        /*) ;;
+        *) die "--profile must be an absolute path for service operations" ;;
+    esac
+    [ -d "$PROFILE" ] || die "profile directory does not exist: $PROFILE"
+    [ -f "$PROFILE/.yaminet-testnet-profile" ] || die "not a testnet profile (marker missing): $PROFILE"
+}
+
+unit_files() {
+    local directory=$1
+    shopt -s nullglob
+    local files=("$directory"/*.service)
+    shopt -u nullglob
+    if [ "${#files[@]}" -gt 0 ]; then
+        printf '%s\n' "${files[@]}"
+    fi
+}
+
+cmd_init() {
+    need_bin
+    exec "$BIN" init "$@"
+}
+cmd_preflight() {
+    need_bin
+    exec "$BIN" preflight "$@"
+}
+cmd_check_config() {
+    need_bin
+    exec "$BIN" check-config "$@"
+}
+cmd_render_unit() {
+    need_bin
+    exec "$BIN" render-unit "$@"
+}
+cmd_remove() {
+    need_bin
+    local -a forward=("$@")
+    local profile="" previous="" argument
+    for argument in "$@"; do
+        if [ "$previous" = "--profile" ]; then
+            profile=$argument
+            break
+        fi
+        previous=$argument
+    done
+    if [ -n "$profile" ] && command -v "$SYSTEMCTL" >/dev/null 2>&1; then
+        local file name
+        while IFS= read -r file; do
+            [ -n "$file" ] || continue
+            name=$(basename "$file")
+            if "$SYSTEMCTL" is-active --quiet "$name" 2>/dev/null; then
+                die "$name is active; stop/uninstall the service before deleting its profile"
+            fi
+        done < <(unit_files "$profile/units" 2>/dev/null || true)
+    fi
+    exec "$BIN" remove "${forward[@]}"
+}
+
+cmd_install() {
+    PROFILE=""
+    USER_NAME=""
+    START=0
+    YES=0
+    while [ "$#" -gt 0 ]; do
+        case "$1" in
+            --profile) shift; [ "$#" -gt 0 ] || die "--profile needs a directory"; PROFILE=$1 ;;
+            --user) shift; [ "$#" -gt 0 ] || die "--user needs an account"; USER_NAME=$1 ;;
+            --start) START=1 ;;
+            --yes) YES=1 ;;
+            --help|-h) usage; return 0 ;;
+            *) die "unknown install option: $1" ;;
+        esac
+        shift
+    done
+    need_root
+    require_profile
+    [ -d "$PROFILE/units" ] || die "profile has no units directory: $PROFILE/units"
+    local -a files=()
+    local file
+    while IFS= read -r file; do
+        [ -n "$file" ] && files+=("$file")
+    done < <(unit_files "$PROFILE/units")
+    [ "${#files[@]}" -gt 0 ] || die "no rendered unit files found in $PROFILE/units"
+    if [ -z "$USER_NAME" ]; then
+        USER_NAME=$(sed -n 's/^User=//p' "${files[@]}" | head -n 1)
+        USER_NAME=${USER_NAME:-yaminet}
+    fi
+    if ! id "$USER_NAME" >/dev/null 2>&1; then
+        die "service account '$USER_NAME' does not exist; create it explicitly (for example: useradd --system --home /var/lib/yaminet --shell /usr/sbin/nologin $USER_NAME)"
+    fi
+    local owner
+    owner=$(stat -c '%U' "$PROFILE" 2>/dev/null || true)
+    if [ -n "$owner" ] && [ "$owner" != "$USER_NAME" ]; then
+        warn "profile is owned by '$owner' but units run as '$USER_NAME'; fix ownership explicitly if the service cannot read its files"
+    fi
+    info "The following units would be installed into $UNIT_DIR:"
+    printf '  %s\n' "${files[@]}"
+    if [ "$START" = "1" ]; then
+        info "They would then be enabled and started. This is an explicit request."
+    else
+        info "They would NOT be enabled or started."
+    fi
+    confirm "Install these reviewed units?" || die "not installed"
+    if [ "${YAMINET_DRY_RUN:-0}" = "1" ]; then
+        printf 'DRY RUN: install -m 0644 <unit> %s\n' "$UNIT_DIR"
+        if [ "$START" = "1" ]; then
+            printf 'DRY RUN: %s enable --now <unit>\n' "$SYSTEMCTL"
+        fi
+        return 0
+    fi
+    mkdir -p "$UNIT_DIR"
+    local name changed=0
+    for file in "${files[@]}"; do
+        name=$(basename "$file")
+        if [ -f "$UNIT_DIR/$name" ] && cmp -s "$file" "$UNIT_DIR/$name"; then
+            info "unchanged: $name"
+            continue
+        fi
+        install -m 0644 "$file" "$UNIT_DIR/$name"
+        info "installed: $name"
+        changed=1
+    done
+    if [ "$changed" = "1" ]; then
+        run_systemctl daemon-reload
+    fi
+    if [ "$START" = "1" ]; then
+        for file in "${files[@]}"; do
+            name=$(basename "$file")
+            run_systemctl enable --now "$name"
+        done
+        info "Started explicitly requested units. Inspect logs with: journalctl -u yaminet-testnet-bootstrap -f"
+    else
+        info "Units are installed but not enabled or started."
+        info "Start them explicitly with: systemctl enable --now yaminet-testnet-bootstrap.service"
+    fi
+}
+
+cmd_uninstall() {
+    YES=0
+    while [ "$#" -gt 0 ]; do
+        case "$1" in
+            --yes) YES=1 ;;
+            --help|-h) usage; return 0 ;;
+            *) die "unknown uninstall option: $1" ;;
+        esac
+        shift
+    done
+    need_root
+    info "This will stop, disable and remove only unit files whose Description contains 'YamiNet public testnet'."
+    info "Profiles, identities and websites are NOT removed."
+    confirm "Remove installed YamiNet testnet units?" || die "not uninstalled"
+    local file name found=0
+    shopt -s nullglob
+    for file in "$UNIT_DIR"/yaminet-testnet-*.service; do
+        found=1
+        grep -q "YamiNet public testnet" "$file" || {
+            warn "refusing to remove unrecognized unit file: $file"
+            continue
+        }
+        name=$(basename "$file")
+        run_systemctl stop "$name" >/dev/null 2>&1 || true
+        run_systemctl disable "$name" >/dev/null 2>&1 || true
+        if [ "${YAMINET_DRY_RUN:-0}" = "1" ]; then
+            printf 'DRY RUN: rm -f %s\n' "$file"
+        else
+            rm -f "$file"
+        fi
+        info "removed: $name"
+    done
+    shopt -u nullglob
+    [ "$found" = "1" ] || info "no installed YamiNet testnet units found in $UNIT_DIR"
+    run_systemctl daemon-reload
+    info "Profiles were retained. Delete one explicitly with: yami-testnet remove --profile DIR --confirm --purge-data"
+}
+
+cmd_stop() {
+    PROFILE=""
+    while [ "$#" -gt 0 ]; do
+        case "$1" in
+            --profile) shift; [ "$#" -gt 0 ] || die "--profile needs a directory"; PROFILE=$1 ;;
+            --help|-h) usage; return 0 ;;
+            *) die "unknown stop option: $1" ;;
+        esac
+        shift
+    done
+    need_root
+    require_profile
+    local -a files=()
+    local file name
+    while IFS= read -r file; do
+        [ -n "$file" ] && files+=("$file")
+    done < <(unit_files "$PROFILE/units")
+    [ "${#files[@]}" -gt 0 ] || die "no units in profile"
+    for file in "${files[@]}"; do
+        name=$(basename "$file")
+        run_systemctl stop "$name" || true
+        info "stopped: $name"
+    done
+}
+
+cmd_status() {
+    PROFILE=""
+    while [ "$#" -gt 0 ]; do
+        case "$1" in
+            --profile) shift; [ "$#" -gt 0 ] || die "--profile needs a directory"; PROFILE=$1 ;;
+            --help|-h) usage; return 0 ;;
+            *) die "unknown status option: $1" ;;
+        esac
+        shift
+    done
+    require_profile
+    local -a files=()
+    local file name
+    while IFS= read -r file; do
+        [ -n "$file" ] && files+=("$file")
+    done < <(unit_files "$PROFILE/units")
+    [ "${#files[@]}" -gt 0 ] || die "no units in profile"
+    for file in "${files[@]}"; do
+        name=$(basename "$file")
+        printf '%-38s active=%-10s enabled=%s\n' \
+            "$name" \
+            "$("$SYSTEMCTL" is-active "$name" 2>/dev/null || true)" \
+            "$("$SYSTEMCTL" is-enabled "$name" 2>/dev/null || true)"
+    done
+    info "Configured ports (presence is not reachability):"
+    sed -n 's/^\([A-Z_]*PORT\)=/\1=/p' "$PROFILE/addresses.env" 2>/dev/null || true
+    if command -v ss >/dev/null 2>&1; then
+        info "Local TCP listeners mentioning configured ports:"
+        local ports
+        ports=$(sed -n "s/^[A-Z_]*PORT='\([0-9]*\)'/\1/p" "$PROFILE/addresses.env" 2>/dev/null | paste -sd'|' -)
+        if [ -n "$ports" ]; then
+            ss -ltn 2>/dev/null | grep -E ":($ports)[[:space:]]" || true
+        fi
+    fi
+}
+
+cmd_logs() {
+    PROFILE=""
+    LINES=100
+    while [ "$#" -gt 0 ]; do
+        case "$1" in
+            --profile) shift; [ "$#" -gt 0 ] || die "--profile needs a directory"; PROFILE=$1 ;;
+            --lines) shift; [ "$#" -gt 0 ] || die "--lines needs a number"; LINES=$1 ;;
+            --help|-h) usage; return 0 ;;
+            *) die "unknown logs option: $1" ;;
+        esac
+        shift
+    done
+    require_profile
+    case "$LINES" in
+        ''|*[!0-9]*) die "--lines must be a positive integer" ;;
+    esac
+    if [ "$LINES" -lt 1 ] || [ "$LINES" -gt 10000 ]; then
+        die "--lines must be 1..10000"
+    fi
+    local units=()
+    local file name
+    while IFS= read -r file; do
+        [ -n "$file" ] || continue
+        name=$(basename "$file")
+        units+=(-u "$name")
+    done < <(unit_files "$PROFILE/units")
+    [ "${#units[@]}" -gt 0 ] || die "no units in profile"
+    journalctl "${units[@]}" -n "$LINES" --no-pager
+}
+
+read_env_value() {
+    local file=$1 key=$2
+    sed -n "s/^$key='\(.*\)'$/\1/p" "$file" | head -n 1
+}
+
+cmd_firewall_plan() {
+    PROFILE=""
+    while [ "$#" -gt 0 ]; do
+        case "$1" in
+            --profile) shift; [ "$#" -gt 0 ] || die "--profile needs a directory"; PROFILE=$1 ;;
+            --help|-h) usage; return 0 ;;
+            *) die "unknown firewall-plan option: $1" ;;
+        esac
+        shift
+    done
+    require_profile
+    local mode bootstrap_port relay_port site_port host_mode
+    mode=$(read_env_value "$PROFILE/addresses.env" YAMINET_MODE)
+    bootstrap_port=$(read_env_value "$PROFILE/addresses.env" BOOTSTRAP_PORT)
+    relay_port=$(read_env_value "$PROFILE/addresses.env" RELAY_PORT)
+    site_port=$(read_env_value "$PROFILE/addresses.env" SITE_PORT)
+    host_mode=$(read_env_value "$PROFILE/addresses.env" HOST_MODE)
+    info "Firewall plan only. This command makes no changes."
+    if [ "$mode" = "home" ]; then
+        info "Home-host mode is outbound-only: no inbound port or router forwarding is required."
+        info "Allow outbound TCP to the bootstrap and relay endpoints shown in $PROFILE/addresses.env."
+        return 0
+    fi
+    if [ "$mode" != "public" ]; then
+        info "Profile mode is '$mode'; no inbound firewall rule is required for loopback-only testing."
+        return 0
+    fi
+    info "Ask the VPS provider to allow these inbound TCP ports for your testnet only:"
+    [ -n "$bootstrap_port" ] && info "  $bootstrap_port/tcp  DHT bootstrap node"
+    [ -n "$relay_port" ] && info "  $relay_port/tcp  relay"
+    if [ "$host_mode" = "direct" ] && [ -n "$site_port" ]; then
+        info "  $site_port/tcp  direct demonstration website"
+    else
+        info "  no website port: the host uses an outbound relay connection"
+    fi
+    info ""
+    info "If you use ufw and have already preserved your SSH rule, the equivalent commands are:"
+    [ -n "$bootstrap_port" ] && info "  sudo ufw allow $bootstrap_port/tcp"
+    [ -n "$relay_port" ] && info "  sudo ufw allow $relay_port/tcp"
+    if [ "$host_mode" = "direct" ] && [ -n "$site_port" ]; then
+        info "  sudo ufw allow $site_port/tcp"
+    fi
+    info ""
+    info "For firewalld:"
+    [ -n "$bootstrap_port" ] && info "  sudo firewall-cmd --permanent --add-port=$bootstrap_port/tcp"
+    [ -n "$relay_port" ] && info "  sudo firewall-cmd --permanent --add-port=$relay_port/tcp"
+    if [ "$host_mode" = "direct" ] && [ -n "$site_port" ]; then
+        info "  sudo firewall-cmd --permanent --add-port=$site_port/tcp"
+    fi
+    info "  sudo firewall-cmd --reload"
+    info ""
+    info "Also check the provider's external firewall/security group. YamiNet does not change any of these rules automatically."
+}
+
+main() {
+    [ "$#" -gt 0 ] || { usage; exit 0; }
+    local command=$1
+    shift
+    case "$command" in
+        init) cmd_init "$@" ;;
+        preflight) cmd_preflight "$@" ;;
+        check-config) cmd_check_config "$@" ;;
+        render-unit) cmd_render_unit "$@" ;;
+        install) cmd_install "$@" ;;
+        uninstall) cmd_uninstall "$@" ;;
+        stop) cmd_stop "$@" ;;
+        status) cmd_status "$@" ;;
+        logs) cmd_logs "$@" ;;
+        firewall-plan) cmd_firewall_plan "$@" ;;
+        remove) cmd_remove "$@" ;;
+        --version) need_bin; exec "$BIN" --version ;;
+        --help|-h|help) usage ;;
+        *) usage >&2; die "unknown command: $command" ;;
+    esac
+}
+
+main "$@"
