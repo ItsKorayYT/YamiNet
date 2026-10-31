@@ -47,7 +47,7 @@ def package(platform, binaries, output):
     (stage / 'VERSION.txt').write_text(
         f'YamiNet {version}\n{platform} x86_64\nExperimental alpha; unsigned.\n', encoding='utf-8')
     files = sorted(p for p in stage.rglob('*') if p.is_file())
-    forbidden = {'node.key', 'peers.tsv', 'library.tsv', 'preferences.conf'}
+    forbidden = {'node.key', 'peers.tsv', 'library.tsv', 'preferences.conf', 'yns.json', 'yns.tmp'}
     assert not any(p.name in forbidden or p.suffix in ('.lock', '.cache') for p in files)
     (stage / 'MANIFEST.sha256').write_text(''.join(
         f'{hashlib.sha256(p.read_bytes()).hexdigest()}  {p.relative_to(stage).as_posix()}\n'

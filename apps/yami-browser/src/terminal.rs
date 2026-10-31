@@ -57,11 +57,11 @@ pub fn run(
     );
     let (text, remote_style) = match source.as_deref() {
         Some(url) if url.starts_with(yami_browser::native::SCHEME) => {
-            let address = yami_browser::native::Address::parse(url)?;
             let resolver = match resolver {
                 Some(resolver) => resolver,
                 None => std::sync::Arc::new(yami_browser::native::Resolver::from_environment()?),
             };
+            let address = resolver.resolve_address(url)?;
             if let Some(enabled) = relay_enabled {
                 resolver.set_relay_enabled(enabled);
             }

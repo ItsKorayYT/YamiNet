@@ -20,3 +20,5 @@ pub mod image_cache;
 pub mod diagnostics;
 
 pub mod network_trial;
+
+pub mod naming;

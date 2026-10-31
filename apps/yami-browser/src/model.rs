@@ -34,6 +34,8 @@ pub enum Location {
     Ynps(String),
     /// Stable identity address resolved through the existing DHT.
     Yami(Address),
+    /// Readable YNS name; the worker resolves it before identity lookup.
+    Named(crate::naming::ReadableAddress),
 }
 impl Location {
     pub fn is_local(&self) -> bool {
@@ -42,7 +44,7 @@ impl Location {
             Self::Ynps(url) => {
                 ynp_tls::parse_url(url).is_ok_and(|(_, endpoint, _)| endpoint.ip().is_loopback())
             }
-            Self::Yami(_) => false,
+            Self::Yami(_) | Self::Named(_) => false,
         }
     }
     pub fn parse(input: &str) -> Result<Self, String> {
@@ -56,6 +58,7 @@ impl Location {
             "local:about" => Ok(Self::About),
             _ if address.starts_with(native::SCHEME) => Address::parse(input)
                 .map(Self::Yami)
+                .or_else(|_| crate::naming::ReadableAddress::parse(input).map(Self::Named))
                 .map_err(|error| format!("Cannot open this address: {error}")),
             _ if address.starts_with(ynp_tls::SCHEME) => {
                 ynp_tls::parse_url(address).map_err(unusable)?;
@@ -74,6 +77,7 @@ impl Location {
             Self::About => "local:about".into(),
             Self::Ynp(address) | Self::Ynps(address) => address.clone(),
             Self::Yami(address) => address.url(),
+            Self::Named(address) => address.url(),
         }
     }
     fn label(&self) -> &str {
@@ -81,7 +85,7 @@ impl Location {
             Self::Home => "New tab",
             Self::Welcome => "Welcome to YamiNet",
             Self::About => "About YamiNet",
-            Self::Ynp(_) | Self::Ynps(_) | Self::Yami(_) => "YNP document",
+            Self::Ynp(_) | Self::Ynps(_) | Self::Yami(_) | Self::Named(_) => "YNP document",
         }
     }
 }
@@ -207,6 +211,17 @@ impl Tab {
                     key: key.into(),
                 }
                 .url(),
+                Location::Named(_) => self
+                    .security()
+                    .and_then(Security::destination)
+                    .map(|id| {
+                        Address {
+                            id,
+                            key: key.into(),
+                        }
+                        .url()
+                    })
+                    .unwrap_or_else(|| target.into()),
                 Location::Ynps(url) => ynp_tls::parse_url(url)
                     .map(|(id, endpoint, _)| ynp_tls::format_url(&id, endpoint, key))
                     .unwrap_or_else(|_| target.into()),
@@ -216,19 +231,23 @@ impl Tab {
                 _ => target.into(),
             };
         }
-        if let (Location::Yami(current), PageState::Ready(page)) = (self.location(), &self.state) {
-            if page.security.destination() == Some(current.id) {
+        if let PageState::Ready(page) = &self.state {
+            if let Some(id) = page
+                .security
+                .destination()
+                .filter(|id| match self.location() {
+                    Location::Yami(current) => *id == current.id,
+                    Location::Named(_) => true,
+                    _ => false,
+                })
+            {
                 if let Some(rest) = target.strip_prefix("ynp://") {
                     if let Ok(linked) = Address::parse(&format!("yami://{rest}")) {
                         return linked.url();
                     }
                     if let Ok((endpoint, key)) = ynp::parse_endpoint(rest) {
                         if page.endpoint == Some(endpoint) {
-                            return Address {
-                                id: current.id,
-                                key,
-                            }
-                            .url();
+                            return Address { id, key }.url();
                         }
                     }
                 }
@@ -476,7 +495,11 @@ impl Browser {
     /// Open a link from the active page (see [`Tab::resolve_link`]).
     pub fn follow(&mut self, target: &str, loader: &Loader) -> Result<(), String> {
         let address = self.active().resolve_link(target);
-        if matches!(self.active().location(), Location::Yami(_)) && address.starts_with("ynp://") {
+        if matches!(
+            self.active().location(),
+            Location::Yami(_) | Location::Named(_)
+        ) && address.starts_with("ynp://")
+        {
             let message = "Refused plaintext link from a Yami page. Use a yami:// identity address or an explicit ynps:// address.".to_string();
             let tab = self.active_mut();
             tab.generation = tab.generation.wrapping_add(1);
@@ -685,7 +708,7 @@ impl Loader {
         let mut loader = Self::with_fetcher(
             wake,
             Arc::new(move |location, deadline| {
-                if matches!(location, Location::Yami(_)) {
+                if matches!(location, Location::Yami(_) | Location::Named(_)) {
                     let resolver = resolver
                         .get_or_init(|| {
                             Resolver::from_environment().map(|mut resolver| {
@@ -721,7 +744,7 @@ impl Loader {
         let mut loader = Self::with_fetcher(
             wake,
             Arc::new(move |location, deadline| {
-                if matches!(location, Location::Yami(_)) {
+                if matches!(location, Location::Yami(_) | Location::Named(_)) {
                     load_native_page(location, &resolver, deadline)
                 } else {
                     load_page(location)
@@ -917,7 +940,9 @@ fn load_page(location: &Location) -> Result<Page, String> {
             })?;
             (data.source, data.style, Security::Plaintext)
         }
-        Location::Yami(_) => return Err("Native loading requires a browser DHT resolver.".into()),
+        Location::Yami(_) | Location::Named(_) => {
+            return Err("Native loading requires a browser DHT resolver.".into())
+        }
         Location::Ynps(address) => {
             let (data, id) = fetch_verified(address)?;
             (data.source, data.style, Security::Verified(id))
@@ -940,10 +965,12 @@ fn load_native_page(
     resolver: &Resolver,
     deadline: Instant,
 ) -> Result<Page, String> {
-    let Location::Yami(address) = location else {
-        unreachable!()
+    let address = match location {
+        Location::Yami(address) => address.clone(),
+        Location::Named(address) => address.resolve(resolver)?,
+        _ => unreachable!(),
     };
-    let (data, info) = resolver.fetch_until(address, deadline)?;
+    let (data, info) = resolver.fetch_until(&address, deadline)?;
     let mut page = parse_page(
         &data.source,
         &data.style,

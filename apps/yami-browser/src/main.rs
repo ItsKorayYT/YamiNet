@@ -122,6 +122,14 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             yami_browser::native::Resolver::from_config(&config)?,
         ));
     }
+    if args.first().is_some_and(|s| s == "yns") {
+        let resolver = match resolver {
+            Some(resolver) => resolver,
+            None => std::sync::Arc::new(yami_browser::native::Resolver::from_environment()?),
+        };
+        println!("{}", yami_browser::naming::command(&args[1..], &resolver)?);
+        return Ok(());
+    }
     if args == ["--network-status"] {
         let resolver = match resolver {
             Some(resolver) => resolver,
@@ -176,7 +184,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         return Ok(());
     }
     if args.first().is_some_and(|s| s == "--help") {
-        println!("Yami Browser\n  --network-trial URL --config FILE --asset KEY [--host-config FILE] [--include-endpoints] [--operator-relay-cycle]\n  --diagnostic-log ABS-DIR | diagnostics report|clear ABS-DIR\n  --desktop-smoke ABS-REPORT (isolated test profile required)\n  --game LOCAL-MANIFEST                 Play a local WebAssembly game\n  --version | --probe URL [--asset KEY]  Explicit authenticated diagnostics\n  yami-browser                         Native desktop window\n  yami-browser --desktop [YNP URL]     Desktop with initial page\n  yami-browser --terminal [file]       Terminal viewer\n  yami-browser [file | YNP URL] [--style file] [--ppm image.ppm]\nConfiguration: --config FILE | check-config FILE | --network-status\nSettings: --enable-relays | --disable-relays; --bootstrap node-ID@IPv4:port\nSidebar: relay toggle and Add bootstrap peer (paste full ID@IPv4:port, Enter).\nYNP URLs: yami://node-id/key (DHT lookup, pinned TLS 1.3)\n          ynps://node-id@IP:port/key (TLS 1.3, loopback, LAN or public IPv4)\n          ynp://loopback-IP:port/key (plaintext, this computer only)\n{}\n{}", ynp::WARNING, ynp_tls::WARNING);
+        println!("Yami Browser\n  --network-trial URL --config FILE --asset KEY [--host-config FILE] [--include-endpoints] [--operator-relay-cycle]\n  --diagnostic-log ABS-DIR | diagnostics report|clear ABS-DIR\n  --desktop-smoke ABS-REPORT (isolated test profile required)\n  --game LOCAL-MANIFEST                 Play a local WebAssembly game\n  --version | --probe URL [--asset KEY]  Explicit authenticated diagnostics\n  yami-browser                         Native desktop window\n  yami-browser --desktop [YNP URL]     Desktop with initial page\n  yami-browser --terminal [file]       Terminal viewer\n  yami-browser [file | YNP URL] [--style file] [--ppm image.ppm]\nConfiguration: --config FILE | check-config FILE | --network-status\nSettings: --enable-relays | --disable-relays; --bootstrap node-ID@IPv4:port\nSidebar: relay toggle and Add bootstrap peer (paste full ID@IPv4:port, Enter).\nNaming: yns (see docs/yns.md); yami://@alias/key; yami://label.full-owner-ID.yns/key\nYNP URLs: yami://node-id/key (DHT lookup, pinned TLS 1.3)\n          ynps://node-id@IP:port/key (TLS 1.3, loopback, LAN or public IPv4)\n          ynp://loopback-IP:port/key (plaintext, this computer only)\n{}\n{}", ynp::WARNING, ynp_tls::WARNING);
         Ok(())
     } else if game_path.is_some() || args.is_empty() || args[0] == "--desktop" {
         if args.first().is_some_and(|arg| arg == "--desktop") {

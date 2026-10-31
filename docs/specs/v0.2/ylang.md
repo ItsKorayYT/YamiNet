@@ -58,3 +58,9 @@ or URLs. The key selects `assets/<key>.png` on the authenticated parent node.
 Images are inert references; the browser's bounded same-node resource policy
 controls requests. Missing images retain alternative text. No external resources,
 fonts, scripts or tracking endpoints are implied by this grammar.
+
+YNS 0.1 also permits explicit `yami://@alias/home`,
+`yami://label.FULL-OWNER-ID.yns/home`, and `yami://service.yami/home` link targets.
+These links remain inert until selected. Syntax acceptance establishes no trust:
+the browser validates names and resolves them to full authenticated identities.
+See [YNS](../../yns.md) for canonical spelling and trust rules.
