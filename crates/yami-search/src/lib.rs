@@ -1,9 +1,15 @@
 //! Bounded local full-text search of inert YLang ASTs. No network on query.
 mod engine;
 mod files;
+mod provider;
+mod publication;
 mod text;
 
 pub use engine::{Index, Page, SearchHit, Stats};
+pub use provider::Provider;
+pub use publication::{
+    Manifest, Publication, ShardRef, MANIFEST_KEY, MAX_PUBLICATION_BYTES, MAX_SHARDS,
+};
 pub use text::{normalize, tokens};
 pub use yami_discover::WebsiteAddress;
 

@@ -41,3 +41,33 @@ serving, the selected directory and local state must be trusted against
 concurrent mutation by hostile local processes. Keep private material outside
 public website directories. Atomicity is filesystem atomicity, not a multiwriter
 transaction: use one writer per index directory.
+
+## Publish and curate
+
+```sh
+yami-search index sites/alice --output alice-index --identity FULL-ALICE-ID
+yami-search export alice-index --output published-alice
+yami-search provider create community-search
+yami-search provider add community-search alice-index
+yami-search provider add community-search bob-index
+yami-search provider build community-search
+yami-search verify community-search/published
+```
+
+Import only content you are authorized to index. Imports copy the supplied,
+validated content; they do not crawl or follow links. An index must have
+operator-supplied canonical addresses to publish. An independent provider can
+publish pages from several identities, with no assertion of ownership or trust.
+
+Serve the generated directory using existing `yami-node serve-dir ... --tls`
+or explicit relay hosting. The provider address is
+`yami://PROVIDER-FULL-ID/search-manifest`. See the normative
+[publication specification](specs/v0.4/fulltext-index.md) for strict bounds.
+The JSON payload is hex-chunked inside inert YLang sections, using SHA-256 from
+the existing identity crate to bind the manifest to exact shards. Original text
+and normalized terms round-trip through the production parser and validator.
+
+Export/build outputs must be new directories. For a subsequent generation use
+`provider build community-search --output published-next`, verify it, stop the
+node and switch its site directory. No unrelated site documents are overwritten.
+Publishing is a separate explicit action: export never opens network listeners.

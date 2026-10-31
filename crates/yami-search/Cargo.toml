@@ -16,3 +16,8 @@ ylang = { path = "../ylang" }
 yami-discover = { path = "../yami-discover" }
 yami-identity = { path = "../yami-identity" }
 
+[dev-dependencies]
+yami-node = { path = "../../apps/yami-node" }
+ynp = { path = "../ynp" }
+ynp-tls = { path = "../ynp-tls" }
+

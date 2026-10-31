@@ -15,10 +15,20 @@ Validation PASS: `cargo test -p yami-search -p yami-discover --locked`
 (4 full-text integration tests plus existing Discover suite); targeted Clippy
 with warnings denied; formatting; local Alice index/query/stats/rebuild CLI smoke.
 
+## Phase 2 — publication
+
+Implemented format-1 manifest and content-hashed shards as inert YLang 0.2
+documents, canonical addresses and validated normalized terms, deterministic
+builds, explicit multi-site provider imports, conflict rejection, new-directory
+export and verification CLI. Normative specification: `specs/v0.4/fulltext-index.md`.
+Validation PASS: 8 search tests including multi-site combination, multi-shard
+UTF-8 round-trip, malformed payload/envelope/hash rejection and serving a
+publication through the real existing TLS/YNP node. Targeted Clippy with warnings
+denied; index/provider/create/add/build/verify CLI smoke. All networking used
+loopback; physical internet validation NOT RUN.
+
 ## Remaining phases
 
-2. Specify and implement bounded inert YLang manifest/shards, portable validation,
-   explicit independent provider imports/builds and integration tests.
 3. Generalize existing authenticated document fetcher without weakening identity
    checks; implement bounded subscriptions, atomic valid snapshots, offline
    multi-provider merging and authenticated loopback/relay tests.
