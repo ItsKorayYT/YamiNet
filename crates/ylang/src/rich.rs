@@ -168,7 +168,7 @@ fn native_authority(s: &str) -> bool {
     }
     if let Some(body) = s.strip_suffix(".yns") {
         let (p, owner) = body.rsplit_once('.').unwrap_or(("", body));
-        return identity(owner) && (p.is_empty() || path(p));
+        return !body.starts_with('.') && identity(owner) && (p.is_empty() || path(p));
     }
     s.strip_suffix(".yami").is_some_and(path)
 }

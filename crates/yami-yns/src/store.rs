@@ -133,15 +133,17 @@ impl Store {
             drop(file);
             regular(&self.dir.join("yns.json")).map_err(std::io::Error::other)?;
             fs::rename(&tmp, self.dir.join("yns.json"))?;
-            #[cfg(unix)]
-            File::open(&self.dir)?.sync_all()?;
             Ok(())
         })();
         if let Err(e) = result {
             let _ = fs::remove_file(tmp);
             return Err(e.into());
         }
+        // Once rename succeeds, memory must retain the new history even if
+        // directory sync fails: a later operation must never write old pins.
         self.data = data;
+        #[cfg(unix)]
+        File::open(&self.dir)?.sync_all()?;
         Ok(())
     }
     pub fn aliases(&self) -> &BTreeMap<String, String> {

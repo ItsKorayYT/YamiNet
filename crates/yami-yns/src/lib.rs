@@ -64,6 +64,9 @@ impl Name {
         }
         if let Some(body) = text.strip_suffix(".yns") {
             let (path, key) = body.rsplit_once('.').unwrap_or(("", body));
+            if body.starts_with('.') {
+                return Err(Error::Invalid("empty name label"));
+            }
             path_valid(path)?;
             let owner = key
                 .parse()

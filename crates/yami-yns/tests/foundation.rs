@@ -350,6 +350,7 @@ fn names_have_one_strict_spelling_and_bounded_depth() {
     ] {
         assert!(Name::parse(input).is_err(), "{input}");
     }
+    assert!(Name::parse(&format!(".{ns}")).is_err());
     assert!(Name::parse(&ns).is_ok());
     assert!(Name::parse(&format!("blog.{ns}")).is_ok());
     assert!(Name::parse("@blog-1").is_ok());
