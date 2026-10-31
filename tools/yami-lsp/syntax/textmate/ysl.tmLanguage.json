@@ -1,0 +1,49 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "YSL",
+  "scopeName": "source.ysl",
+  "fileTypes": ["ysl"],
+  "patterns": [
+    { "include": "#header" },
+    { "include": "#group" },
+    { "include": "#property" },
+    { "include": "#color" },
+    { "include": "#number" },
+    { "include": "#keyword" }
+  ],
+  "repository": {
+    "header": {
+      "match": "^(@style)([ \\t]+)(0\\.[12])[ \\t]*\\r?$",
+      "captures": {
+        "1": { "name": "keyword.control.directive.ysl" },
+        "2": { "name": "punctuation.whitespace.ysl" },
+        "3": { "name": "constant.numeric.version.ysl" }
+      }
+    },
+    "group": {
+      "match": "^(canvas|text|heading|section|link|card|image|row)[ \\t]*\\r?$",
+      "captures": {
+        "1": { "name": "entity.name.type.group.ysl" }
+      }
+    },
+    "property": {
+      "match": "^(  )([a-z][a-z0-9-]*)(?=[ \\t])",
+      "captures": {
+        "1": { "name": "punctuation.whitespace.indent.ysl" },
+        "2": { "name": "support.type.property-name.ysl" }
+      }
+    },
+    "color": {
+      "match": "#[0-9A-Fa-f]{6}\\b",
+      "name": "constant.other.color.rgb-value.ysl"
+    },
+    "number": {
+      "match": "\\b\\d{1,4}\\b",
+      "name": "constant.numeric.ysl"
+    },
+    "keyword": {
+      "match": "\\b(left|center|right)\\b",
+      "name": "support.constant.keyword.ysl"
+    }
+  }
+}

@@ -1,0 +1,17 @@
+[package]
+name = "yami-lsp"
+description = "Native Language Server Protocol implementation for YLang and YSL"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+# The language server reuses the exact parsers shipped by YamiNet. It never
+# parses YLang/YSL with a second, divergent grammar implementation.
+ylang = { path = "../../../../crates/ylang" }
+ysl = { path = "../../../../crates/ysl" }
+
+[lints]
+workspace = true

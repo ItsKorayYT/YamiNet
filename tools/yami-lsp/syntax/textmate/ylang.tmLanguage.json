@@ -1,0 +1,101 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "YLang",
+  "scopeName": "source.ylang",
+  "fileTypes": ["ylang"],
+  "patterns": [
+    { "include": "#header" },
+    { "include": "#metadata" },
+    { "include": "#heading" },
+    { "include": "#section-typed" },
+    { "include": "#section-generic" },
+    { "include": "#link" },
+    { "include": "#image" },
+    { "include": "#separator" },
+    { "include": "#escape" },
+    { "include": "#inline" }
+  ],
+  "repository": {
+    "header": {
+      "match": "^(@page)([ \\t]+)(0\\.[12])[ \\t]*\\r?$",
+      "captures": {
+        "1": { "name": "keyword.control.directive.ylang" },
+        "2": { "name": "punctuation.whitespace.ylang" },
+        "3": { "name": "constant.numeric.version.ylang" }
+      }
+    },
+    "metadata": {
+      "match": "^(  )(title|language)([ \\t]+)(.+?)[ \\t]*\\r?$",
+      "captures": {
+        "1": { "name": "punctuation.whitespace.indent.ylang" },
+        "2": { "name": "entity.name.tag.metadata.ylang" },
+        "3": { "name": "punctuation.whitespace.ylang" },
+        "4": { "name": "string.unquoted.metadata.ylang" }
+      }
+    },
+    "heading": {
+      "match": "^(={1,6})(?=[ \\t])",
+      "captures": {
+        "1": { "name": "markup.heading.ylang" }
+      }
+    },
+    "section-typed": {
+      "match": "^(::)([ \\t]+)(card|row|group|list|steps)(?=[ \\t]|\\r?$)",
+      "captures": {
+        "1": { "name": "punctuation.definition.section.ylang" },
+        "2": { "name": "punctuation.whitespace.ylang" },
+        "3": { "name": "keyword.other.container.ylang" }
+      }
+    },
+    "section-generic": {
+      "match": "^(::)([ \\t]+)([^\\s]+)[ \\t]*(.*?)\\r?$",
+      "captures": {
+        "1": { "name": "punctuation.definition.section.ylang" },
+        "2": { "name": "punctuation.whitespace.ylang" },
+        "3": { "name": "entity.name.section.ylang" },
+        "4": { "name": "string.unquoted.section-title.ylang" }
+      }
+    },
+    "link": {
+      "match": "^(>)([ \\t]+)(\\S+)([ \\t]+\\|)([ \\t]+)(.*?)\\r?$",
+      "captures": {
+        "1": { "name": "keyword.operator.link.ylang" },
+        "2": { "name": "punctuation.whitespace.ylang" },
+        "3": { "name": "markup.underline.link.ylang" },
+        "4": { "name": "punctuation.separator.link.ylang" },
+        "5": { "name": "punctuation.whitespace.ylang" },
+        "6": { "name": "string.unquoted.link-label.ylang" }
+      }
+    },
+    "image": {
+      "match": "^!([ \\t]+)(\\S+)([ \\t]+\\|)([ \\t]+)(.*?)\\r?$",
+      "captures": {
+        "1": { "name": "punctuation.whitespace.ylang" },
+        "2": { "name": "string.unquoted.asset.ylang" },
+        "3": { "name": "punctuation.separator.image.ylang" },
+        "4": { "name": "punctuation.whitespace.ylang" },
+        "5": { "name": "string.unquoted.image-alt.ylang" }
+      }
+    },
+    "separator": {
+      "match": "^---[ \\t]*\\r?$",
+      "name": "punctuation.separator.ylang"
+    },
+    "escape": {
+      "match": "^\\\\.*$",
+      "name": "string.quoted.literal.ylang"
+    },
+    "inline": {
+      "begin": "\\[(strong|em|code):[ \\t]+",
+      "beginCaptures": {
+        "0": { "name": "punctuation.definition.inline.ylang" },
+        "1": { "name": "storage.type.inline.ylang" }
+      },
+      "end": "\\]",
+      "endCaptures": {
+        "0": { "name": "punctuation.definition.inline.ylang" }
+      },
+      "contentName": "markup.other.inline.ylang"
+    }
+  }
+}

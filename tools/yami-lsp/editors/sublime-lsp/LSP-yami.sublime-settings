@@ -1,0 +1,12 @@
+{
+  "clients": {
+    "yami-lsp": {
+      "command": ["/absolute/path/to/yami-lsp"],
+      "selector": "source.ylang, source.ysl",
+      "enabled": true,
+      "initializationOptions": {
+        "siteRoot": "/absolute/path/to/website"
+      }
+    }
+  }
+}

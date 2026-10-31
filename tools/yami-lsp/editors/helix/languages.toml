@@ -1,0 +1,24 @@
+# Helix language-server configuration for yami-lsp.
+# Merge this into ~/.config/helix/languages.toml.
+# Helix uses tree-sitter for highlighting; no grammar is bundled with yami-lsp,
+# so highlighting may fall back to plain text while LSP features still work.
+
+[language-server.yami-lsp]
+command = "yami-lsp"
+
+# Sent through workspace/didChangeConfiguration. "." resolves against the
+# workspace root; replace it with an absolute website directory if needed.
+[language-server.yami-lsp.config]
+siteRoot = "."
+
+[[language]]
+name = "ylang"
+scope = "source.ylang"
+file-types = ["ylang"]
+language-servers = ["yami-lsp"]
+
+[[language]]
+name = "ysl"
+scope = "source.ysl"
+file-types = ["ysl"]
+language-servers = ["yami-lsp"]
