@@ -76,11 +76,17 @@ assumptions apply. Publication updates use new output directories.
 
 Git author and committer are both `ItsKorayYT
 <123951134+ItsKorayYT@users.noreply.github.com>` for all implementation commits.
-Remote push preparation was tested with a non-mutating Git push dry run; it
-failed because this environment has no HTTPS Git username/credential available.
-The four phase commits remain on the local review branch. No main rewrite,
-force push, release publication or merge was attempted. After configuring Git
-push access, push `feature/fulltext-search` and open a review against `main`.
+Initial push preparation failed because HTTPS Git credentials were unavailable.
+A subsequent push on 2026-10-31 succeeded and published all four phase commits
+at `ae175f8`. The user then authorized merging all branches into `main` and
+deleting the merged branches. Merge commit `c8bc5e0` includes both the full-text
+head and native language-server head `76ad4a9`, retaining their histories.
+The language server is an independent nested workspace; its formatting,
+Clippy, 57 tests and locked offline build passed against the combined parsers.
+Combined-root verification after the merge also passed: formatting, Clippy
+with warnings denied, 322 tests (8 ignored) and the locked build. The nested
+language-server workspace passed formatting, Clippy and build separately.
+No main history rewrite, force push or release publication was performed.
 
 Next milestone: the Windows and two-independent-network validation procedure
 recorded in [the roadmap](fulltext-roadmap.md), followed by release review.

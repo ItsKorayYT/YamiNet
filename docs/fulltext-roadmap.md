@@ -70,8 +70,8 @@ validation separately uses real authenticated sockets.
 Final workspace fmt, Clippy (warnings denied), locked tests and locked build
 all PASS. Cargo summaries: 322 passed, 0 failed, 8 ignored. Native X11 first-run
 and reopened-profile full-text smokes both PASS. See `fulltext-validation.md`
-for precise scope and unrun tests. Git push dry run was blocked by missing HTTPS
-Git credentials; the committed branch is prepared locally for review.
+for precise scope and unrun tests. After the initial credential failure, all four
+phase commits were pushed to GitHub at `ae175f8` on 2026-10-31.
 Implementation commits: phase 1 `f594d10`, phase 2 `1cee9b5`, phase 3 `f8d692e`;
 phase 4 is the commit introducing native Discover Pages and this status.
 
@@ -90,4 +90,7 @@ Exact next milestone: validate this branch on Windows and two independent
 physical networks using independent website/provider nodes, exercise direct and
 signed-relay refresh plus outages/offline search, capture destination identity
 rejection and privacy observations, and record results before release review.
-Review and merge remain explicit; no main rewrite or release publication occurs.
+The user subsequently authorized integration of all branches into `main` and
+removal of the merged branches. The full-text head `ae175f8` and language-server
+head `76ad4a9` are included by merge commit `c8bc5e0`. No main history rewrite,
+force push or release publication is part of this integration.
