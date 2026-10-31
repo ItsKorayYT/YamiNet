@@ -1,6 +1,7 @@
 //! Native game presentation. The browser knows drawing commands, never game rules.
 use crate::chrome::{self, Action, Canvas, ChromeState, Rect, Scene, INK};
-use tiny_skia::{Pixmap, PixmapPaint, Transform};
+use std::sync::Arc;
+use tiny_skia::{Paint, Pixmap, PixmapPaint, Transform};
 use yami_games::{Command, Snapshot, Status, HEIGHT, WIDTH};
 const MUTED: [u8; 4] = [169, 183, 207, 255];
 fn color(value: u32) -> [u8; 4] {
@@ -16,6 +17,9 @@ pub struct Presentation {
     elapsed: f64,
     frames: u64,
     paint_ms: f64,
+    pub diagnostics: bool,
+    surface: Option<Pixmap>,
+    frame: Option<Arc<yami_games::Frame>>,
 }
 impl Presentation {
     pub fn record(
@@ -26,10 +30,13 @@ impl Presentation {
         elapsed: std::time::Duration,
     ) {
         if tab != self.tab {
-            *self = Self {
-                tab,
-                ..Self::default()
-            };
+            self.tab = tab;
+            self.game_frame = 0;
+            self.last = None;
+            self.intervals = 0;
+            self.elapsed = 0.;
+            self.frames = 0;
+            self.paint_ms = 0.;
         }
         if !running {
             self.last = None;
@@ -65,25 +72,109 @@ impl Presentation {
     }
 }
 
+const BACKGROUND: [u8; 4] = [8, 12, 23, 255];
+const ACCENT: [u8; 4] = [114, 235, 239, 255];
+const EDGE: [u8; 4] = [42, 57, 78, 255];
+
+/// All games share this aspect-preserving native surface and compact toolbar.
+/// Coordinates returned here are logical window pixels, independent of DPI.
+pub fn surface(area: Rect) -> Rect {
+    let factor = ((area.w - 32.) / WIDTH as f32)
+        .min((area.h - 112.) / HEIGHT as f32)
+        .max(0.01);
+    let w = WIDTH as f32 * factor;
+    let h = HEIGHT as f32 * factor;
+    Rect::new(
+        area.x + (area.w - w) / 2.,
+        area.y + 64. + (area.h - 112. - h) / 2.,
+        w,
+        h,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn button(
+    c: &mut Canvas<'_>,
+    scene: &mut Scene,
+    ui: &ChromeState<'_>,
+    r: Rect,
+    label: &str,
+    action: Action,
+    enabled: bool,
+    primary: bool,
+) {
+    let hover = r.contains(ui.mouse.0, ui.mouse.1) || ui.focus == Some(&action);
+    let fill = if primary {
+        [25, 64, 76, 255]
+    } else if enabled && hover {
+        [36, 49, 69, 255]
+    } else {
+        [18, 26, 41, 255]
+    };
+    let ink = if !enabled {
+        [97, 113, 137, 255]
+    } else if primary {
+        ACCENT
+    } else {
+        INK
+    };
+    c.round(
+        r,
+        8.,
+        fill,
+        fill,
+        Some(if enabled && hover { ACCENT } else { EDGE }),
+    );
+    let size = 13.;
+    let width = c.text.measure(label, size * c.scale, true) / c.scale;
+    c.text(
+        label,
+        r.x + (r.w - width) / 2.,
+        r.y + (r.h - size * 1.5) / 2.,
+        r.w,
+        size,
+        ink,
+        true,
+    );
+    if enabled {
+        scene.add(r, action);
+    }
+}
+
 pub fn paint(
     c: &mut Canvas<'_>,
     scene: &mut Scene,
     ui: &ChromeState<'_>,
     game: &Snapshot,
-    presentation: &Presentation,
+    presentation: &mut Presentation,
+    immersive: bool,
 ) {
-    let area = chrome::viewport(ui.width, ui.height);
-    c.round(area, 10., [13, 19, 36, 255], [13, 19, 36, 255], None);
+    let area = if immersive {
+        Rect::new(0., 0., ui.width, ui.height)
+    } else {
+        chrome::viewport(ui.width, ui.height)
+    };
+    c.round(area, 0., BACKGROUND, BACKGROUND, None);
+    c.text(
+        "YAMI / ARCADE",
+        area.x + 24.,
+        area.y + 13.,
+        180.,
+        11.,
+        ACCENT,
+        true,
+    );
     c.text(
         &game.title,
         area.x + 24.,
-        area.y + 16.,
-        area.w - 340.,
-        20.,
+        area.y + 29.,
+        area.w - 440.,
+        16.,
         INK,
         true,
     );
-    for (i, (label, action)) in [
+    let available = matches!(game.status, Status::Running | Status::Paused);
+    for (i, (label, action, enabled)) in [
         (
             if game.status == Status::Paused {
                 "Resume"
@@ -91,38 +182,64 @@ pub fn paint(
                 "Pause"
             },
             Action::GamePause,
+            available,
         ),
-        ("Restart", Action::GameReset),
-        ("Stop", Action::GameStop),
+        ("Restart", Action::GameReset, game.status != Status::Loading),
+        ("Stop", Action::GameStop, available),
+        (
+            if immersive { "Browser" } else { "Focus game" },
+            Action::GameLayout,
+            true,
+        ),
     ]
     .into_iter()
     .enumerate()
     {
-        chrome::panel_button(
+        button(
             c,
             scene,
             ui,
             Rect::new(
-                area.x + area.w - 300. + i as f32 * 92.,
-                area.y + 12.,
-                84.,
-                30.,
+                area.x + area.w - 400. + i as f32 * 94.,
+                area.y + 16.,
+                86.,
+                34.,
             ),
             label,
             action,
-            true,
+            enabled,
+            i == 0 && game.status == Status::Paused,
         );
     }
-    let factor = ((area.w - 32.) / WIDTH as f32)
-        .min((area.h - 150.) / HEIGHT as f32)
-        .max(0.01);
-    let x = area.x + (area.w - WIDTH as f32 * factor) / 2.;
-    let y = area.y + 60. + ((area.h - 150.) - HEIGHT as f32 * factor) / 2.;
-    if let Some(frame) = &game.frame {
-        // Always draw to a separate fixed-size pixmap. Long text is clipped here,
-        // so even valid guest commands cannot paint over browser chrome or controls.
-        if let Some(mut pix) = Pixmap::new(WIDTH as u32, HEIGHT as u32) {
-            let mut gc = Canvas::new(&mut pix, c.text, 1.);
+    let view = surface(area);
+    c.round(
+        Rect::new(view.x - 2., view.y - 2., view.w + 4., view.h + 4.),
+        2.,
+        EDGE,
+        EDGE,
+        None,
+    );
+    // Rasterize at the destination's physical resolution, including shaped text.
+    // This isolated pixmap remains the clipping boundary for every guest command.
+    // No magnified glyph bitmap or second texture filtering pass is involved.
+    let width = (view.w * c.scale).floor().max(1.) as u32;
+    let height = (view.h * c.scale).floor().max(1.) as u32;
+    let factor = (width as f32 / WIDTH as f32).min(height as f32 / HEIGHT as f32);
+    let resized = presentation
+        .surface
+        .as_ref()
+        .is_none_or(|p| p.width() != width || p.height() != height);
+    if resized {
+        presentation.surface = Pixmap::new(width, height);
+    }
+    if let (Some(frame), Some(pix)) = (&game.frame, &mut presentation.surface) {
+        if resized
+            || !presentation
+                .frame
+                .as_ref()
+                .is_some_and(|last| Arc::ptr_eq(last, frame) || last.commands == frame.commands)
+        {
+            let mut gc = Canvas::new(pix, c.text, factor);
             for command in &frame.commands {
                 match command {
                     Command::Clear(value) => {
@@ -138,13 +255,22 @@ pub fn paint(
                         color: value,
                     } => {
                         let v = color(*value);
-                        gc.round(
-                            Rect::new(*x as f32, *y as f32, *w as f32, *h as f32),
-                            0.,
-                            v,
-                            v,
-                            None,
-                        );
+                        // Snap straight edges to physical pixels for crisp grid
+                        // lines. Curves and text retain antialiasing. This also
+                        // avoids tiny-skia's fractional thin-rect AA assertion.
+                        let mut paint = Paint {
+                            anti_alias: false,
+                            ..Paint::default()
+                        };
+                        paint.set_color_rgba8(v[0], v[1], v[2], v[3]);
+                        if let Some(rect) = tiny_skia::Rect::from_xywh(
+                            *x as f32 * factor,
+                            *y as f32 * factor,
+                            *w as f32 * factor,
+                            *h as f32 * factor,
+                        ) {
+                            gc.pix.fill_rect(rect, &paint, Transform::identity(), None);
+                        }
                     }
                     Command::Circle {
                         x,
@@ -173,66 +299,122 @@ pub fn paint(
                         (WIDTH - x) as f32,
                         *size as f32,
                         color(*value),
-                        false,
+                        *size >= 18,
                     ),
                 }
             }
-            c.pix.draw_pixmap(
-                0,
-                0,
-                pix.as_ref(),
-                &PixmapPaint::default(),
-                Transform::from_scale(factor * c.scale, factor * c.scale)
-                    .post_translate(x * c.scale, y * c.scale),
-                None,
-            );
+            presentation.frame = Some(Arc::clone(frame));
         }
+        c.pix.draw_pixmap(
+            (view.x * c.scale).round() as i32,
+            (view.y * c.scale).round() as i32,
+            pix.as_ref(),
+            &PixmapPaint::default(),
+            Transform::identity(),
+            None,
+        );
     }
-    let status = match &game.status {
-        Status::Loading => "Loading local WebAssembly…".into(),
-        Status::Paused => "PAUSED · Resume or press P".into(),
-        Status::Stopped => "STOPPED · Restart to play".into(),
-        Status::Failed(error) => format!("Game stopped: {error}"),
-        Status::Running => {
-            "LOCAL WASM · A/D or arrows to move · Space to start · P to pause".into()
-        }
+    let overlay = match &game.status {
+        Status::Running => None,
+        Status::Paused => Some((
+            "INTERMISSION",
+            "Game paused",
+            "Your next move can wait.",
+            "Resume / P",
+            Action::GamePause,
+        )),
+        Status::Stopped => Some((
+            "SESSION ENDED",
+            "Game stopped",
+            "Ready for another round?",
+            "Restart",
+            Action::GameReset,
+        )),
+        Status::Loading => Some((
+            "YAMI ARCADE",
+            "Getting ready",
+            "Opening your local game…",
+            "Loading…",
+            Action::GameReset,
+        )),
+        Status::Failed(_) => Some((
+            "SESSION ENDED",
+            "Unable to play",
+            "The game stopped safely.",
+            "Try again",
+            Action::GameReset,
+        )),
     };
-    c.text(
-        &status,
-        area.x + 24.,
-        area.y + area.h - 57.,
-        area.w - 48.,
-        13.,
-        MUTED,
-        false,
-    );
-    if game.frames > 0 {
-        let info = format!(
-            "ABI 1 · 640 × 480 · 60 Hz target · VM avg {:.2} ms / max {:.2} ms · {} late frames",
-            game.total_update_us as f64 / game.frames as f64 / 1000.,
-            game.max_update_us as f64 / 1000.,
-            game.late_frames
+    if let Some((eyebrow, title, detail, label, action)) = overlay {
+        c.round(view, 0., [5, 9, 18, 215], [5, 9, 18, 215], None);
+        let panel = Rect::new(
+            view.x + (view.w - 360.) / 2.,
+            view.y + (view.h - 208.) / 2.,
+            360.,
+            208.,
+        );
+        c.round(panel, 12., [18, 27, 44, 255], [18, 27, 44, 255], Some(EDGE));
+        c.round(
+            Rect::new(panel.x + 28., panel.y, 48., 2.),
+            0.,
+            ACCENT,
+            ACCENT,
+            None,
         );
         c.text(
-            &info,
-            area.x + 24.,
-            area.y + area.h - 32.,
-            area.w - 48.,
+            eyebrow,
+            panel.x + 28.,
+            panel.y + 22.,
+            304.,
             11.,
+            ACCENT,
+            true,
+        );
+        c.text(title, panel.x + 28., panel.y + 47., 304., 27., INK, true);
+        c.text(
+            detail,
+            panel.x + 28.,
+            panel.y + 94.,
+            304.,
+            14.,
             MUTED,
             false,
         );
+        button(
+            c,
+            scene,
+            ui,
+            Rect::new(panel.x + 28., panel.y + 144., 150., 36.),
+            label,
+            action,
+            game.status != Status::Loading,
+            true,
+        );
     }
+    let footer = if presentation.diagnostics {
+        format!(
+            "{} · VM {:.2} ms · {} late",
+            presentation.label(),
+            game.total_update_us as f64 / game.frames.max(1) as f64 / 1000.,
+            game.late_frames
+        )
+    } else if let Status::Failed(error) = &game.status {
+        format!("Game stopped: {error}")
+    } else {
+        "A / D or ← / →  Move     SPACE  Start / serve     P / ESC  Pause     R  Restart".into()
+    };
     c.text(
-        &presentation.label(),
+        &footer,
         area.x + 24.,
-        area.y + area.h - 79.,
+        area.y + area.h - 31.,
         area.w - 48.,
-        11.,
+        12.,
         MUTED,
         false,
     );
-    chrome::round_viewport(c, ui);
+    if !immersive {
+        chrome::round_viewport(c, ui);
+    }
 }
 
 pub fn launcher(

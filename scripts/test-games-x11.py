@@ -65,6 +65,13 @@ def run(args):
                 key("ctrl+r")  # deterministic restart/resume after focus during load
                 time.sleep(0.5)
                 capture("start-screen")
+                xdo("mousemove", "1360", "32", "click", "1")  # Browser: pause and restore sidebar
+                time.sleep(0.3)
+                capture("browser-layout")
+                xdo("mousemove", "1360", "32", "click", "1")  # Focus game again
+                time.sleep(0.3)
+                key("p"); time.sleep(0.2)
+                report["checks"].append("immersive launch, Browser return, focused layout and explicit resume")
                 key("space"); time.sleep(0.1)
                 key("space"); time.sleep(0.3)
                 xdo("keydown", "Left"); time.sleep(0.25); xdo("keyup", "Left")
@@ -78,6 +85,9 @@ def run(args):
                 # Keep the game active long enough to sample actual presentation statistics.
                 time.sleep(8)
                 capture("gameplay")
+                key("F3"); time.sleep(0.3)
+                capture("performance")
+                key("F3")
                 key("ctrl+t"); title("New tab")
                 key("ctrl+l"); xdo("type", "--clearmodifiers", "local:about"); key("Return")
                 title("About YamiNet")
@@ -98,7 +108,7 @@ def run(args):
                 key("space"); time.sleep(0.1); key("space")
                 time.sleep(1)
                 capture("native-game")
-                xdo("mousemove", "1350", "35", "click", "1")  # Stop
+                xdo("mousemove", "1270", "32", "click", "1")  # Stop
                 time.sleep(0.4)
                 first = capture("stopped")
                 time.sleep(0.25)
@@ -107,6 +117,9 @@ def run(args):
                 assert first != capture("restarted"), "stopped VM did not restart"
                 xdo("windowsize", window, "900", "600"); time.sleep(0.5)
                 capture("scaled-900x600")
+                key("space"); time.sleep(0.1); key("space"); time.sleep(0.3)
+                key("p"); time.sleep(0.2)
+                capture("paused-900x600")
                 report["checks"].append("UI manifest launcher, stop, reload restart and viewport scaling")
                 key("alt+F4")
                 assert proc.wait(timeout=10) == 0, "unclean browser shutdown"

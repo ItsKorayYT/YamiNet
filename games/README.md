@@ -1,4 +1,4 @@
-# Yami Games 0.1
+# Yami Games 0.1.1
 
 Prism Breakout is an original Rust game running entirely through the reusable
 WebAssembly runtime. No browser-side Breakout logic is used.
@@ -16,7 +16,11 @@ the Wasm compilation target. Games are never loaded from document links.
 
 Use **Space** to start, then **Space** again to launch each ball. Move with
 **A/D** or **Left/Right**. **P** or **Escape** pauses/resumes. **R** resets to the
-start screen. The native toolbar also offers Pause/Resume, Restart and Stop.
+start screen. Games launch in a focused arcade layout with Pause/Resume, Restart,
+Stop and **Browser** in a compact toolbar. Browser restores the normal sidebar
+and pauses the game; **Focus game** returns to the dedicated surface. Resume
+explicitly after changing layouts. **Tab** pauses and focuses toolbar controls;
+**Enter** activates the focused control. **F3** toggles local performance counters.
 Switching tabs, opening a browser panel or losing focus pauses the game; resume
 explicitly. Close a game tab normally, including with Ctrl+W. Stop drops the VM;
 Restart after stopping explicitly reloads the local package.
@@ -36,3 +40,6 @@ WASI. Its small FFI wrappers call only the four versioned host drawing functions
 The host workspace continues to forbid unsafe Rust in its own code.
 
 See [the ABI, limits, architecture and validation report](../docs/games-0.1.md).
+
+See [the 0.1.1 visual overhaul and native validation](../docs/games-0.1.1.md)
+for display-resolution text rendering, screenshots and current checks.
