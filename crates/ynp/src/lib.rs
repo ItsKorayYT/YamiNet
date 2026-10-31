@@ -4,10 +4,12 @@
 //! crate carries the same frames over TLS 1.3 to a pinned node identity.
 mod assets;
 mod games;
+mod naming;
 pub use assets::{
     request_asset, validate_asset_key, AssetData, MAX_ASSET_BYTES, MAX_ASSET_KEY, MAX_ASSET_PAYLOAD,
 };
 pub use games::{request_game, GameResource, MAX_GAME_MANIFEST, MAX_GAME_MODULE};
+pub use naming::{request_naming, MAX_NAMING_BYTES};
 use std::{
     io::{self, Read, Write},
     net::{SocketAddr, TcpListener, TcpStream},
@@ -35,6 +37,12 @@ pub struct DocumentData {
 }
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Message {
+    NamingRequest {
+        bytes: Vec<u8>,
+    },
+    NamingResponse {
+        bytes: Vec<u8>,
+    },
     Get {
         key: String,
     },
@@ -98,6 +106,12 @@ fn put_text(output: &mut Vec<u8>, text: &str, max: usize) -> io::Result<()> {
 }
 
 pub fn write_frame(writer: &mut (impl Write + ?Sized), frame: &Frame) -> io::Result<()> {
+    if matches!(
+        frame.message,
+        Message::NamingRequest { .. } | Message::NamingResponse { .. }
+    ) {
+        return naming::write_naming(writer, frame);
+    }
     if matches!(
         frame.message,
         Message::GetAsset { .. } | Message::Asset(_) | Message::AssetNotFound { .. }
@@ -195,6 +209,9 @@ fn read_frame_limited(
     }
     if header[6..8] != [0, 0] {
         return Err(invalid("reserved header bits must be zero"));
+    }
+    if header[4] == 4 && !asset_only {
+        return naming::read_naming(reader, header);
     }
     if header[4] == 3 && !asset_only {
         return games::read_game(reader, header, MAX_GAME_MODULE);

@@ -39,6 +39,7 @@ yami-node dht status [--dir <peer-directory>] [--local]
 yami-node dht lookup <node-id> [--dir <peer-directory>] [--identity <identity-directory>] [--local]
 yami-node dht fetch <node-id> <key> [--dir <peer-directory>] [--identity <identity-directory>] [--local]
 serve-dir DHT options: --dht [--dht-local] [--dht-dir <peer/state-directory>] [--dht-endpoint <advertised-IPv4:port> ...]
+Naming mirror opt-in: --yns-dir <state-directory> [--yns-peer <full-ID@IPv4:port> ...] [--yns-registry-key <full-ID> ...]; requires TLS; see docs/yns-network.md
 Maintenance opt-in: --dht-maintain [--dht-renew-secs 30..43200] [--dht-health-secs 5..3600] [--dht-endpoints-file <file>]
 yami-node fetch <loopback-IP:port> <key>
 yami-node fetch <ynps://node-id@numeric-IP:port/key>
@@ -201,6 +202,9 @@ fn tls_demo(dir_one: &Path, dir_two: &Path) -> Result<()> {
 }
 const DEFAULT_WORKERS: usize = 4;
 fn serve_dir(address: SocketAddr, root: &str, options: ServeOptions) -> Result<()> {
+    if options.yns_dir.is_some() && !address.is_ipv4() {
+        return Err("YNS mirror requires a specific IPv4 listener".into());
+    }
     if !(1..=yami_node::MAX_WORKERS).contains(&options.workers) {
         return Err("worker count must be 1..32".into());
     }
@@ -326,6 +330,24 @@ fn serve_dir(address: SocketAddr, root: &str, options: ServeOptions) -> Result<(
             } else {
                 None
             };
+            let naming = if let Some(dir) = &options.yns_dir {
+                let network = if options.public {
+                    yami_dht::Network::Public
+                } else {
+                    yami_dht::Network::Loopback
+                };
+                let peers = options
+                    .yns_peers
+                    .iter()
+                    .map(|p| yami_yns::network::Provider::parse(p, network))
+                    .collect::<yami_yns::Result<Vec<_>>>()?;
+                let service = yami_yns::network::Service::open(dir, network, peers)?;
+                service.configure_registry(&options.yns_registry)?;
+                eprintln!("YNS v1 mirror enabled: bounded signed publication and query; no naming authority is granted to this node");
+                Some(service)
+            } else {
+                None
+            };
             // Keep the guard alive alongside the TLS listener. Without the flag
             // no discovery socket is created, even on an opted-in LAN listener.
             let _discovery = if options.discoverable {
@@ -362,7 +384,7 @@ fn serve_dir(address: SocketAddr, root: &str, options: ServeOptions) -> Result<(
                 &site,
                 options.workers,
                 options.public,
-                dht.as_ref(),
+                (dht.as_ref(), naming.as_ref()),
                 &|key| ynp_tls::format_url(&id, address, key),
                 &shutdown,
             );
@@ -381,7 +403,7 @@ fn serve_dir(address: SocketAddr, root: &str, options: ServeOptions) -> Result<(
                 &site,
                 options.workers,
                 false,
-                None,
+                (None, None),
                 &|key| format!("ynp://{address}/{key}"),
                 &yami_node::shutdown::Shutdown::default(),
             )
@@ -393,7 +415,10 @@ fn serve_site(
     site: &Site,
     workers: usize,
     public: bool,
-    dht: Option<&yami_dht::Service>,
+    services: (
+        Option<&yami_dht::Service>,
+        Option<&yami_yns::network::Service>,
+    ),
     url: &dyn Fn(&str) -> String,
     shutdown: &yami_node::shutdown::Shutdown,
 ) -> Result<()> {
@@ -414,10 +439,28 @@ fn serve_site(
         listener,
         workers,
         &|connection| {
-            if let Some(dht) = dht {
-                yami_node::serve_connection_with_dht(connection, site, dht)
+            fn dispatch(
+                connection: &mut dyn ynp::Connection,
+                documents: &impl yami_node::Documents,
+                dht: Option<&yami_dht::Service>,
+            ) -> io::Result<Reply> {
+                if let Some(dht) = dht {
+                    yami_node::serve_connection_with_dht(connection, documents, dht)
+                } else {
+                    yami_node::serve_connection(connection, documents)
+                }
+            }
+            if let Some(naming) = services.1 {
+                dispatch(
+                    connection,
+                    &yami_node::NamingDocuments {
+                        documents: site,
+                        naming,
+                    },
+                    services.0,
+                )
             } else {
-                yami_node::serve_connection(connection, site)
+                dispatch(connection, site, services.0)
             }
         },
         &|outcome| {
@@ -441,6 +484,7 @@ fn serve_site(
                 Ok(Reply::GameNotFound(key)) => eprintln!("Game resource not found: {key}"),
                 Ok(Reply::Asset(key)) => eprintln!("Served PNG asset {key}"),
                 Ok(Reply::AssetNotFound(key)) => eprintln!("PNG asset not found: {key}"),
+                Ok(Reply::Naming) => eprintln!("Served bounded YNS RPC"),
                 Ok(Reply::Dht) => eprintln!("Served bounded DHT RPC"),
             }
         },
@@ -452,6 +496,9 @@ fn open_site(root: &str) -> Result<Site> {
     Site::open(root).map_err(|error| format!("cannot open site {root}: {error}").into())
 }
 struct ServeOptions {
+    yns_dir: Option<PathBuf>,
+    yns_peers: Vec<String>,
+    yns_registry: Vec<NodeId>,
     workers: usize,
     identity: Option<PathBuf>,
     tls: bool,
@@ -468,6 +515,7 @@ struct ServeOptions {
 }
 fn serve_dir_options(options: &[String]) -> Result<ServeOptions> {
     let (mut workers, mut identity, mut tls, mut lan) = (None, None, false, false);
+    let (mut yns_dir, mut yns_peers, mut yns_registry) = (None, Vec::new(), Vec::new());
     let mut discoverable = false;
     let mut public = false;
     let (mut dht, mut dht_local, mut dht_dir, mut dht_endpoints) = (false, false, None, Vec::new());
@@ -476,6 +524,15 @@ fn serve_dir_options(options: &[String]) -> Result<ServeOptions> {
     let mut options = options.iter();
     while let Some(flag) = options.next() {
         match flag.as_str() {
+            "--yns-dir" if yns_dir.is_none() => {
+                yns_dir = Some(PathBuf::from(options.next().ok_or(USAGE)?))
+            }
+            "--yns-peer" if yns_peers.len() < yami_yns::network::MAX_PEERS => {
+                yns_peers.push(options.next().ok_or(USAGE)?.clone())
+            }
+            "--yns-registry-key" if yns_registry.len() < 32 => {
+                yns_registry.push(options.next().ok_or(USAGE)?.parse()?)
+            }
             "--workers" if workers.is_none() => {
                 workers = Some(options.next().ok_or(USAGE)?.parse()?)
             }
@@ -506,6 +563,12 @@ fn serve_dir_options(options: &[String]) -> Result<ServeOptions> {
             }
             _ => return Err(USAGE.into()),
         }
+    }
+    if yns_dir.is_some() && (!tls || lan) {
+        return Err("--yns-dir requires TLS on public IPv4 or isolated loopback; LAN mode is not supported for YNS providers".into());
+    }
+    if yns_dir.is_none() && (!yns_peers.is_empty() || !yns_registry.is_empty()) {
+        return Err("YNS peer/registry options require --yns-dir".into());
     }
     if !dht_maintain
         && (renew_secs.is_some() || health_secs.is_some() || dht_endpoints_file.is_some())
@@ -549,6 +612,9 @@ fn serve_dir_options(options: &[String]) -> Result<ServeOptions> {
         );
     }
     Ok(ServeOptions {
+        yns_dir,
+        yns_peers,
+        yns_registry,
         workers: workers.unwrap_or(DEFAULT_WORKERS),
         identity,
         tls,

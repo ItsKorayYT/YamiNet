@@ -13,18 +13,38 @@ pub trait RecordSource {
 pub struct History {
     high_water: BTreeMap<String, (u64, [u8; 32])>,
     bindings: BTreeMap<String, String>,
+    #[serde(default)]
+    conflicts: BTreeMap<String, u64>,
 }
 impl History {
     pub(crate) fn observe(&mut self, record: &Record) -> Result<()> {
         let key = format!("{}/{}", record.namespace(), record.path());
         let next = (record.sequence(), record.digest());
+        if self
+            .conflicts
+            .get(&key)
+            .is_some_and(|sequence| next.0 <= *sequence)
+        {
+            return Err(Error::Rollback);
+        }
         if let Some(old) = self.high_water.get(&key) {
-            if next.0 < old.0 || (next.0 == old.0 && next.1 != old.1) {
+            if next.0 < old.0 {
+                return Err(Error::Rollback);
+            }
+            if next.0 == old.0 && next.1 != old.1 {
+                self.conflicts.insert(key, next.0);
                 return Err(Error::Rollback);
             }
         }
+        self.conflicts.remove(&key);
         self.high_water.insert(key, next);
         Ok(())
+    }
+    pub(crate) fn conflict(&mut self, namespace: &str, path: &str, sequence: u64) {
+        self.conflicts
+            .entry(format!("{namespace}/{path}"))
+            .and_modify(|old| *old = (*old).max(sequence))
+            .or_insert(sequence);
     }
     pub(crate) fn pin(&mut self, name: &Name, id: NodeId) -> Result<()> {
         let name = name.to_string();
