@@ -132,12 +132,13 @@ pub enum PageState {
     Loading,
     Ready(Box<Page>),
     Error(String),
-    Game(Box<LocalGame>),
+    Game(Box<GameTab>),
 }
-/// Local executable content has no document origin, remote URL or persisted history.
+/// Executable content only enters through an explicit game action; never persisted.
 #[derive(Debug)]
-pub struct LocalGame {
-    pub path: std::path::PathBuf,
+pub struct GameTab {
+    pub source: crate::hosted_games::Source,
+    pub security: Option<Security>,
     pub session: yami_games::Session,
     pub snapshot: yami_games::Snapshot,
 }
@@ -180,10 +181,11 @@ impl Tab {
             PageState::Home => self.location().label(),
         }
     }
-    /// Only a loaded page has a connection to describe.
+    /// Describe observed delivery, never an uncompleted game transfer.
     pub fn security(&self) -> Option<&Security> {
         match &self.state {
             PageState::Ready(page) => Some(&page.security),
+            PageState::Game(game) if game.snapshot.frames > 0 => game.security.as_ref(),
             _ => None,
         }
     }
@@ -352,8 +354,57 @@ impl Browser {
         let snapshot = session.snapshot();
         let tab = self.active_mut();
         tab.address = "Local WebAssembly game".into();
-        tab.state = PageState::Game(Box::new(LocalGame {
-            path,
+        tab.state = PageState::Game(Box::new(GameTab {
+            source: crate::hosted_games::Source::Local(path),
+            security: None,
+            session,
+            snapshot,
+        }));
+        Ok(())
+    }
+    /// Called exclusively by the desktop's user-activated Play control.
+    /// `follow` and `navigate` intentionally cannot execute game links.
+    pub fn play_hosted(
+        &mut self,
+        key: &str,
+        wake: Arc<dyn Fn() + Send + Sync>,
+    ) -> Result<(), String> {
+        ynp::validate_asset_key(key).map_err(|e| e.to_string())?;
+        let PageState::Ready(page) = &self.active().state else {
+            return Err("Open an authenticated game page first".into());
+        };
+        fn offers(nodes: &[ylang::Node], target: &str) -> bool {
+            nodes.iter().any(|node| matches!(&node.kind, ylang::NodeKind::Link { target: offered, .. } if offered == target) || offers(node.kind.children(), target))
+        }
+        if !offers(&page.document.nodes, &format!("game:{key}")) {
+            return Err("This page does not offer that game".into());
+        }
+        let origin = page
+            .origin
+            .clone()
+            .filter(|o| page.security.destination() == Some(o.destination))
+            .ok_or("Play requires an authenticated publisher over TLS 1.3")?;
+        if self.tabs.len() >= MAX_TABS {
+            return Err("Close a tab before opening a game".into());
+        }
+        let security = Some(page.security.clone());
+        let source = crate::hosted_games::Source::Hosted {
+            origin,
+            key: key.into(),
+        };
+        let session = source.launch(wake)?;
+        let location = self.active().location().clone();
+        if !self.open_tab() {
+            return Err("Cannot open another tab".into());
+        }
+        let snapshot = session.snapshot();
+        let tab = self.active_mut();
+        tab.address = location.address();
+        tab.history.push(location);
+        tab.cursor = 1;
+        tab.state = PageState::Game(Box::new(GameTab {
+            source,
+            security,
             session,
             snapshot,
         }));

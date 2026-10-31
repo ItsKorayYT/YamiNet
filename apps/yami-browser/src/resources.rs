@@ -17,7 +17,7 @@ pub struct Origin {
     pub public_relay: bool,
 }
 impl Origin {
-    fn connect(&self, budget: Duration) -> std::io::Result<Box<dyn ynp::Connection>> {
+    pub(crate) fn connect(&self, budget: Duration) -> std::io::Result<Box<dyn ynp::Connection>> {
         if let Some(relay) = self.relay {
             yami_relay::Route {
                 relay,

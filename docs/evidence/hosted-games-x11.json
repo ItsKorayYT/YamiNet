@@ -1,0 +1,16 @@
+{
+  "schema": "yami-hosted-games-x11-1",
+  "network": "same-machine authenticated loopback",
+  "input": "synthetic X11/XTEST",
+  "checks": [
+    "actual yami address, signed DHT resolution, inert page before consent",
+    "mouse Play fetches manifest and Wasm over pinned TLS into immersive game tab",
+    "game controls, stable pause and resume",
+    "responsive document tabs, background pause, preserved source page, no player executable files",
+    "clean browser and publisher process shutdown"
+  ],
+  "address": "yami://yn1-pjxjzjabhuufftjxajpnid6hnak4xzh7odehr5m7dd7rgguptvhrd3jyfa/home",
+  "publisher_pid": 27175,
+  "browser_pid": 27182,
+  "result": "PASS"
+}

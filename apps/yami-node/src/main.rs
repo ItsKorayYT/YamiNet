@@ -437,6 +437,8 @@ fn serve_site(
                 Ok(Reply::Document(key)) => eprintln!("Served {key}"),
                 Ok(Reply::NotFound(key)) => eprintln!("NotFound {key}"),
                 Err(error) => eprintln!("Connection rejected: {error}"),
+                Ok(Reply::Game(key)) => eprintln!("Served game resource {key}"),
+                Ok(Reply::GameNotFound(key)) => eprintln!("Game resource not found: {key}"),
                 Ok(Reply::Asset(key)) => eprintln!("Served PNG asset {key}"),
                 Ok(Reply::AssetNotFound(key)) => eprintln!("PNG asset not found: {key}"),
                 Ok(Reply::Dht) => eprintln!("Served bounded DHT RPC"),
@@ -1172,9 +1174,10 @@ fn site_command(args: &[String]) -> Result<()> {
         _ => return Err(USAGE.into()),
     };
     println!(
-        "Valid site: {} pages, {} PNG assets, {} bytes",
+        "Valid site: {} pages, {} PNG assets, {} hosted games, {} bytes",
         report.pages.len(),
         report.assets.len(),
+        report.games.len(),
         report.bytes
     );
     for key in report.pages {
@@ -1182,6 +1185,9 @@ fn site_command(args: &[String]) -> Result<()> {
     }
     for key in report.assets {
         println!("PNG {key}");
+    }
+    for key in report.games {
+        println!("Game {key}");
     }
     Ok(())
 }

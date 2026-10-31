@@ -1,4 +1,6 @@
-//! Explicit local-only WebAssembly games. No WASI, native plugins or remote loader.
+//! Bounded WebAssembly games. No WASI or native plugins.
+mod hosted;
+pub use hosted::{HostedManifest, ModuleResource};
 mod runtime;
 mod session;
 pub use runtime::{Command, Frame, Runtime};

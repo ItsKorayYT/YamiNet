@@ -3,9 +3,11 @@
 //! This crate provides no identity, encryption or anonymity. The `ynp-tls`
 //! crate carries the same frames over TLS 1.3 to a pinned node identity.
 mod assets;
+mod games;
 pub use assets::{
     request_asset, validate_asset_key, AssetData, MAX_ASSET_BYTES, MAX_ASSET_KEY, MAX_ASSET_PAYLOAD,
 };
+pub use games::{request_game, GameResource, MAX_GAME_MANIFEST, MAX_GAME_MODULE};
 use std::{
     io::{self, Read, Write},
     net::{SocketAddr, TcpListener, TcpStream},
@@ -33,12 +35,33 @@ pub struct DocumentData {
 }
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Message {
-    Get { key: String },
+    Get {
+        key: String,
+    },
     Document(DocumentData),
-    NotFound { key: String },
-    GetAsset { key: String },
+    NotFound {
+        key: String,
+    },
+    GetGame {
+        key: String,
+        resource: GameResource,
+    },
+    Game {
+        key: String,
+        resource: GameResource,
+        bytes: Vec<u8>,
+    },
+    GameNotFound {
+        key: String,
+        resource: GameResource,
+    },
+    GetAsset {
+        key: String,
+    },
     Asset(AssetData),
-    AssetNotFound { key: String },
+    AssetNotFound {
+        key: String,
+    },
 }
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Frame {
@@ -80,6 +103,12 @@ pub fn write_frame(writer: &mut (impl Write + ?Sized), frame: &Frame) -> io::Res
         Message::GetAsset { .. } | Message::Asset(_) | Message::AssetNotFound { .. }
     ) {
         return assets::write_asset(writer, frame);
+    }
+    if matches!(
+        frame.message,
+        Message::GetGame { .. } | Message::Game { .. } | Message::GameNotFound { .. }
+    ) {
+        return games::write_game(writer, frame);
     }
     let mut payload = Vec::new();
     let kind = match &frame.message {
@@ -166,6 +195,9 @@ fn read_frame_limited(
     }
     if header[6..8] != [0, 0] {
         return Err(invalid("reserved header bits must be zero"));
+    }
+    if header[4] == 3 && !asset_only {
+        return games::read_game(reader, header, MAX_GAME_MODULE);
     }
     if header[4] == 2 {
         return assets::read_asset(reader, header, asset_limit);

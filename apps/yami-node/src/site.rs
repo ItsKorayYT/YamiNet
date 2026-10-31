@@ -117,6 +117,53 @@ impl Site {
         }
         Ok(Some(bytes))
     }
+    /// Only typed resources in the publisher-owned games directory are served.
+    pub fn game(&self, key: &str, resource: ynp::GameResource) -> io::Result<Option<Vec<u8>>> {
+        ynp::validate_asset_key(key)?;
+        let directory = self.root.join("games");
+        match fs::symlink_metadata(&directory) {
+            Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(None),
+            Err(e) => return Err(e),
+            Ok(meta) if !meta.file_type().is_dir() => {
+                return Err(refused("games", "is not a regular non-symlink directory"))
+            }
+            _ => {}
+        }
+        let extension = match resource {
+            ynp::GameResource::Manifest => "json",
+            ynp::GameResource::Module => "wasm",
+        };
+        let name = format!("{key}.{extension}");
+        let path = directory.join(&name);
+        match fs::symlink_metadata(&path) {
+            Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(None),
+            Err(e) => return Err(e),
+            Ok(meta) if !meta.file_type().is_file() => {
+                return Err(refused(&name, "is not a regular non-symlink file"))
+            }
+            _ => {}
+        }
+        let resolved = fs::canonicalize(&path)?;
+        if resolved.parent() != Some(directory.as_path())
+            || resolved.file_name() != Some(name.as_ref())
+        {
+            return Err(refused(
+                &name,
+                "resolves outside the games directory or to an alias",
+            ));
+        }
+        let file = File::open(resolved)?;
+        if !file.metadata()?.is_file() {
+            return Err(refused(&name, "is not a regular file"));
+        }
+        let mut bytes = Vec::new();
+        file.take((resource.limit() + 1) as u64)
+            .read_to_end(&mut bytes)?;
+        if bytes.is_empty() || bytes.len() > resource.limit() {
+            return Err(refused(&name, "exceeds game resource bounds"));
+        }
+        Ok(Some(bytes))
+    }
     pub fn assets(&self) -> io::Result<Vec<String>> {
         let directory = self.root.join("assets");
         if !directory.exists() {

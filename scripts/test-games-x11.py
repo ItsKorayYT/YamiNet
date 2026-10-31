@@ -43,6 +43,7 @@ def run(args):
                     if expected in xdo("getwindowname", window):
                         return
                     time.sleep(0.05)
+                capture("failure")
                 raise RuntimeError("title did not reach " + expected)
             def capture(name):
                 path = output / (name + ".png")

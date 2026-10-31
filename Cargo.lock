@@ -2535,8 +2535,10 @@ version = "0.1.0"
 dependencies = [
  "serde",
  "serde_json",
+ "sha2",
  "wasmi",
  "wat",
+ "ynp",
 ]
 
 [[package]]
@@ -2559,6 +2561,7 @@ dependencies = [
  "rustls",
  "yami-config",
  "yami-dht",
+ "yami-games",
  "yami-identity",
  "yami-relay",
  "yami-render",
