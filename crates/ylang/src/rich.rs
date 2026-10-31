@@ -141,6 +141,9 @@ fn inline(line: &Line<'_>, text: &str) -> Result<Vec<Inline>, SyntaxError> {
     parse_inline(text, &span)
 }
 fn link_target(target: &str) -> bool {
+    if let Some(key) = target.strip_prefix("game:") {
+        return valid_key(key) && key.len() <= 64;
+    }
     if let Some(key) = target.strip_prefix('/') {
         return valid_key(key);
     }
@@ -258,7 +261,11 @@ pub(super) fn block(
             }
             NodeKind::Link {
                 target: target.into(),
-                label: label.trim().into(),
+                label: if target.starts_with("game:") {
+                    format!("Play game: {}", label.trim())
+                } else {
+                    label.trim().into()
+                },
             }
         } else if let Some(value) = text.strip_prefix("! ") {
             let (key, alt) = value.split_once(" | ").ok_or_else(|| {
@@ -415,5 +422,28 @@ mod tests {
         assert_eq!((error.span.line, error.span.column), (4, 5));
         let error = parse("@page 0.3\n  title Unsupported\n").unwrap_err();
         assert_eq!((error.span.line, error.span.column), (1, 1));
+    }
+}
+
+#[cfg(test)]
+mod game_tests {
+    #[test]
+    fn play_links_are_inert_same_owner_keys_with_a_fixed_consent_label() {
+        let doc =
+            crate::parse("@page 0.2\n  title Arcade\n> game:prism | Prism Breakout\n").unwrap();
+        assert!(
+            matches!(&doc.nodes[0].kind,crate::NodeKind::Link {target,label} if target=="game:prism" && label=="Play game: Prism Breakout")
+        );
+        for target in [
+            "game:",
+            "game:../prism",
+            "game:yami://other/game",
+            "game:prism.wasm",
+        ] {
+            assert!(
+                crate::parse(&format!("@page 0.2\n  title Arcade\n> {target} | Launch\n")).is_err()
+            );
+        }
+        assert!(crate::parse("@page 0.1\n  title Arcade\n> game:prism | Launch\n").is_err());
     }
 }

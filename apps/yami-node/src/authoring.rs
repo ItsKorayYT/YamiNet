@@ -4,6 +4,7 @@ use std::{collections::BTreeSet, fs, io, path::Path};
 use ylang::{Node, NodeKind};
 const MAX_PAGES: usize = 256;
 const MAX_ASSETS: usize = 256;
+const MAX_GAMES: usize = 64;
 fn invalid(message: impl Into<String>) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, message.into())
 }
@@ -12,6 +13,8 @@ pub struct Report {
     pub pages: Vec<String>,
     pub assets: Vec<String>,
     pub bytes: usize,
+    pub games: Vec<String>,
+    pub modules: Vec<String>,
 }
 fn inventory(dir: &Path, extension: &str, max: usize) -> io::Result<Vec<String>> {
     let mut keys = Vec::new();
@@ -27,7 +30,7 @@ fn inventory(dir: &Path, extension: &str, max: usize) -> io::Result<Vec<String>>
                     "{name}: expected a regular file, never a symlink"
                 )));
             }
-            if extension == ".png" {
+            if matches!(extension, ".png" | ".json" | ".wasm") {
                 ynp::validate_asset_key(key)?;
             } else {
                 ynp::validate_key(key)?;
@@ -75,6 +78,33 @@ pub fn check(root: impl AsRef<Path>) -> io::Result<Report> {
         bytes += data.len();
         sizes.insert(key.clone(), (data.len(), image.pixels.len()));
     }
+    let game_dir = site.root().join("games");
+    let games = match fs::symlink_metadata(&game_dir) {
+        Ok(m) if m.file_type().is_dir() => inventory(&game_dir, ".json", MAX_GAMES)?,
+        Ok(_) => {
+            return Err(invalid(
+                "games must be a regular directory, never a symlink",
+            ))
+        }
+        Err(e) if e.kind() == io::ErrorKind::NotFound => Vec::new(),
+        Err(e) => return Err(e),
+    };
+    let mut modules = BTreeSet::new();
+    for key in &games {
+        let data = site
+            .game(key, ynp::GameResource::Manifest)?
+            .ok_or_else(|| invalid("game manifest disappeared"))?;
+        let manifest = yami_games::HostedManifest::parse(&data).map_err(invalid)?;
+        let module = site
+            .game(&manifest.module.key, ynp::GameResource::Module)?
+            .ok_or_else(|| invalid("game module missing"))?;
+        manifest.validate_module(&module).map_err(invalid)?;
+        bytes += data.len();
+        if modules.insert(manifest.module.key) {
+            bytes += module.len();
+        }
+    }
+    let game_set: BTreeSet<_> = games.iter().cloned().collect();
     let page_set: BTreeSet<_> = pages.iter().cloned().collect();
     for key in &pages {
         let data = site
@@ -83,7 +113,7 @@ pub fn check(root: impl AsRef<Path>) -> io::Result<Report> {
         bytes += data.source.len();
         let doc = ylang::parse(&data.source).map_err(|e| invalid(format!("{key}.ylang: {e}")))?;
         let mut images = BTreeSet::new();
-        validate_nodes(&doc.nodes, &page_set, &mut images, 0)
+        validate_nodes(&doc.nodes, &page_set, &game_set, &mut images, 0)
             .map_err(|e| invalid(format!("{key}.ylang: {e}")))?;
         if images.len() > yami_render::assets::MAX_PAGE_IMAGES {
             return Err(invalid(format!(
@@ -108,12 +138,15 @@ pub fn check(root: impl AsRef<Path>) -> io::Result<Report> {
     Ok(Report {
         pages,
         assets,
+        games,
+        modules: modules.into_iter().collect(),
         bytes,
     })
 }
 fn validate_nodes(
     nodes: &[Node],
     pages: &BTreeSet<String>,
+    games: &BTreeSet<String>,
     images: &mut BTreeSet<String>,
     depth: usize,
 ) -> io::Result<()> {
@@ -126,7 +159,12 @@ fn validate_nodes(
                 images.insert(key.clone());
             }
             NodeKind::Link { target, .. } => {
-                if let Some(key) = target.strip_prefix('/') {
+                if let Some(key) = target.strip_prefix("game:") {
+                    ynp::validate_asset_key(key)?;
+                    if !games.contains(key) {
+                        return Err(invalid(format!("missing games/{key}.json")));
+                    }
+                } else if let Some(key) = target.strip_prefix('/') {
                     if !pages.contains(key) {
                         return Err(invalid(format!(
                             "line {}: local link /{key} has no page",
@@ -162,7 +200,7 @@ fn validate_nodes(
             _ => {}
         }
         if !node.kind.children().is_empty() {
-            validate_nodes(node.kind.children(), pages, images, depth + 1)?;
+            validate_nodes(node.kind.children(), pages, games, images, depth + 1)?;
         }
     }
     Ok(())
@@ -222,7 +260,7 @@ pub fn new_site(root: impl AsRef<Path>, template: &str) -> io::Result<Report> {
     }
     result
 }
-/// A build exports only validated pages, shared style and PNGs; never keys/state.
+/// A build exports validated pages, style, PNGs and referenced game resources; never keys/state.
 pub fn build(source: impl AsRef<Path>, output: impl AsRef<Path>) -> io::Result<Report> {
     let report = check(&source)?;
     let site = Site::open(source)?;
@@ -251,6 +289,23 @@ pub fn build(source: impl AsRef<Path>, output: impl AsRef<Path>) -> io::Result<R
                 .asset(key)?
                 .ok_or_else(|| invalid("asset disappeared during build"))?;
             fs::write(output.join("assets").join(format!("{key}.png")), bytes)?;
+        }
+        if !report.games.is_empty() {
+            fs::create_dir(output.join("games"))?;
+            for (keys, resource, extension) in [
+                (&report.games, ynp::GameResource::Manifest, "json"),
+                (&report.modules, ynp::GameResource::Module, "wasm"),
+            ] {
+                for key in keys {
+                    let bytes = site
+                        .game(key, resource)?
+                        .ok_or_else(|| invalid("game resource disappeared during build"))?;
+                    fs::write(
+                        output.join("games").join(format!("{key}.{extension}")),
+                        bytes,
+                    )?;
+                }
+            }
         }
         check(output)
     })();

@@ -6,6 +6,7 @@ pub mod page_search;
 
 mod reliability;
 
+pub mod hosted_games;
 pub mod resources;
 
 pub mod library;

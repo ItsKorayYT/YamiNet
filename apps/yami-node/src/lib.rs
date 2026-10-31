@@ -26,12 +26,18 @@ pub const MAX_WORKERS: usize = 32;
 /// Anything that can answer a YNP Get. `Ok(None)` becomes a NotFound reply;
 /// an error closes the connection without a reply.
 pub trait Documents: Sync {
+    fn game(&self, _key: &str, _resource: ynp::GameResource) -> io::Result<Option<Vec<u8>>> {
+        Ok(None)
+    }
     fn lookup(&self, key: &str) -> io::Result<Option<DocumentData>>;
     fn asset(&self, _key: &str) -> io::Result<Option<Vec<u8>>> {
         Ok(None)
     }
 }
 impl Documents for Site {
+    fn game(&self, key: &str, resource: ynp::GameResource) -> io::Result<Option<Vec<u8>>> {
+        Site::game(self, key, resource)
+    }
     fn asset(&self, key: &str) -> io::Result<Option<Vec<u8>>> {
         Site::asset(self, key)
     }
@@ -68,6 +74,8 @@ pub enum Reply {
     Document(String),
     NotFound(String),
     Dht,
+    Game(String),
+    GameNotFound(String),
     Asset(String),
     AssetNotFound(String),
 }
@@ -144,6 +152,31 @@ pub fn serve_connection(
             Some(_) => return Err(io::Error::other("document source returned another key")),
             None => (Message::NotFound { key: key.clone() }, Reply::NotFound(key)),
         },
+        Message::GetGame { key, resource } => {
+            if connection.inner.protection() != ynp::Protection::Tls13PinnedServer {
+                return Err(io::Error::new(
+                    io::ErrorKind::PermissionDenied,
+                    "games require authenticated TLS",
+                ));
+            }
+            match documents.game(&key, resource)? {
+                Some(bytes) => (
+                    Message::Game {
+                        key: key.clone(),
+                        resource,
+                        bytes,
+                    },
+                    Reply::Game(key),
+                ),
+                None => (
+                    Message::GameNotFound {
+                        key: key.clone(),
+                        resource,
+                    },
+                    Reply::GameNotFound(key),
+                ),
+            }
+        }
         Message::GetAsset { key } => {
             if connection.inner.protection() != ynp::Protection::Tls13PinnedServer {
                 return Err(io::Error::new(

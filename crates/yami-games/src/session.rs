@@ -44,6 +44,7 @@ struct Shared {
     pressed: AtomicU32,
     reset: AtomicBool,
     notified: AtomicBool,
+    cancelled: AtomicBool,
 }
 /// A latest-frame mailbox and coalesced input: no unbounded queues, no VM on the caller.
 /// Drop requests shutdown without joining on the UI thread. Fuel bounds guest shutdown latency.
@@ -57,14 +58,23 @@ impl std::fmt::Debug for Session {
 }
 impl Session {
     pub fn launch(path: PathBuf, wake: Arc<dyn Fn() + Send + Sync>) -> Result<Self, String> {
+        Self::launch_with("Local game".into(), move |_| load_local(&path), wake)
+    }
+    /// Load bytes on an admitted game worker. The cancellation flag is set by stop/drop.
+    /// The loader must bound blocking I/O independently and check cancellation between transfers.
+    pub fn launch_with(
+        title: String,
+        load: impl FnOnce(&AtomicBool) -> Result<(Manifest, Vec<u8>), String> + Send + 'static,
+        wake: Arc<dyn Fn() + Send + Sync>,
+    ) -> Result<Self, String> {
         WORKERS
             .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |n| {
                 (n < MAX_SESSIONS).then_some(n + 1)
             })
-            .map_err(|_| "At most four local game sessions may be open")?;
+            .map_err(|_| "At most four game sessions may be open")?;
         let shared = Arc::new(Shared {
             snapshot: Mutex::new(Snapshot {
-                title: "Local game".into(),
+                title,
                 description: String::new(),
                 status: Status::Loading,
                 frame: None,
@@ -81,6 +91,7 @@ impl Session {
             pressed: AtomicU32::new(0),
             reset: AtomicBool::new(false),
             notified: AtomicBool::new(false),
+            cancelled: AtomicBool::new(false),
         });
         let worker = Arc::clone(&shared);
         if let Err(error) = thread::Builder::new()
@@ -93,9 +104,13 @@ impl Session {
                     }
                 }
                 let _count = Count;
-                if let Err(error) = worker.run(path, &wake) {
+                if let Err(error) = worker.run(load, &wake) {
                     worker.snapshot.lock().unwrap().status =
-                        Status::Failed(error.chars().take(500).collect());
+                        if worker.cancelled.load(Ordering::Acquire) {
+                            Status::Stopped
+                        } else {
+                            Status::Failed(error.chars().take(500).collect())
+                        };
                     worker.notify(&wake);
                 } else {
                     worker.snapshot.lock().unwrap().status = Status::Stopped;
@@ -133,6 +148,9 @@ impl Session {
         if self.shared.desired.load(Ordering::Acquire) >= STOP && value < QUIT {
             return;
         }
+        if value >= STOP {
+            self.shared.cancelled.store(true, Ordering::Release);
+        }
         self.shared.desired.store(value, Ordering::Release);
         self.clear_input();
         self.shared.changed.notify_one();
@@ -162,9 +180,20 @@ impl Shared {
             wake();
         }
     }
-    fn run(&self, path: PathBuf, wake: &Arc<dyn Fn() + Send + Sync>) -> Result<(), String> {
+    fn run(
+        &self,
+        load: impl FnOnce(&AtomicBool) -> Result<(Manifest, Vec<u8>), String>,
+        wake: &Arc<dyn Fn() + Send + Sync>,
+    ) -> Result<(), String> {
         let start = Instant::now();
-        let (manifest, bytes) = load_local(&path)?;
+        if self.cancelled.load(Ordering::Acquire) {
+            return Ok(());
+        }
+        let loaded = load(&self.cancelled);
+        if self.cancelled.load(Ordering::Acquire) {
+            return Ok(());
+        }
+        let (manifest, bytes) = loaded?;
         if self.desired.load(Ordering::Acquire) >= STOP {
             return Ok(());
         }
@@ -294,5 +323,32 @@ mod tests {
         let shared = Arc::clone(&game.shared);
         drop(game);
         wait(&shared, |s| s.status == Status::Stopped);
+        let (send, receive) = std::sync::mpsc::channel();
+        let exited = Arc::new(AtomicBool::new(false));
+        let done = exited.clone();
+        let loading = Session::launch_with(
+            "Remote transfer".into(),
+            move |cancel| {
+                send.send(()).unwrap();
+                while !cancel.load(Ordering::Acquire) {
+                    thread::sleep(Duration::from_millis(1));
+                }
+                done.store(true, Ordering::Release);
+                Err("cancelled".into())
+            },
+            Arc::new(|| {}),
+        )
+        .unwrap();
+        receive.recv_timeout(Duration::from_secs(3)).unwrap();
+        let shared = loading.shared.clone();
+        drop(loading);
+        wait(&shared, |s| s.status == Status::Stopped);
+        assert!(exited.load(Ordering::Acquire));
+        assert_eq!(shared.snapshot.lock().unwrap().frames, 0);
+        let start = Instant::now();
+        while WORKERS.load(Ordering::SeqCst) != 0 {
+            assert!(start.elapsed() < Duration::from_secs(3));
+            thread::yield_now();
+        }
     }
 }

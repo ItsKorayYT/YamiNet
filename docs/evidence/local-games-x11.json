@@ -1,0 +1,12 @@
+{
+  "schema": "yami-games-x11-1",
+  "input": "synthetic X11/XTEST",
+  "checks": [
+    "immersive launch, Browser return, focused layout and explicit resume",
+    "CLI load, start, launch, paddle, pause freeze and resume",
+    "browser shortcuts, document browsing, background pause and close-tab isolation",
+    "UI manifest launcher, stop, reload restart and viewport scaling",
+    "clean native window shutdown with a game tab"
+  ],
+  "result": "PASS"
+}

@@ -481,10 +481,7 @@ impl Desktop {
                         game.snapshot.status,
                         yami_games::Status::Stopped | yami_games::Status::Failed(_)
                     ) {
-                        match yami_games::Session::launch(
-                            game.path.clone(),
-                            Arc::clone(&self.game_wake),
-                        ) {
+                        match game.source.launch(Arc::clone(&self.game_wake)) {
                             Ok(session) => {
                                 game.session = session;
                                 game.snapshot = game.session.snapshot();
@@ -645,7 +642,7 @@ impl Desktop {
                 }
             }
             Action::Follow(target) => {
-                let _ = self.browser.follow(&target, &self.loader);
+                self.activate_link(&target);
                 self.clear_focus();
             }
             Action::Find => {
@@ -1332,6 +1329,21 @@ impl Desktop {
         }
         self.scene = scene;
     }
+    fn activate_link(&mut self, target: &str) {
+        if let Some(key) = target.strip_prefix("game:") {
+            match self.browser.play_hosted(key, Arc::clone(&self.game_wake)) {
+                Ok(()) => {
+                    self.game_immersive = true;
+                    self.clear_focus();
+                }
+                Err(error) => {
+                    self.browser.active_mut().state = PageState::Error(error);
+                }
+            }
+        } else {
+            let _ = self.browser.follow(target, &self.loader);
+        }
+    }
     fn game_key(&mut self, key: &winit::keyboard::PhysicalKey, down: bool, repeat: bool) -> bool {
         use winit::keyboard::{KeyCode, PhysicalKey};
         let bit = match key {
@@ -1804,7 +1816,7 @@ impl ApplicationHandler<()> for Desktop {
                     if self.scene.hit(self.mouse.0, self.mouse.1).is_none()
                         && self.link().as_ref() == Some(&target)
                     {
-                        let _ = self.browser.follow(&target, &self.loader);
+                        self.activate_link(&target);
                     }
                 }
                 self.redraw();

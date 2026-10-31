@@ -98,16 +98,20 @@ Search queries run on your computer, and there is no central search server. Refr
 
 [Learn more about Discover](docs/discover.md) · [Full-text search guide](docs/fulltext-search.md)
 
-## 🎮 Play a local game
+## 🎮 Play browser games
 
 Choose **Open local game** in the browser sidebar and enter the full path to
 `games/breakout/game.yami-game.json` in the package. **Prism Breakout** opens in
 its own native tab. Use **Space** to start and launch the ball, **A/D** or the
 arrow keys to move, and **P** to pause or resume.
 
-Games currently load only from files you explicitly choose on your computer;
-websites and Discover results cannot launch games. The WebAssembly runtime has
-experimental resource limits, without default WASI or operating-system access.
+Hosted games now offer an explicit **Play game** link on authenticated YamiNet
+websites. Choose Play to fetch and run the game inside a browser tab, with no
+installation or manual game-file handling. Ordinary page loads never launch code.
+Publishers can host their own manifests and Wasm modules; see [Games 0.2](docs/games-0.2.md)
+for publishing, the two-process demonstration and testing limits. Local games
+continue to work. The WebAssembly runtime has experimental resource limits,
+without WASI or operating-system access.
 See the [game walkthrough](games/README.md) and
 [ABI, limits and measured performance](docs/games-0.1.md).
 

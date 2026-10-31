@@ -43,6 +43,7 @@ def run(args):
                     if expected in xdo("getwindowname", window):
                         return
                     time.sleep(0.05)
+                capture("failure")
                 raise RuntimeError("title did not reach " + expected)
             def capture(name):
                 path = output / (name + ".png")
@@ -101,7 +102,7 @@ def run(args):
                 title("Welcome to YamiNet")
                 report["checks"].append("browser shortcuts, document browsing, background pause and close-tab isolation")
                 # With one remaining tab, this is the sidebar's Open local game control.
-                xdo("mousemove", "75", "245", "click", "1")
+                xdo("mousemove", "75", "273", "click", "1")
                 xdo("type", "--clearmodifiers", "--delay", "1", str(manifest)); key("Return")
                 title("Prism Breakout")
                 time.sleep(0.5)

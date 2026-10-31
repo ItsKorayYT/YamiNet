@@ -1,0 +1,7 @@
+@page 0.2
+  title YamiNet Arcade
+= Prism Breakout
+Clear the prism wall. Keep the ball alive. Chase 500 points.
+> game:prism | Prism Breakout
+Use Left / Right or A / D to move, Space to start and launch, P to pause.
+The game starts only when you choose Play. No installation is needed.
