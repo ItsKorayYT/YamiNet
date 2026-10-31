@@ -1,0 +1,11 @@
+# TEMPLATE ONLY. Replace every placeholder before use.
+# Create the identity first:
+#   yami-node identity new --dir /var/lib/yaminet/testnet/relay/identity
+yaminet-config 1
+role relay
+network public
+public-listen yes
+identity /var/lib/yaminet/testnet/relay/identity
+state /var/lib/yaminet/testnet/relay/state
+listen BIND_IPV4:17550
+advertise PUBLIC_IPV4:17550

@@ -122,6 +122,8 @@ You can build a personal page, a blog or a portfolio with YamiNet's included sit
 
 Start with the [step-by-step website publishing guide](docs/publishing-sites.md). It covers creating a site, editing its files, previewing, identities and hosting.
 
+To run your own experimental bootstrap/relay test network on a VPS, see the [public test-network deployment guide](docs/public-testnet.md).
+
 <details>
 <summary><strong>Already comfortable with a terminal? Try creating a site.</strong></summary>
 
