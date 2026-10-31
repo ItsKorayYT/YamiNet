@@ -1,6 +1,8 @@
 import hashlib
 import importlib.util
 import pathlib
+import re
+import shutil
 import subprocess
 import tempfile
 import unittest
@@ -13,6 +15,42 @@ SPEC.loader.exec_module(PACK)
 from verify import verify
 
 class BundleTests(unittest.TestCase):
+    def test_windows_uninstall_covers_staged_resources_without_deleting_user_files(self):
+        """Exercise the NSIS uninstall allowlist against the real staged layout."""
+        script = (PACK.ROOT / 'packaging/windows/installer.nsi').read_text()
+        uninstall = script.split('Section "Uninstall"', 1)[1].split('SectionEnd', 1)[0]
+        # Only known immediate application directories may be removed recursively.
+        directories = re.findall(r'^\s*RMDir /r "\$INSTDIR\\([^"\\]+)"\s*$', uninstall, re.M)
+        files = re.findall(r'^\s*Delete "\$INSTDIR\\([^"\\]+)"\s*$', uninstall, re.M)
+        self.assertEqual(len(directories), len(re.findall(r'^\s*RMDir /r ', uninstall, re.M)))
+        self.assertNotIn('*', ''.join(directories + files))
+        with tempfile.TemporaryDirectory(prefix='Yami uninstall regression ') as tmp:
+            root = pathlib.Path(tmp)
+            binaries = root / 'bin'; binaries.mkdir()
+            for name in PACK.BINS:
+                (binaries / (name + '.exe')).write_bytes(b'fixture executable')
+            stage = PACK.package('windows', binaries, root / 'output')
+            verify(stage, execute=False)
+            (stage / 'Uninstall.exe').write_bytes(b'generated NSIS uninstaller')
+            # Model the existing explicit NSIS commands, not a recursive wipe.
+            for directory in directories:
+                path = stage / directory
+                if path.is_dir(): shutil.rmtree(path)
+            for filename in files:
+                (stage / filename).unlink(missing_ok=True)
+            self.assertEqual(sorted(p.relative_to(stage).as_posix() for p in stage.rglob('*')), [])
+            # Running the same allowlist must leave operator files and state intact.
+            note = stage / 'operator-note.txt'; note.write_bytes(b'keep my note')
+            state = root / 'user data'; state.mkdir()
+            private = state / 'node.key'; private.write_bytes(b'private fixture')
+            for directory in directories:
+                path = stage / directory
+                if path.is_dir(): shutil.rmtree(path)
+            for filename in files:
+                (stage / filename).unlink(missing_ok=True)
+            self.assertEqual(note.read_bytes(), b'keep my note')
+            self.assertEqual(private.read_bytes(), b'private fixture')
+
     def test_layout_manifest_and_upgrade_leave_identity_untouched(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = pathlib.Path(tmp)
@@ -49,6 +87,7 @@ class BundleTests(unittest.TestCase):
                 (binaries / (name + '.exe')).write_bytes(b'fixture executable')
             stage = PACK.package('windows', binaries, root / 'output')
             self.assertTrue((stage / 'Launch Browser.cmd').is_file())
+            verify(stage, execute=False)
             with zipfile.ZipFile(next((root / 'output').glob('*.zip'))) as archive:
                 names = archive.namelist()
                 self.assertTrue(any(n.endswith('/fonts/DejaVu-LICENSE.txt') for n in names))
@@ -80,12 +119,18 @@ class BundleTests(unittest.TestCase):
             for name in PACK.BINS: (binaries / name).write_bytes(b'fixture executable')
             stage = PACK.package('linux', binaries, root / 'output')
             verify(stage, execute=False)
-            missing = 'fonts/OpenSans-Regular.ttf'
-            (stage / missing).unlink()
             manifest = stage / 'MANIFEST.sha256'
-            manifest.write_text(''.join(line+'\n' for line in manifest.read_text().splitlines() if not line.endswith('  '+missing)))
-            with self.assertRaisesRegex(ValueError, 'missing required resources'):
-                verify(stage, execute=False)
+            original_manifest = manifest.read_text()
+            for missing in ('fonts/OpenSans-Regular.ttf', 'games/breakout/game.yami-game.json',
+                            'games/breakout/breakout.wasm'):
+                with self.subTest(missing=missing):
+                    original = (stage / missing).read_bytes()
+                    (stage / missing).unlink()
+                    manifest.write_text(''.join(line+'\n' for line in original_manifest.splitlines() if not line.endswith('  '+missing)))
+                    with self.assertRaisesRegex(ValueError, 'missing required resources'):
+                        verify(stage, execute=False)
+                    (stage / missing).write_bytes(original)
+                    manifest.write_text(original_manifest)
 
     def test_extra_and_unsafe_manifest_entries_are_rejected(self):
         with tempfile.TemporaryDirectory() as tmp:

@@ -100,8 +100,9 @@ def run(args):
                 key("ctrl+l"); xdo("type", "local:welcome"); key("Return")
                 title("Welcome to YamiNet")
                 report["checks"].append("browser shortcuts, document browsing, background pause and close-tab isolation")
-                # With one remaining tab, this is the sidebar's Open local game control.
-                xdo("mousemove", "75", "245", "click", "1")
+                # Current chrome: one tab, built-in page, game button at y=258..288.
+                # y=245 now activates New Tab rather than the local game launcher.
+                xdo("mousemove", "75", "273", "click", "1")
                 xdo("type", "--clearmodifiers", "--delay", "1", str(manifest)); key("Return")
                 title("Prism Breakout")
                 time.sleep(0.5)
