@@ -119,6 +119,35 @@ python packaging/verify.py "$stage" --expected-version 0.3.1-alpha.1
 ./packaging/windows/verify-native.ps1 -Stage $stage -Version 0.3.1-alpha.1
 ```
 
+### Recorded results
+
+The fix at `0dddace50eb240d572cca2883352c45243d807b8` passed
+[both CI jobs](https://github.com/ItsKorayYT/YamiNet/actions/runs/41201668947):
+
+| Automated check | Result |
+| --- | --- |
+| Local formatting, strict workspace Clippy, debug and optimized workspace builds | PASS |
+| Local workspace tests | 339 passed, 0 failed; 9 existing ignores |
+| Packaging regressions, including missing game resources and uninstall allowlist | 7 passed |
+| Linux release package, no-Rust native verification, X11 lifecycle and input | PASS locally and in CI |
+| Native Windows MSVC package and NSIS creation | PASS in CI |
+| Real `0.3.0-alpha.1` to `0.3.1-alpha.1` installer upgrade | PASS in CI |
+| Windows installed and portable native GUI, fresh and reopened profiles | All four runs PASS in CI |
+| Windows cached full-text, tabs and packaged game lifecycle | PASS in all four GUI runs |
+| Windows complete uninstall, shortcuts/registry removal and user-data preservation | PASS in CI |
+
+The additional `scripts/test-games-x11.py` run against the packaged Linux release
+reached gameplay, paddle input, pause/resume and tab isolation, then exposed a
+stale test coordinate from before the browser redesign. Its y=245 click now
+activates New Tab; the current game launcher is at y=258..288. Updating only that
+click to the button center makes the complete script pass, including the UI
+manifest launcher, stop/restart, 900x600 scaling and clean shutdown. All existing
+assertions are retained; no application UI changes are needed.
+
+The follow-up commit contains that harness correction and this evidence. Its
+final CI run must also pass; the first green run is not substituted for validation
+of the final branch revision.
+
 The PR records the final source SHA, the exact Actions run and both matrix job
 results. Acceptance requires successful Linux and Windows jobs on that final
 branch revision, including the unchanged installer upgrade gate. The uploaded
