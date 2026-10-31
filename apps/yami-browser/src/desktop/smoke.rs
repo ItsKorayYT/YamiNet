@@ -8,6 +8,7 @@ pub(super) struct Smoke {
     last_frame: u64,
     reopened: bool,
     checks: Vec<&'static str>,
+    game_checkpoint: u64,
 }
 impl Smoke {
     pub(super) fn new(output: PathBuf, reopened: bool) -> Self {
@@ -18,6 +19,7 @@ impl Smoke {
             last_frame: 0,
             reopened,
             checks: Vec::new(),
+            game_checkpoint: 0,
         }
     }
     fn check(&mut self, ok: bool, name: &'static str) -> Result<(), String> {
@@ -258,9 +260,79 @@ impl Smoke {
                     matches!(app.browser.active().state, PageState::Home),
                     "error-start-page-recovery",
                 )?;
-                self.write("PASS", app.frames)?;
-                events.exit();
-                return Ok(true);
+                if let Some(path) = std::env::var_os("YAMINET_SMOKE_GAME") {
+                    // Only explicit smoke mode reads this fixture. The normal
+                    // local-only manifest loader and launcher remain in use.
+                    app.act(Action::OpenGame);
+                    app.editor.replace(&PathBuf::from(path).to_string_lossy());
+                    app.act(Action::LaunchGame);
+                    self.check(app.browser.tabs.len() == 2, "packaged-game-tab-open")?;
+                } else {
+                    return self.finish(app, events);
+                }
+            }
+            11 => {
+                let game = Self::game(app)?;
+                if game.status != yami_games::Status::Running || game.frames < 2 {
+                    return Ok(false);
+                }
+                self.check(
+                    game.frame.as_ref().is_some_and(|f| !f.commands.is_empty()),
+                    "packaged-game-render",
+                )?;
+                self.capture(app, "game-smoke.png")?;
+                app.act(Action::GamePause);
+            }
+            12 => {
+                if Self::game(app)?.status != yami_games::Status::Paused {
+                    return Ok(false);
+                }
+                self.check(true, "packaged-game-pause")?;
+                app.act(Action::Tab(0));
+                self.check(
+                    matches!(app.browser.active().state, PageState::Home),
+                    "packaged-game-tabs",
+                )?;
+                app.act(Action::Tab(1));
+                self.check(
+                    Self::game(app)?.status == yami_games::Status::Paused,
+                    "packaged-game-background-paused",
+                )?;
+                app.act(Action::GamePause);
+            }
+            13 => {
+                let game = Self::game(app)?;
+                if game.status != yami_games::Status::Running {
+                    return Ok(false);
+                }
+                self.check(true, "packaged-game-resume")?;
+                self.game_checkpoint = game.frames;
+                app.act(Action::GameReset);
+            }
+            14 => {
+                // A completed update after reset must still produce valid drawing.
+                let game = Self::game(app)?;
+                if game.frames <= self.game_checkpoint + 1 {
+                    return Ok(false);
+                }
+                self.check(
+                    game.status == yami_games::Status::Running && game.frame.is_some(),
+                    "packaged-game-reset",
+                )?;
+                app.act(Action::GameStop);
+            }
+            15 => {
+                if Self::game(app)?.status != yami_games::Status::Stopped {
+                    return Ok(false);
+                }
+                self.check(true, "packaged-game-stop")?;
+                app.act(Action::Close(1));
+                self.check(
+                    app.browser.tabs.len() == 1
+                        && matches!(app.browser.active().state, PageState::Home),
+                    "packaged-game-close",
+                )?;
+                return self.finish(app, events);
             }
             _ => unreachable!("smoke phase"),
         }
@@ -268,6 +340,20 @@ impl Smoke {
         self.phase += 1;
         app.redraw();
         Ok(false)
+    }
+    fn game(app: &Desktop) -> Result<&yami_games::Snapshot, String> {
+        let PageState::Game(game) = &app.browser.active().state else {
+            return Err("packaged game did not open".into());
+        };
+        if let yami_games::Status::Failed(error) = &game.snapshot.status {
+            return Err(format!("packaged game failed: {error}"));
+        }
+        Ok(&game.snapshot)
+    }
+    fn finish(&self, app: &Desktop, events: &ActiveEventLoop) -> Result<bool, String> {
+        self.write("PASS", app.frames)?;
+        events.exit();
+        Ok(true)
     }
     fn capture(&self, app: &Desktop, name: &str) -> Result<(), String> {
         app.frame

@@ -36,6 +36,49 @@ def extract(archive, target):
     return dirs[0]
 
 
+def gui_smoke(app, env, cwd, root, report_path, pin, label):
+    """Run the shipped executable/resources, with a synthetic offline search cache."""
+    env = dict(env)
+    profile = root / f'{label} gui profile'
+    discover = profile / 'discover'
+    pages = discover / 'pages'
+    pages.mkdir(parents=True)
+    # Versioned test data is parsed and queried by the actual packaged SearchStore.
+    # This is a local cached snapshot, not a provider refresh or a network request.
+    (pages / 'search-state.json').write_text(json.dumps({
+        'version': 1, 'providers': [{
+            'name': 'Offline smoke', 'address': f'yami://{pin}/search-manifest',
+            'last_success': 1, 'last_error': None,
+            'snapshot': [{'key': 'home', 'title': 'Café smoke page',
+                          'headings': 'Native cached search', 'text': 'Original café document text.',
+                          'address': f'yami://{pin}/home'}],
+        }],
+    }), encoding='utf-8')
+    env.update(YAMINET_BROWSER_DATA_DIR=str(profile), YAMINET_DISCOVER_DIR=str(discover),
+               YAMINET_SMOKE_FULLTEXT='1',
+               YAMINET_SMOKE_GAME=str(app / 'games/breakout/game.yami-game.json'))
+    suffix = '.exe' if os.name == 'nt' else ''
+    observed_runs = []
+    for launch in range(2):
+        result = root / f'{label}-gui-{launch}.json'
+        run([app / ('yami-browser' + suffix), '--desktop-smoke', result], env, cwd, timeout=45)
+        observed = json.loads(result.read_text())
+        required = {'tabs-open-close', 'native-pages-mode', 'cached-fulltext-results',
+                    'fulltext-keyboard-selection', 'packaged-game-render',
+                    'packaged-game-pause', 'packaged-game-tabs', 'packaged-game-resume',
+                    'packaged-game-reset', 'packaged-game-stop', 'packaged-game-close'}
+        if (observed['result'] != 'PASS' or observed['reopened'] != bool(launch)
+                or not required <= set(observed['checks'])):
+            raise ValueError(f'{label} native GUI, search or game verification failed')
+        for source, name in [(result.with_suffix('.png'), f'{label}-window-{launch}.png'),
+                             (root / 'game-smoke.png', f'{label}-game-{launch}.png')]:
+            shutil.copy2(source, report_path.with_name(f'{report_path.stem}-{name}'))
+        if launch == 0 and (root / 'onboarding-smoke.png').exists():
+            shutil.copy2(root / 'onboarding-smoke.png', report_path.with_name(f'{report_path.stem}-{label}-onboarding.png'))
+        observed_runs.append(observed)
+    return observed_runs
+
+
 def lifecycle(args, report=None):
     if report is None: report = {}
     report.update({'schema': 'yaminet-package-lifecycle-1', 'platform': platform.platform(), 'checks': {}, 'gui': 'NOT RUN', 'cross_version_upgrade': 'NOT RUN'})
@@ -78,6 +121,7 @@ def lifecycle(args, report=None):
                 raise ValueError('native Windows lifecycle requires an NSIS installer')
             dest = root / 'installed application with spaces'
             previous = args.previous_installer or args.installer
+            report['phase'] = 'baseline-install'
             # NSIS /D= is a special final raw tail, NOT an ordinary quoted argv item.
             subprocess.run(f'"{previous.resolve()}" /S /D={dest}', env=env, cwd=cwd, capture_output=True, text=True, timeout=45, check=True)
             if not (dest / 'Uninstall.exe').is_file() or not (menu / 'Yami Browser.lnk').is_file():
@@ -87,16 +131,35 @@ def lifecycle(args, report=None):
                 raise ValueError('previous installer must contain an actually older version')
             report['upgrade_from'] = old_version
             unchanged()
+            report['phase'] = 'installer-upgrade'
             subprocess.run(f'"{args.installer.resolve()}" /S /D={dest}', env=env, cwd=cwd, capture_output=True, text=True, timeout=45, check=True)
+            report['phase'] = 'installed-package-verification'
             report['checks']['installed'] = verify(dest, expected_version=report['checks']['portable']['version'], installed=True)
+            with winreg.OpenKey(winreg.HKEY_CURRENT_USER, key) as entry:
+                installed_version = winreg.QueryValueEx(entry, 'DisplayVersion')[0]
+            if installed_version != report['checks']['portable']['version']:
+                raise ValueError('installed registry version was not upgraded')
             unchanged()
             report['cross_version_upgrade'] = 'PASS' if args.previous_installer else 'NOT RUN (same-build reinstall only)'
+            report['installed_gui'] = 'NOT RUN'
+            if args.gui:
+                report['phase'] = 'installed-gui'
+                report['installed_gui'] = 'RUNNING'
+                report['installed_gui_runs'] = gui_smoke(dest, env, cwd, root, args.report, pin, 'installed')
+                report['installed_gui'] = 'PASS (native window, logical actions; no physical keyboard/IME claim)'
+                unchanged()
+            report['phase'] = 'uninstall'
             # Normal NSIS self-copy spawns a child; verify actual removal, not only parent exit.
             run([dest / 'Uninstall.exe', '/S'], env, cwd)
             deadline = time.monotonic() + 30
             while time.monotonic() < deadline and ((dest / 'yami-browser.exe').exists() or (dest / 'Uninstall.exe').exists() or menu.exists()):
                 time.sleep(0.1)
             if dest.exists() or menu.exists():
+                # Relative paths only, never file contents or user-state dumps.
+                report['uninstall_remaining'] = {
+                    'application': sorted(p.relative_to(dest).as_posix() for p in dest.rglob('*'))[:256],
+                    'shortcuts': sorted(p.relative_to(menu).as_posix() for p in menu.rglob('*'))[:256],
+                }
                 raise ValueError('uninstall left application directory or shortcuts')
             try:
                 with winreg.OpenKey(winreg.HKEY_CURRENT_USER, key):
@@ -123,19 +186,7 @@ def lifecycle(args, report=None):
         if args.gui:
             report['phase'] = 'gui'
             report['gui'] = 'RUNNING'
-            # Separate fresh profile: smoke actions may deliberately save test bookmarks.
-            env['YAMINET_BROWSER_DATA_DIR'] = str(data / 'gui profile')
-            for launch in range(2):
-                result = root / f'gui-{launch}.json'
-                run([app / ('yami-browser' + suffix), '--desktop-smoke', result], env, cwd, timeout=45)
-                observed = json.loads(result.read_text())
-                if observed['result'] != 'PASS' or observed['reopened'] != bool(launch):
-                    raise ValueError('native GUI smoke/persistence check failed')
-                screenshot = args.report.with_name(f'{args.report.stem}-window-{launch}.png')
-                shutil.copy2(result.with_suffix('.png'), screenshot)
-                if launch == 0 and (root / 'onboarding-smoke.png').exists():
-                    shutil.copy2(root / 'onboarding-smoke.png', args.report.with_name(f'{args.report.stem}-onboarding.png'))
-                report.setdefault('gui_runs', []).append(observed)
+            report['gui_runs'] = gui_smoke(app, env, cwd, root, args.report, pin, 'portable')
             report['gui'] = 'PASS (native window, logical test actions; no physical keyboard/IME claim)'
         unchanged()
     report['phase'] = 'complete'
@@ -163,6 +214,7 @@ if __name__ == '__main__':
                 'Synthetic package smoke subprocess failed\nstdout:\n' + str(stdout)[-32768:] + '\nstderr:\n' + str(stderr)[-32768:], encoding='utf-8')
         report.update(result='FAIL', error_class=type(error).__name__, failed_phase=report.get('phase', 'extract'))
         if report.get('phase') == 'gui': report['gui'] = 'FAIL'
+        if report.get('phase') == 'installed-gui': report['installed_gui'] = 'FAIL'
         args.report.write_text(json.dumps(report, indent=2), encoding='utf-8')
         raise
     args.report.write_text(json.dumps(report, indent=2), encoding='utf-8')
