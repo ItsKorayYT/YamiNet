@@ -194,6 +194,7 @@ struct CachedDocument {
 struct Desktop {
     game_wake: Arc<dyn Fn() + Send + Sync>,
     game_open: bool,
+    game_immersive: bool,
     game_error: Option<String>,
     game_keys: std::collections::HashSet<winit::keyboard::KeyCode>,
     game_presentation: super::game_view::Presentation,
@@ -241,6 +242,7 @@ impl Desktop {
         Self {
             game_wake: Arc::new(|| {}),
             game_open: false,
+            game_immersive: true,
             game_error: None,
             game_keys: std::collections::HashSet::new(),
             game_presentation: super::game_view::Presentation::default(),
@@ -335,6 +337,7 @@ impl Desktop {
             match self.browser.open_game(path, Arc::clone(&self.game_wake)) {
                 Ok(()) => {
                     self.game_open = false;
+                    self.game_immersive = true;
                     self.clear_focus();
                 }
                 Err(error) => self.game_error = Some(error),
@@ -411,10 +414,12 @@ impl Desktop {
                     | Action::Find
                     | Action::Settings
                     | Action::Library
+                    | Action::SaveBookmark
                     | Action::Discover
                     | Action::FindLocal
             ) {
                 game.session.pause();
+                self.game_immersive = false;
             }
         }
         if matches!(
@@ -458,6 +463,11 @@ impl Desktop {
                 self.editor.focus = Some(());
             }
             Action::LaunchGame => self.commit(),
+            Action::GameLayout => {
+                self.game_immersive = !self.game_immersive;
+                self.browser.pause_active_game();
+                self.clear_focus();
+            }
             Action::GamePause => {
                 if let PageState::Game(game) = &self.browser.active().state {
                     match game.snapshot.status {
@@ -1094,15 +1104,29 @@ impl Desktop {
         };
         let viewport = self.viewport();
         let mut c = Canvas::new(pix, &mut self.text, scale);
-        let mut scene = chrome::paint(&mut c, &self.browser, &ui);
-        chrome::relay_setting(&mut c, &mut scene, &ui, self.loader.relay_enabled());
+        let immersive = self.game_immersive
+            && matches!(self.browser.active().state, PageState::Game(_))
+            && !self.settings_open
+            && !self.library_open
+            && !self.discover.open
+            && !self.discovery.open
+            && !self.find_open
+            && !self.game_open;
+        let mut scene = if immersive {
+            Scene::default()
+        } else {
+            let mut scene = chrome::paint(&mut c, &self.browser, &ui);
+            chrome::relay_setting(&mut c, &mut scene, &ui, self.loader.relay_enabled());
+            scene
+        };
         match &self.browser.active().state {
             PageState::Game(game) => super::game_view::paint(
                 &mut c,
                 &mut scene,
                 &ui,
                 &game.snapshot,
-                &self.game_presentation,
+                &mut self.game_presentation,
+                immersive,
             ),
             PageState::Home => chrome::home(&mut c, &mut scene, &ui),
             PageState::Loading => {
@@ -1334,10 +1358,16 @@ impl Desktop {
                 game.session.key(bit, false);
             }
         }
+        if matches!(key, PhysicalKey::Code(KeyCode::Tab)) && down && !repeat {
+            self.game_keys.clear();
+            game.session.clear_input();
+            game.session.pause();
+        }
         if self.modifiers.control_key()
             || self.modifiers.super_key()
             || self.modifiers.alt_key()
             || self.editor.focus.is_some()
+            || self.keyboard_focus.is_some()
             || self.game_open
             || self.settings_open
             || self.library_open
@@ -1346,6 +1376,13 @@ impl Desktop {
             || self.find_open
         {
             return false;
+        }
+        if matches!(key, PhysicalKey::Code(KeyCode::F3)) {
+            if down && !repeat {
+                self.game_presentation.diagnostics = !self.game_presentation.diagnostics;
+                self.redraw();
+            }
+            return true;
         }
         if matches!(key, PhysicalKey::Code(KeyCode::KeyP | KeyCode::Escape)) {
             if down && !repeat {
@@ -1864,9 +1901,45 @@ mod tests {
         assert_eq!(app.browser.tabs.len(), 2);
         assert!(matches!(app.browser.tabs[0].state, PageState::Ready(_)));
         assert_eq!(app.browser.tabs[0].id, document_id);
-        game_wait(&mut app, |s| s.frames > 0);
+        game_wait(&mut app, |s| {
+            s.frames > 0 && s.status == yami_games::Status::Running
+        });
         let _ = frame(&mut app);
-        for action in [Action::GamePause, Action::GameReset, Action::GameStop] {
+        assert!(app.game_immersive);
+        assert!(!app
+            .scene
+            .hits
+            .iter()
+            .any(|hit| hit.action == Action::Address));
+        // Tab transfers keyboard ownership to the toolbar and releases movement.
+        app.game_key(&PhysicalKey::Code(KeyCode::KeyA), true, false);
+        app.game_key(&PhysicalKey::Code(KeyCode::Tab), true, false);
+        app.keyboard(&Key::Named(NamedKey::Tab), None, None);
+        game_wait(&mut app, |s| s.status == yami_games::Status::Paused);
+        assert!(app.game_keys.is_empty());
+        assert!(!app.game_key(&PhysicalKey::Code(KeyCode::Enter), true, false));
+        app.keyboard(&Key::Named(NamedKey::Enter), None, None);
+        game_wait(&mut app, |s| s.status == yami_games::Status::Running);
+
+        app.act(Action::GameLayout);
+        game_wait(&mut app, |s| s.status == yami_games::Status::Paused);
+        let _ = frame(&mut app);
+        assert!(!app.game_immersive);
+        assert!(app
+            .scene
+            .hits
+            .iter()
+            .any(|hit| hit.action == Action::Address));
+        app.act(Action::GameLayout);
+        app.act(Action::GamePause);
+        game_wait(&mut app, |s| s.status == yami_games::Status::Running);
+        let _ = frame(&mut app);
+        for action in [
+            Action::GamePause,
+            Action::GameReset,
+            Action::GameStop,
+            Action::GameLayout,
+        ] {
             assert!(app.scene.hits.iter().any(|hit| hit.action == action));
         }
         assert!(app.game_key(&PhysicalKey::Code(KeyCode::Space), true, false));
@@ -1911,41 +1984,101 @@ mod tests {
             .is_err());
     }
     #[test]
-    fn game_rendering_is_scaled_and_clipped_to_the_document_viewport() {
+    fn game_rendering_preserves_aspect_and_clips_at_multiple_sizes_and_dpi() {
         let mut app = headless(900., 600.);
         app.settings_open = false;
         app.browser
             .open_game(game_path(), Arc::clone(&app.game_wake))
             .unwrap();
         game_wait(&mut app, |s| s.frames > 1);
-        let original = frame(&mut app);
-        let PageState::Game(game) = &mut app.browser.active_mut().state else {
-            panic!()
-        };
-        game.session.pause();
-        game.snapshot.frame = Some(Arc::new(yami_games::Frame {
-            commands: vec![
-                yami_games::Command::Clear(0xff0000ff),
-                yami_games::Command::Text {
-                    x: 639,
-                    y: 479,
-                    size: 48,
-                    text: "OVERFLOW".into(),
-                    color: 0xffffffff,
-                },
-            ],
-        }));
-        let changed = frame(&mut app);
-        // Guest commands cannot alter the browser sidebar or its controls.
-        for y in 0..600 {
-            for x in 0..230 {
-                assert_eq!(original.pixel(x, y), changed.pixel(x, y));
+        if let PageState::Game(game) = &app.browser.active().state {
+            game.session.pause();
+        }
+        for (w, h, scale, immersive) in [
+            (900., 600., 1., true),
+            (1440., 900., 1.25, true),
+            (1200., 800., 2., true),
+            (900., 600., 1.5, false),
+        ] {
+            app.headless = Some((w, h, scale));
+            app.game_immersive = immersive;
+            let original = if let PageState::Game(game) = &app.browser.active().state {
+                Arc::clone(game.snapshot.frame.as_ref().unwrap())
+            } else {
+                panic!()
+            };
+            let mut before = Pixmap::new((w * scale) as u32, (h * scale) as u32).unwrap();
+            app.compose(&mut before);
+            let PageState::Game(game) = &mut app.browser.active_mut().state else {
+                panic!()
+            };
+            game.snapshot.frame = Some(Arc::new(yami_games::Frame {
+                commands: vec![
+                    yami_games::Command::Clear(0xff0000ff),
+                    yami_games::Command::Rect {
+                        x: 320,
+                        y: 240,
+                        w: 24,
+                        h: 12,
+                        color: 0x00ff00ff,
+                    },
+                    yami_games::Command::Text {
+                        x: 639,
+                        y: 479,
+                        size: 48,
+                        text: "OVERFLOW".into(),
+                        color: 0xffffffff,
+                    },
+                ],
+            }));
+            let mut after = Pixmap::new(before.width(), before.height()).unwrap();
+            app.compose(&mut after);
+            let area = if immersive {
+                Rect::new(0., 0., w, h)
+            } else {
+                chrome::viewport(w, h)
+            };
+            let view = super::super::game_view::surface(area);
+            assert!((view.w / view.h - 4. / 3.).abs() < 0.001);
+            assert!(area.contains(view.x, view.y));
+            assert!(view.x + view.w <= area.x + area.w);
+            assert!(view.y + view.h <= area.y + area.h);
+            let surface = Rect::new(
+                (view.x * scale).round(),
+                (view.y * scale).round(),
+                (view.w * scale).floor(),
+                (view.h * scale).floor(),
+            );
+            let green = after
+                .pixel(
+                    (surface.x + surface.w * 0.516) as u32,
+                    (surface.y + surface.h * 0.510) as u32,
+                )
+                .unwrap();
+            assert_eq!(
+                (green.red(), green.green(), green.blue()),
+                (0, 255, 0),
+                "logical geometry must scale with the surface at {scale} DPI"
+            );
+            for y in 0..after.height() {
+                for x in 0..after.width() {
+                    if !surface.contains(x as f32, y as f32) {
+                        assert_eq!(
+                            before.pixel(x, y),
+                            after.pixel(x, y),
+                            "guest escaped surface at {x},{y}"
+                        );
+                    }
+                }
+            }
+            assert!(after
+                .pixels()
+                .iter()
+                .any(|p| p.red() == 255 && p.green() == 0 && p.blue() == 0));
+            if let PageState::Game(game) = &mut app.browser.active_mut().state {
+                game.snapshot.frame = Some(original);
             }
         }
-        assert!(changed
-            .pixels()
-            .iter()
-            .any(|p| p.red() == 255 && p.green() == 0 && p.blue() == 0));
     }
 
     #[test]

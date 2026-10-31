@@ -48,6 +48,7 @@ pub enum Action {
     GamePause,
     GameReset,
     GameStop,
+    GameLayout,
     Discover,
     DiscoverView(bool),
     DiscoverMode(bool),

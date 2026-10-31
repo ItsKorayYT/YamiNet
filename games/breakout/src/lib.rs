@@ -1,16 +1,29 @@
 //! Original arcade game. All simulation, screens and art execute inside Wasm.
 use std::cell::RefCell;
 use yami_game_api::*;
-const WHITE: u32 = rgb(237, 243, 255);
-const MUTED: u32 = rgb(149, 166, 200);
-const CYAN: u32 = rgb(92, 225, 230);
+const WHITE: u32 = rgb(234, 244, 255);
+const MUTED: u32 = rgb(139, 160, 187);
+const CYAN: u32 = rgb(114, 235, 239);
 const COLORS: [u32; 5] = [
-    rgb(243, 117, 160),
-    rgb(247, 158, 100),
-    rgb(246, 208, 114),
-    rgb(120, 211, 173),
-    rgb(116, 162, 245),
+    rgb(231, 128, 199),
+    rgb(184, 143, 237),
+    rgb(126, 172, 241),
+    rgb(103, 211, 221),
+    rgb(141, 226, 193),
 ];
+fn tint(color: u32, amount: u32) -> u32 {
+    let channel = |shift: u32, base: u32| {
+        ((((color >> shift) & 255) * amount + base * (100 - amount)) / 100) as u8
+    };
+    rgb(channel(24, 10), channel(16, 16), channel(8, 30))
+}
+#[derive(Clone, Copy, Default)]
+struct Burst {
+    x: i32,
+    y: i32,
+    life: f32,
+    color: u32,
+}
 #[derive(Clone)]
 struct Game {
     paddle: f32,
@@ -26,6 +39,9 @@ struct Game {
     pressed: u32,
     trail: [(i32, i32); 6],
     trail_tick: u32,
+    bursts: [Burst; 8],
+    next_burst: usize,
+    paddle_flash: f32,
 }
 impl Default for Game {
     fn default() -> Self {
@@ -43,6 +59,9 @@ impl Default for Game {
             pressed: 0,
             trail: [(320, 393); 6],
             trail_tick: 0,
+            bursts: [Burst::default(); 8],
+            next_burst: 0,
+            paddle_flash: 0.,
         }
     }
 }
@@ -69,6 +88,10 @@ impl Game {
             }
         }
         self.pressed = 0;
+        for burst in &mut self.bursts {
+            burst.life = (burst.life - dt).max(0.);
+        }
+        self.paddle_flash = (self.paddle_flash - dt).max(0.);
         if self.mode == 1 || self.mode == 2 {
             let direction = i32::from(self.held & RIGHT != 0) - i32::from(self.held & LEFT != 0);
             self.paddle = (self.paddle + direction as f32 * 420. * dt).clamp(20., 524.);
@@ -103,6 +126,7 @@ impl Game {
                 && self.x - 6. <= self.paddle + 96.
             {
                 self.y = 404.;
+                self.paddle_flash = 0.16;
                 let offset = ((self.x - self.paddle - 48.) / 48.).clamp(-1., 1.);
                 self.vx = offset * 230.;
                 self.vy = -(310. * 310. - self.vx * self.vx).sqrt();
@@ -120,6 +144,13 @@ impl Game {
                 {
                     self.bricks[i] = false;
                     self.score += 10;
+                    self.bursts[self.next_burst] = Burst {
+                        x: bx as i32 + 27,
+                        y: by as i32 + 11,
+                        life: 0.24,
+                        color: COLORS[i / 10],
+                    };
+                    self.next_burst = (self.next_burst + 1) % self.bursts.len();
                     if old_y + 6. <= by || old_y - 6. >= by + 22. {
                         self.vy = -self.vy;
                     } else {
@@ -146,59 +177,103 @@ impl Game {
         }
     }
     fn draw(&self) {
-        clear(rgb(13, 19, 36));
-        // Subtle grid and original geometric artwork, no external assets.
-        for x in (30..640).step_by(40) {
-            rect(x, 60, 1, 390, rgb(21, 30, 49));
+        clear(rgb(10, 16, 30));
+        // A quiet technical grid leaves the prismatic wall and ball in focus.
+        for x in (30..624).step_by(40) {
+            rect(x, 66, 1, 382, rgb(17, 26, 43));
         }
-        for y in (70..450).step_by(40) {
-            rect(16, y, 608, 1, rgb(21, 30, 49));
+        for y in (88..448).step_by(40) {
+            rect(18, y, 604, 1, rgb(17, 26, 43));
         }
-        text("PRISM / BREAKOUT", 24, 17, 19, WHITE);
-        text(&format!("SCORE {:03}", self.score), 320, 20, 14, CYAN);
-        text(&format!("LIVES {}", self.lives), 513, 20, 14, WHITE);
-        rect(16, 55, 608, 2, rgb(71, 88, 119));
-        rect(14, 57, 2, 393, rgb(71, 88, 119));
-        rect(624, 57, 2, 393, rgb(71, 88, 119));
+        text("PRISM / 01", 28, 12, 10, CYAN);
+        text("BREAKOUT", 28, 28, 18, WHITE);
+        text(&format!("SCORE {:03}", self.score), 278, 18, 22, WHITE);
+        text(&format!("LIVES {}", self.lives), 518, 23, 12, CYAN);
+        rect(18, 58, 604, 1, rgb(44, 62, 85));
+        rect(18, 58, 60, 2, CYAN);
+        rect(16, 60, 1, 390, rgb(44, 62, 85));
+        rect(623, 60, 1, 390, rgb(44, 62, 85));
+        rect(18, 449, 604, 1, rgb(31, 47, 68));
         for i in 0..50 {
             if !self.bricks[i] {
                 continue;
             }
             let x = 30 + (i % 10) as i32 * 58;
             let y = 98 + (i / 10) as i32 * 28;
-            rect(x, y, 54, 22, COLORS[i / 10]);
-            rect(x + 2, y + 2, 50, 2, WHITE);
-            rect(x + 2, y + 18, 50, 2, rgb(46, 48, 75));
+            let ink = COLORS[i / 10];
+            rect(x - 1, y - 1, 56, 24, tint(ink, 15));
+            rect(x, y, 54, 22, tint(ink, 38));
+            rect(x + 1, y + 1, 52, 2, ink);
+            rect(x + 1, y + 3, 1, 17, tint(ink, 75));
+            rect(x + 2, y + 19, 50, 2, tint(ink, 20));
         }
-        for (i, (x, y)) in self.trail.iter().enumerate().rev() {
-            circle(*x, *y, (5 - i / 2) as i32, rgb(32, 65, 88));
+        // Fixed-size, short-lived fragments and impact flash; no random or growing buffers.
+        for burst in &self.bursts {
+            if burst.life <= 0. {
+                continue;
+            }
+            let age = 1. - burst.life / 0.24;
+            let spread = (4. + age * 16.) as i32;
+            let ink = tint(burst.color, (burst.life / 0.24 * 100.) as u32);
+            for (dx, dy) in [(-1, -1), (1, -1), (-1, 1), (1, 1)] {
+                rect(
+                    (burst.x + dx * spread).clamp(18, 618),
+                    (burst.y + dy * spread / 2).clamp(62, 444),
+                    3,
+                    2,
+                    ink,
+                );
+            }
         }
-        rect(self.paddle as i32 - 3, 408, 102, 14, rgb(28, 66, 86));
-        rect(self.paddle as i32, 410, 96, 10, CYAN);
-        rect(self.paddle as i32 + 8, 411, 80, 2, WHITE);
-        circle(self.x as i32, self.y.clamp(66., 444.) as i32, 6, WHITE);
-        text(
-            "A / D  or  LEFT / RIGHT       SPACE  launch       R  reset",
-            49,
-            457,
-            12,
-            MUTED,
+        if self.mode == 2 {
+            for (i, (x, y)) in self.trail.iter().enumerate().rev() {
+                circle(
+                    *x,
+                    *y,
+                    (5 - i / 2) as i32,
+                    tint(CYAN, 12 + (5 - i as u32) * 7),
+                );
+            }
+        }
+        let paddle = self.paddle as i32;
+        rect(paddle - 3, 407, 102, 17, tint(CYAN, 12));
+        rect(
+            paddle,
+            410,
+            96,
+            10,
+            if self.paddle_flash > 0. { WHITE } else { CYAN },
         );
+        rect(paddle + 3, 412, 90, 1, WHITE);
+        rect(paddle + 8, 418, 80, 2, tint(CYAN, 55));
+        let x = self.x as i32;
+        let y = self.y.clamp(66., 444.) as i32;
+        circle(x, y, 10, tint(CYAN, 10));
+        circle(x, y, 7, tint(CYAN, 45));
+        circle(x, y, 4, WHITE);
+        text("50 PRISMS / 500 POINTS", 28, 459, 10, MUTED);
+        text("THREE LIVES. MAKE THEM COUNT.", 397, 459, 10, MUTED);
         match self.mode {
             0 => self.panel(
+                "THE ORIGINAL / YAMI ARCADE",
                 "PRISM BREAKOUT",
                 "50 prisms. 3 lives. One more try.",
                 "SPACE to start",
             ),
             1 => {
-                text("SPACE to launch", 243, 330, 18, WHITE);
+                rect(212, 317, 216, 40, rgb(19, 37, 54));
+                rect(212, 317, 2, 40, CYAN);
+                text("SPACE to launch", 244, 324, 18, WHITE);
+                text("A / D or arrows to position", 237, 365, 12, MUTED);
             }
             3 => self.panel(
+                "END OF RUN",
                 "GAME OVER",
                 &format!("Final score: {} / 500", self.score),
                 "SPACE to play again",
             ),
             4 => self.panel(
+                "SPECTRUM COMPLETE",
                 "WALL CLEARED",
                 "500 points. Every prism shattered.",
                 "SPACE to play again",
@@ -206,12 +281,21 @@ impl Game {
             _ => {}
         }
     }
-    fn panel(&self, title: &str, subtitle: &str, prompt: &str) {
-        rect(94, 249, 452, 128, rgb(31, 44, 69));
-        rect(94, 249, 452, 3, CYAN);
-        text(title, 126, 267, 30, WHITE);
-        text(subtitle, 126, 310, 16, MUTED);
-        text(prompt, 126, 344, 17, CYAN);
+    fn panel(&self, eyebrow: &str, title: &str, subtitle: &str, prompt: &str) {
+        rect(98, 420, 448, 4, rgb(6, 10, 21));
+        rect(542, 254, 4, 166, rgb(6, 10, 21));
+        rect(94, 250, 448, 170, rgb(17, 26, 44));
+        rect(94, 250, 448, 1, rgb(39, 58, 79));
+        rect(94, 419, 448, 1, rgb(39, 58, 79));
+        rect(94, 250, 1, 170, rgb(39, 58, 79));
+        rect(541, 250, 1, 170, rgb(39, 58, 79));
+        rect(126, 250, 54, 2, CYAN);
+        text(eyebrow, 126, 265, 10, CYAN);
+        text(title, 124, 286, 30, WHITE);
+        text(subtitle, 126, 334, 14, MUTED);
+        rect(126, 374, 235, 30, rgb(25, 62, 74));
+        text(prompt, 142, 378, 14, CYAN);
+        text("P / ESC  pause", 386, 381, 11, MUTED);
     }
 }
 thread_local! {static GAME:RefCell<Game>=RefCell::new(Game::default());}

@@ -1,5 +1,7 @@
 # Yami Games 0.1
 
+Current presentation: [Games 0.1.1 polish and validation](games-0.1.1.md).
+
 This milestone adds explicitly opened local WebAssembly games to the native
 winit/tiny-skia/softbuffer browser. YLang/YSL pages, Discover, full-text search,
 YNP/TLS/DHT and the separate language server retain their document routes.
@@ -105,9 +107,9 @@ resume begins a fresh schedule without accumulated simulation time.
 | `circle` | `(x, y, radius, rgba)` | Positive circle entirely within canvas |
 | `text` | `(ptr, len, x, y, size, rgba)` | Copies bounded UTF-8 from exported `memory`; control characters rejected; alpha must be 255 |
 
-The UI paints validated commands into an isolated logical pixmap, then scales
-it uniformly with letterboxing in the document viewport. Text overflow is
-clipped to the pixmap. Guest drawing cannot cover tabs, controls or other pages.
+The UI paints validated logical commands at the displayed physical resolution
+into an isolated pixmap, using uniform scaling and letterboxing. Shaped text is
+rasterized at that resolution too; overflow is clipped to the pixmap. Guest drawing cannot cover tabs, controls or other pages.
 Neither the runtime nor the browser has Breakout-specific drawing or simulation.
 
 Each worker advances at a target of 60 Hz with fixed `dt_us=16667`. A late frame
