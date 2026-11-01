@@ -709,7 +709,7 @@ pub fn paint(c: &mut Canvas<'_>, browser: &Browser, ui: &ChromeState<'_>) -> Sce
 
     // New tab.
     let new_tab = Rect::new(left, y, inner, ROW);
-    if browser.tabs.len() < 12 {
+    let game_y = if browser.tabs.len() < crate::model::MAX_TABS {
         ghost(
             c,
             new_tab,
@@ -727,13 +727,18 @@ pub fn paint(c: &mut Canvas<'_>, browser: &Browser, ui: &ChromeState<'_>) -> Sce
             false,
         );
         scene.add(new_tab, Action::NewTab);
-    }
+        y + ROW + 4.0
+    } else {
+        // At the tab limit there is no new-tab control. Do not reserve its
+        // empty row below full wrapped destination/relay identities.
+        y
+    };
 
     panel_button(
         c,
         &mut scene,
         ui,
-        Rect::new(left, y + ROW + 4.0, inner, 30.0),
+        Rect::new(left, game_y, inner, 30.0),
         "Open local game",
         Action::OpenGame,
         true,
