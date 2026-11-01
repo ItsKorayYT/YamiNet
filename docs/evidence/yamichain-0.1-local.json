@@ -1,0 +1,138 @@
+{
+  "scope": "loopback only; public dev keys; no real money",
+  "generated_at": "2026-11-01T21:39:40.528907+00:00",
+  "binary_sha256": "d157f83bb51e18eb6428b10dbe0ad2c5d3f7167b550220ced509772008751206",
+  "driver_sha256": "e5490bca2a3f7a8c7905a51475087c0de0d185322db024470d8bb6fd741bda20",
+  "scenarios": {
+    "normal": {
+      "result": "PASS",
+      "processes": 4,
+      "committee": 4,
+      "crash": null,
+      "injected_exit_86": false,
+      "exit_codes": {
+        "0": 0,
+        "1": 0,
+        "2": 0,
+        "3": 0
+      },
+      "validated_synced_payloads": 0,
+      "certified_history_responses": 0,
+      "height": 6,
+      "state_root": "52b28c898578ad722145f3144a727e17e365f62dca85bce6ce426919b03b7bdf",
+      "block": "16a157d3e544661db1d080e20943ff18314cc7b5b52fabb5dbd9a3a331ab0b47",
+      "elapsed_seconds": 6.759
+    },
+    "offline": {
+      "result": "PASS",
+      "processes": 3,
+      "committee": 4,
+      "crash": null,
+      "injected_exit_86": false,
+      "exit_codes": {
+        "0": 0,
+        "1": 0,
+        "2": 0
+      },
+      "validated_synced_payloads": 0,
+      "certified_history_responses": 0,
+      "height": 6,
+      "state_root": "52b28c898578ad722145f3144a727e17e365f62dca85bce6ce426919b03b7bdf",
+      "block": "16a157d3e544661db1d080e20943ff18314cc7b5b52fabb5dbd9a3a331ab0b47",
+      "elapsed_seconds": 7.037
+    },
+    "halt": {
+      "result": "PASS",
+      "processes": 2,
+      "committee": 4,
+      "crash": null,
+      "injected_exit_86": false,
+      "exit_codes": {
+        "0": 1,
+        "1": 1
+      },
+      "validated_synced_payloads": 0,
+      "certified_history_responses": 0,
+      "height": 0,
+      "state_root": "ed53a6b3ac52317b8492c2e54b5c4f9af3a6938c35e73f7f7e94335b6b73e381",
+      "block": "d8b06ded9d9a1159dd872bf164abdba3e9f260b13369414fc1df7d4b8f19c806",
+      "elapsed_seconds": 8.038
+    },
+    "catchup": {
+      "result": "PASS",
+      "processes": 4,
+      "committee": 4,
+      "crash": null,
+      "injected_exit_86": false,
+      "exit_codes": {
+        "0": 0,
+        "1": 0,
+        "2": 0,
+        "3": 0
+      },
+      "validated_synced_payloads": 30,
+      "certified_history_responses": 14,
+      "height": 40,
+      "state_root": "9f5766ab7bb8a05775726d48a83bdc7b7d3f047a89544c7f4fa99e47e4077f9b",
+      "block": "6b5d825c5147adf66b696f8d14d9340302be11b24f7294ce530c7fb90318b354",
+      "elapsed_seconds": 46.188
+    },
+    "proposal": {
+      "result": "PASS",
+      "processes": 4,
+      "committee": 4,
+      "crash": "proposal",
+      "injected_exit_86": true,
+      "exit_codes": {
+        "0": 0,
+        "1": 0,
+        "2": 0,
+        "3": 0
+      },
+      "validated_synced_payloads": 0,
+      "certified_history_responses": 0,
+      "height": 8,
+      "state_root": "335053fca90494178e3a2abac3ef7ce111ee096be8226fcf5de80d37dce7febe",
+      "block": "4f9a995981b54520fcf022193cccd9afe7ec81831b44699c5a2a7832354fa4c7",
+      "elapsed_seconds": 9.133
+    },
+    "vote": {
+      "result": "PASS",
+      "processes": 4,
+      "committee": 4,
+      "crash": "vote",
+      "injected_exit_86": true,
+      "exit_codes": {
+        "0": 0,
+        "1": 0,
+        "2": 0,
+        "3": 0
+      },
+      "validated_synced_payloads": 0,
+      "certified_history_responses": 4,
+      "height": 8,
+      "state_root": "335053fca90494178e3a2abac3ef7ce111ee096be8226fcf5de80d37dce7febe",
+      "block": "4f9a995981b54520fcf022193cccd9afe7ec81831b44699c5a2a7832354fa4c7",
+      "elapsed_seconds": 10.579
+    },
+    "before-commit": {
+      "result": "PASS",
+      "processes": 4,
+      "committee": 4,
+      "crash": "before-commit",
+      "injected_exit_86": true,
+      "exit_codes": {
+        "0": 0,
+        "1": 0,
+        "2": 0,
+        "3": 0
+      },
+      "validated_synced_payloads": 3,
+      "certified_history_responses": 5,
+      "height": 8,
+      "state_root": "335053fca90494178e3a2abac3ef7ce111ee096be8226fcf5de80d37dce7febe",
+      "block": "4f9a995981b54520fcf022193cccd9afe7ec81831b44699c5a2a7832354fa4c7",
+      "elapsed_seconds": 10.708
+    }
+  }
+}

@@ -43,6 +43,10 @@ jobs:
           cargo test --workspace --locked 2>&1 | tee dist/tests.log
           cargo build --workspace --locked 2>&1 | tee dist/build.log
           cargo build --workspace --release --locked 2>&1 | tee dist/release-build.log
+      - name: Ordinary YamiNet remains chain-independent
+        run: python tools/check-chain-independence.py
+      - name: Isolated four-validator YamiChain rehearsal
+        run: python tools/yamichain-local.py --report dist/yamichain-local.json
       - name: Independent-process YNS publication and discovery
         run: python tools/yns-network-demo.py --report dist/yns-network-demo.json
       - name: Testnet topology rehearsal (loopback only)

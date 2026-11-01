@@ -1,6 +1,6 @@
 [workspace]
 exclude = ["games/breakout", "games/yami-game-api"]
-members = ["crates/yami-yns", "crates/yami-games", "crates/yami-search", "crates/yami-config", "crates/ylang", "crates/ysl", "crates/ynp", "crates/yami-render", "crates/yami-identity", "crates/ynp-tls", "crates/ynp-discovery", "crates/yami-dht", "crates/yami-relay", "crates/yami-discover", "apps/yami-relay", "apps/yami-browser", "apps/yami-node", "apps/yami-testnet"]
+members = ["crates/yami-chain", "crates/yami-chain-privacy", "crates/yami-chain-naming", "crates/yami-chain-storage", "crates/yami-chain-consensus", "apps/yami-validator", "crates/yami-yns", "crates/yami-games", "crates/yami-search", "crates/yami-config", "crates/ylang", "crates/ysl", "crates/ynp", "crates/yami-render", "crates/yami-identity", "crates/ynp-tls", "crates/ynp-discovery", "crates/yami-dht", "crates/yami-relay", "crates/yami-discover", "apps/yami-relay", "apps/yami-browser", "apps/yami-node", "apps/yami-testnet"]
 resolver = "2"
 
 [workspace.package]
