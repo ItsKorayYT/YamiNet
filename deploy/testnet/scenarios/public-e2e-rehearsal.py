@@ -33,7 +33,16 @@ def rehearse(binary_dir):
         env['YAMINET_PEER_DIR'] = str(base / 'publisher-state')
         env['YAMINET_BROWSER_RELAYS'] = '0'
 
+        def pace_trial(args):
+            # Every simulated machine shares one source IP. Keep independent
+            # scenarios out of the existing one-second TLS/relay admission
+            # windows, especially on fast Windows runners. Do not relax limits
+            # or retry a negative assertion until an unrelated failure passes.
+            if '--network-trial' in args:
+                time.sleep(1.1)
+
         def run(binary, *args, ok=True, timeout=45):
+            pace_trial(args)
             completed = subprocess.run([str(binaries[binary]), *map(str, args)], env=env,
                                        capture_output=True, text=True, encoding='utf-8',
                                        errors='replace', timeout=timeout)
@@ -149,15 +158,15 @@ def rehearse(binary_dir):
             result('wrong-provider-identity', observed='no record accepted into fresh cache')
             wrong_bootstrap = browser_config(base / 'wrong-bootstrap.conf', base / 'wrong-bootstrap', f"{host_id}@{public['BOOTSTRAP_ENDPOINT']}")
             denied = json.loads(run('yami-browser', '--network-trial', url, '--config', wrong_bootstrap, '--asset', 'cover', ok=False).stdout)
-            assert step_status(denied, 'bootstrap-pin') == 'FAIL'
+            assert step_status(denied, 'bootstrap-pin') == 'FAIL', denied
             result('wrong-bootstrap-identity', expected='FAIL at bootstrap-pin')
             invalid_link = json.loads(run('yami-browser', '--network-trial', url, '--config', client, '--asset', 'cover', '--navigate', 'not-linked', ok=False).stdout)
-            assert step_status(invalid_link, 'page-navigation') == 'FAIL'
+            assert step_status(invalid_link, 'page-navigation') == 'FAIL', invalid_link
             result('unadvertised-navigation-refused')
             module.write_bytes(wasm[:-1] + bytes([wasm[-1] ^ 1]))
             try:
                 bad_game = json.loads(run('yami-browser', *trial_args, ok=False).stdout)
-                assert step_status(bad_game, 'hosted-game') == 'FAIL'
+                assert step_status(bad_game, 'hosted-game') == 'FAIL', bad_game
             finally:
                 module.write_bytes(wasm)
             result('hosted-module-integrity-refusal', expected='FAIL before game execution')
@@ -168,7 +177,7 @@ def rehearse(binary_dir):
             assert run('yami-browser', '--config', client, 'yns', 'resolve', short).stdout.strip() == host_id
             time.sleep(max(0, expiry - time.time() + 1))
             expired = json.loads(run('yami-browser', '--network-trial', url, '--config', client, '--asset', 'cover', '--name', short, ok=False).stdout)
-            assert step_status(expired, 'yns-resolution') == 'FAIL'
+            assert step_status(expired, 'yns-resolution') == 'FAIL', expired
             publish('short', 2, int(time.time()) + 3600)
             assert run('yami-browser', '--config', client, 'yns', 'refresh', short).stdout.strip() == host_id
             result('expired-yns-record-and-higher-sequence-recovery', expected='expired cached record refused, signed sequence 2 accepted')
@@ -176,12 +185,13 @@ def rehearse(binary_dir):
             relay.terminate()
             relay.wait(timeout=10)
             outage = json.loads(run('yami-browser', '--network-trial', url, '--config', client, '--asset', 'cover', ok=False).stdout)
-            assert any(s['name'] in ('signed-publication-resolution', 'document-and-png') and s['status'] == 'FAIL' for s in outage['steps'])
+            assert any(s['name'] in ('signed-publication-resolution', 'document-and-png') and s['status'] == 'FAIL' for s in outage['steps']), outage
             result('relay-outage', expected='authenticated delivery fails without plaintext fallback')
             start('yami-relay', profile / 'relay/relay.conf', 'relay-restarted')
             recovered = None
             deadline = time.monotonic() + 35
             while time.monotonic() < deadline:
+                pace_trial(trial_args)
                 attempt = subprocess.run([str(binaries['yami-browser']), *map(str, trial_args)], env=env,
                                          capture_output=True, text=True, timeout=25)
                 if attempt.returncode == 0:
@@ -195,7 +205,7 @@ def rehearse(binary_dir):
             bootstrap.wait(timeout=10)
             # Cached YNS cannot make the fresh DHT-availability check pass.
             unavailable = json.loads(run('yami-browser', '--network-trial', url, '--config', client, '--asset', 'cover', ok=False).stdout)
-            assert step_status(unavailable, 'bootstrap-pin') == 'FAIL'
+            assert step_status(unavailable, 'bootstrap-pin') == 'FAIL', unavailable
             result('unavailable-bootstrap', expected='FAIL despite previously cached records')
             for check in ('real-vps-deployment', 'home-router-outbound-path', 'independent-internet-client', 'public-firewall-state', 'native-gui-click-and-keyboard'):
                 result(check, 'NOT RUN', reason='local rehearsal does not establish physical topology or operator authorization')
