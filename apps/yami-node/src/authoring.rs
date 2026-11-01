@@ -15,6 +15,7 @@ pub struct Report {
     pub bytes: usize,
     pub games: Vec<String>,
     pub modules: Vec<String>,
+    pub game_assets: Vec<(String, ynp::GameResource)>,
 }
 fn inventory(dir: &Path, extension: &str, max: usize) -> io::Result<Vec<String>> {
     let mut keys = Vec::new();
@@ -90,6 +91,8 @@ pub fn check(root: impl AsRef<Path>) -> io::Result<Report> {
         Err(e) => return Err(e),
     };
     let mut modules = BTreeSet::new();
+    let mut game_assets = Vec::new();
+    let mut resource_keys = BTreeSet::new();
     for key in &games {
         let data = site
             .game(key, ynp::GameResource::Manifest)?
@@ -99,6 +102,17 @@ pub fn check(root: impl AsRef<Path>) -> io::Result<Report> {
             .game(&manifest.module.key, ynp::GameResource::Module)?
             .ok_or_else(|| invalid("game module missing"))?;
         manifest.validate_module(&module).map_err(invalid)?;
+        let mut prepared = yami_games::Assets::default();
+        for asset in &manifest.assets {
+            let resource = site
+                .game(&asset.key, asset.kind.wire())?
+                .ok_or_else(|| invalid("game asset missing"))?;
+            prepared.insert(asset, &resource).map_err(invalid)?;
+            if resource_keys.insert((asset.key.clone(), asset.kind.extension())) {
+                bytes += resource.len();
+                game_assets.push((asset.key.clone(), asset.kind.wire()));
+            }
+        }
         bytes += data.len();
         if modules.insert(manifest.module.key) {
             bytes += module.len();
@@ -140,6 +154,7 @@ pub fn check(root: impl AsRef<Path>) -> io::Result<Report> {
         assets,
         games,
         modules: modules.into_iter().collect(),
+        game_assets,
         bytes,
     })
 }
@@ -292,6 +307,20 @@ pub fn build(source: impl AsRef<Path>, output: impl AsRef<Path>) -> io::Result<R
         }
         if !report.games.is_empty() {
             fs::create_dir(output.join("games"))?;
+            for (key, resource) in &report.game_assets {
+                let extension = match resource {
+                    ynp::GameResource::Png => "png",
+                    ynp::GameResource::Wav => "wav",
+                    _ => unreachable!(),
+                };
+                let data = site
+                    .game(key, *resource)?
+                    .ok_or_else(|| invalid("game asset disappeared during build"))?;
+                fs::write(
+                    output.join("games").join(format!("{key}.{extension}")),
+                    data,
+                )?;
+            }
             for (keys, resource, extension) in [
                 (&report.games, ynp::GameResource::Manifest, "json"),
                 (&report.modules, ynp::GameResource::Module, "wasm"),

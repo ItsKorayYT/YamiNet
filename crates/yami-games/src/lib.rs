@@ -1,4 +1,10 @@
 //! Bounded WebAssembly games. No WASI or native plugins.
+mod assets;
+pub use assets::{
+    AssetKind, AssetResource, Assets, Sound, MAX_ASSETS, MAX_ASSET_TOTAL, MAX_DECODED_TOTAL,
+};
+mod audio;
+pub use audio::AudioCommand;
 mod hosted;
 pub use hosted::{HostedManifest, ModuleResource};
 mod runtime;
@@ -12,7 +18,24 @@ use std::{
     path::{Component, Path},
 };
 
-pub const ABI_VERSION: i32 = 1;
+pub const ABI_VERSION: i32 = 2;
+pub const UP: u32 = 16;
+pub const DOWN: u32 = 32;
+pub const ACTION: u32 = 64;
+pub const SECONDARY: u32 = 128;
+pub const MOUSE_LEFT: u32 = 256;
+pub const MOUSE_RIGHT: u32 = 512;
+pub const INPUT_MASK: u32 = 1023;
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Input {
+    pub held: u32,
+    pub pressed: u32,
+    pub released: u32,
+    /// (-1, -1) means the pointer is outside the game.
+    pub x: i32,
+    pub y: i32,
+}
 pub const WIDTH: i32 = 640;
 pub const HEIGHT: i32 = 480;
 pub const MAX_MODULE_BYTES: usize = 1024 * 1024;
@@ -33,6 +56,10 @@ pub struct Manifest {
     pub title: String,
     pub description: String,
     pub module: String,
+    #[serde(default)]
+    pub assets: Vec<AssetResource>,
+    #[serde(skip)]
+    pub prepared: std::sync::Arc<Assets>,
 }
 
 fn read_bounded(path: &Path, limit: usize) -> Result<Vec<u8>, String> {
@@ -58,9 +85,9 @@ pub fn load_local(path: &Path) -> Result<(Manifest, Vec<u8>), String> {
         return Err("Choose a regular local game manifest".into());
     }
     let path = path.canonicalize().map_err(|e| e.to_string())?;
-    let manifest: Manifest = serde_json::from_slice(&read_bounded(&path, 4096)?)
+    let mut manifest: Manifest = serde_json::from_slice(&read_bounded(&path, 4096)?)
         .map_err(|e| format!("Invalid game manifest: {e}"))?;
-    if manifest.version != 1 || manifest.abi != ABI_VERSION as u32 {
+    if !matches!((manifest.version, manifest.abi), (1, 1) | (2, 2)) {
         return Err("Unsupported game manifest or ABI version".into());
     }
     if manifest.title.is_empty()
@@ -74,6 +101,7 @@ pub fn load_local(path: &Path) -> Result<(Manifest, Vec<u8>), String> {
     {
         return Err("Invalid game title or description".into());
     }
+    assets::validate_resources(manifest.version, &manifest.assets)?;
     let reference = Path::new(&manifest.module);
     if manifest.module.is_empty()
         || manifest.module.contains([':', '\\'])
@@ -91,5 +119,18 @@ pub fn load_local(path: &Path) -> Result<(Manifest, Vec<u8>), String> {
     if !module.starts_with(parent) || !module.is_file() {
         return Err("Game module must remain inside the manifest directory".into());
     }
+    let mut prepared = Assets::default();
+    for asset in &manifest.assets {
+        let resource = parent
+            .join(&asset.key)
+            .with_extension(asset.kind.extension())
+            .canonicalize()
+            .map_err(|e| e.to_string())?;
+        if !resource.starts_with(parent) || !resource.is_file() {
+            return Err("Asset must remain inside the manifest directory".into());
+        }
+        prepared.insert(asset, &read_bounded(&resource, asset.kind.wire().limit())?)?;
+    }
+    manifest.prepared = std::sync::Arc::new(prepared);
     Ok((manifest, read_bounded(&module, MAX_MODULE_BYTES)?))
 }

@@ -1,0 +1,37 @@
+{
+  "version": 2,
+  "abi": 2,
+  "title": "Lantern Drift",
+  "description": "Guide a lantern through a moonlit marsh. Gather 24 lights, avoid the moths, and find your way home.",
+  "module": "lantern-drift.wasm",
+  "assets": [
+    {
+      "id": 0,
+      "key": "sprites",
+      "kind": "png",
+      "bytes": 1513,
+      "sha256": "deb6ede642bfb4c9b2e615af033606eedcaece746d7498dc756ed0db682fc9ac"
+    },
+    {
+      "id": 1,
+      "key": "chime",
+      "kind": "wav",
+      "bytes": 9746,
+      "sha256": "1fa39d5761f1575ce4a588362b9a63bf336dd0ecd9739c5e8ad584ae6ebbb664"
+    },
+    {
+      "id": 2,
+      "key": "bump",
+      "kind": "wav",
+      "bytes": 8864,
+      "sha256": "e30535ec6dc7f1e9d4625f84d80afa74622ed0042f169d74f910111ad7fb6baf"
+    },
+    {
+      "id": 3,
+      "key": "marsh",
+      "kind": "wav",
+      "bytes": 176444,
+      "sha256": "0324bb059edccac1915c05ff33c7c4c5e2d773de837c02f121d9bc965445b28b"
+    }
+  ]
+}

@@ -42,6 +42,8 @@ struct Shared {
     desired: AtomicU8,
     held: AtomicU32,
     pressed: AtomicU32,
+    released: AtomicU32,
+    pointer: Mutex<(i32, i32)>,
     reset: AtomicBool,
     notified: AtomicBool,
     cancelled: AtomicBool,
@@ -89,6 +91,8 @@ impl Session {
             desired: AtomicU8::new(RUN),
             held: AtomicU32::new(0),
             pressed: AtomicU32::new(0),
+            released: AtomicU32::new(0),
+            pointer: Mutex::new((-1, -1)),
             reset: AtomicBool::new(false),
             notified: AtomicBool::new(false),
             cancelled: AtomicBool::new(false),
@@ -116,6 +120,9 @@ impl Session {
                     worker.snapshot.lock().unwrap().status = Status::Stopped;
                     worker.notify(&wake);
                 }
+                // Terminal tabs must not accumulate decoded asset caches.
+                worker.snapshot.lock().unwrap().frame = None;
+                worker.notify(&wake);
             })
         {
             WORKERS.fetch_sub(1, Ordering::SeqCst);
@@ -130,16 +137,29 @@ impl Session {
         self.shared.snapshot.lock().unwrap().clone()
     }
     pub fn key(&self, bit: u32, down: bool) {
-        let bit = bit & 15;
+        let bit = bit & INPUT_MASK;
         if down && self.shared.desired.load(Ordering::Acquire) == RUN {
             let old = self.shared.held.fetch_or(bit, Ordering::AcqRel);
             self.shared.pressed.fetch_or(bit & !old, Ordering::AcqRel);
         } else {
-            self.shared.held.fetch_and(!bit, Ordering::AcqRel);
+            let old = self.shared.held.fetch_and(!bit, Ordering::AcqRel);
+            self.shared.released.fetch_or(old & bit, Ordering::AcqRel);
         }
     }
+    pub fn pointer(&self, x: i32, y: i32) {
+        *self.shared.pointer.lock().unwrap() = if self.shared.desired.load(Ordering::Acquire) == RUN
+            && (0..WIDTH).contains(&x)
+            && (0..HEIGHT).contains(&y)
+        {
+            (x, y)
+        } else {
+            (-1, -1)
+        };
+    }
     pub fn clear_input(&self) {
-        self.shared.held.store(0, Ordering::Release);
+        let old = self.shared.held.swap(0, Ordering::AcqRel);
+        self.shared.released.fetch_or(old, Ordering::AcqRel);
+        *self.shared.pointer.lock().unwrap() = (-1, -1);
         self.shared.pressed.store(0, Ordering::Release);
     }
     fn control(&self, value: u8) {
@@ -197,7 +217,9 @@ impl Shared {
         if self.desired.load(Ordering::Acquire) >= STOP {
             return Ok(());
         }
-        let mut runtime = Runtime::new(&bytes)?;
+        let assets = Arc::clone(&manifest.prepared);
+        let mut runtime = Runtime::with_assets(&bytes, Some(manifest.abi), Arc::clone(&assets))?;
+        let mut audio = crate::audio::Output::new(!assets.sounds.is_empty());
         {
             let mut s = self.snapshot.lock().unwrap();
             s.title = manifest.title;
@@ -211,6 +233,11 @@ impl Shared {
         }
         let first_start = Instant::now();
         let first = runtime.frame(0, 0)?;
+        if self.desired.load(Ordering::Acquire) >= STOP {
+            return Ok(());
+        }
+        audio.pause(self.desired.load(Ordering::Acquire) == PAUSE);
+        audio.apply(&runtime.take_audio(), &assets);
         {
             let mut s = self.snapshot.lock().unwrap();
             s.frame = Some(first);
@@ -229,6 +256,7 @@ impl Shared {
                 return Ok(());
             }
             if desired == PAUSE {
+                audio.pause(true);
                 let changed = {
                     let mut s = self.snapshot.lock().unwrap();
                     let changed = s.status != Status::Paused;
@@ -245,7 +273,9 @@ impl Shared {
                 next = Instant::now();
                 continue;
             }
+            audio.pause(false);
             if self.reset.swap(false, Ordering::AcqRel) {
+                audio.clear();
                 runtime.reset()?;
             }
             let now = Instant::now();
@@ -261,10 +291,18 @@ impl Shared {
                 }
                 continue;
             }
-            let frame = runtime.frame(
-                self.held.load(Ordering::Acquire),
-                self.pressed.swap(0, Ordering::AcqRel),
-            )?;
+            let (x, y) = *self.pointer.lock().unwrap();
+            let frame = runtime.frame_input(Input {
+                held: self.held.load(Ordering::Acquire),
+                pressed: self.pressed.swap(0, Ordering::AcqRel),
+                released: self.released.swap(0, Ordering::AcqRel),
+                x,
+                y,
+            })?;
+            // Only successful, still-running frames can trigger native output.
+            if self.desired.load(Ordering::Acquire) == RUN {
+                audio.apply(&runtime.take_audio(), &assets);
+            }
             let elapsed = now.elapsed();
             {
                 let mut s = self.snapshot.lock().unwrap();
@@ -350,5 +388,34 @@ mod tests {
             assert!(start.elapsed() < Duration::from_secs(3));
             thread::yield_now();
         }
+        let game = Session::launch(
+            PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .join("../../games/lantern-drift/game.yami-game.json"),
+            Arc::new(|| {}),
+        )
+        .unwrap();
+        wait(&game.shared, |s| s.frames > 1);
+        game.key(UP | MOUSE_LEFT, true);
+        game.pointer(639, 479);
+        assert_eq!(game.shared.held.load(Ordering::Acquire), UP | MOUSE_LEFT);
+        assert_eq!(*game.shared.pointer.lock().unwrap(), (639, 479));
+        game.key(UP, false);
+        assert_eq!(game.shared.held.load(Ordering::Acquire), MOUSE_LEFT);
+        game.pause();
+        wait(&game.shared, |s| s.status == Status::Paused);
+        assert_eq!(game.shared.held.load(Ordering::Acquire), 0);
+        assert_eq!(game.shared.pressed.load(Ordering::Acquire), 0);
+        assert_eq!(*game.shared.pointer.lock().unwrap(), (-1, -1));
+        game.key(DOWN, true);
+        game.pointer(50, 50);
+        assert_eq!(game.shared.held.load(Ordering::Acquire), 0);
+        assert_eq!(*game.shared.pointer.lock().unwrap(), (-1, -1));
+        game.resume();
+        game.key(MOUSE_RIGHT, true);
+        game.stop();
+        assert_eq!(game.shared.held.load(Ordering::Acquire), 0);
+        wait(&game.shared, |s| {
+            s.status == Status::Stopped && s.frame.is_none()
+        });
     }
 }

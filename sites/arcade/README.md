@@ -4,6 +4,7 @@ Prepare this site as its publisher, then serve it with a TLS-enabled YamiNet nod
 
 ```sh
 cargo run --locked -p yami-games --example publish -- games/breakout/game.yami-game.json sites/arcade prism
+cargo run --locked -p yami-games --example publish -- games/lantern-drift/game.yami-game.json sites/arcade lantern
 yami-node serve-dir 127.0.0.1:7443 sites/arcade --identity /absolute/test-identity --tls --dht --dht-local --dht-dir /absolute/host-state
 ```
 
@@ -17,3 +18,6 @@ first. These publisher files are not an installation on player machines.
 The automated two-process native-window reproduction is documented in
 [Games 0.2](../../docs/games-0.2.md). Generated publications belong in a staging
 copy; this example checks in only its inert page and stylesheet.
+
+Choose **Play game: Lantern Drift** for the ABI 2 sprite/audio example.
+See [Games 0.3](../../docs/games-0.3.md) for resource bounds and the SDK.

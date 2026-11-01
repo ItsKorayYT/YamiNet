@@ -30,7 +30,7 @@ jobs:
           cache-on-failure: true
       - name: Linux native window dependencies
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y libx11-dev libxkbcommon-dev libxcb1-dev libx11-xcb1 libxkbcommon-x11-0 libxrandr2 libxcursor1 libxi6 libxinerama1 libxrender1 libxfixes3 libxcb-shape0 libxcb-xfixes0 xvfb xauth xdotool
+        run: sudo apt-get update && sudo apt-get install -y libasound2-dev libx11-dev libxkbcommon-dev libxcb1-dev libx11-xcb1 libxkbcommon-x11-0 libxrandr2 libxcursor1 libxi6 libxinerama1 libxrender1 libxfixes3 libxcb-shape0 libxcb-xfixes0 xvfb xauth xdotool
       - name: Locked source verification
         shell: bash
         run: |

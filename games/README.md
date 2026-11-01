@@ -46,3 +46,15 @@ See [the ABI, limits, architecture and validation report](../docs/games-0.1.md).
 
 See [the 0.1.1 visual overhaul and native validation](../docs/games-0.1.1.md)
 for display-resolution text rendering, screenshots and current checks.
+
+## Lantern Drift (ABI 2)
+
+An original sprite game with animation, mouse steering, keyboard controls, synthesized effects and looping background audio. Collect 24 lights in 50 seconds while avoiding moths. Three hearts; Space/Z pulses; X/right click mutes.
+
+```sh
+cargo build --manifest-path games/lantern-drift/Cargo.toml --release --target wasm32-unknown-unknown
+cp games/lantern-drift/target/wasm32-unknown-unknown/release/yami_lantern_drift.wasm games/lantern-drift/lantern-drift.wasm
+cargo run --locked -p yami-browser -- --game "$PWD/games/lantern-drift/game.yami-game.json"
+```
+
+The checked-in Wasm and assets allow immediate play without a guest build. Asset regeneration uses `python3 games/lantern-drift/generate-assets.py` (standard library only). See [ABI 2 and hosted publishing](../docs/games-0.3.md) and the [SDK guide](yami-game-api/README.md). Prism Breakout remains an ABI 1 example.

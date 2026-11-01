@@ -1,5 +1,4 @@
-//! Hosted format 1 / ABI 1: drawing and text resources are embedded in Wasm.
-//! There is deliberately no external resource or capability list in this version.
+//! Strict hosted formats: ABI 1 embedded resources, ABI 2 declared PNG/PCM assets.
 use crate::*;
 use sha2::{Digest, Sha256};
 #[derive(Debug, Clone, Deserialize)]
@@ -17,6 +16,8 @@ pub struct HostedManifest {
     pub title: String,
     pub description: String,
     pub module: ModuleResource,
+    #[serde(default)]
+    pub assets: Vec<AssetResource>,
 }
 impl HostedManifest {
     pub fn parse(bytes: &[u8]) -> Result<Self, String> {
@@ -25,7 +26,7 @@ impl HostedManifest {
         }
         let manifest: Self =
             serde_json::from_slice(bytes).map_err(|e| format!("Invalid hosted manifest: {e}"))?;
-        if manifest.version != 1 || manifest.abi != ABI_VERSION as u32 {
+        if !matches!((manifest.version, manifest.abi), (1, 1) | (2, 2)) {
             return Err("Unsupported hosted manifest or ABI version".into());
         }
         if manifest.title.is_empty()
@@ -51,6 +52,7 @@ impl HostedManifest {
         {
             return Err("Invalid module size or SHA-256 digest".into());
         }
+        assets::validate_resources(manifest.version, &manifest.assets)?;
         Ok(manifest)
     }
     /// Integrity is relative to the manifest delivered by the authenticated publisher.
@@ -69,11 +71,13 @@ impl HostedManifest {
     }
     pub fn runtime_manifest(self) -> Manifest {
         Manifest {
-            version: 1,
+            version: self.version,
             abi: self.abi,
             title: self.title,
             description: self.description,
             module: self.module.key,
+            assets: self.assets,
+            prepared: std::sync::Arc::default(),
         }
     }
 }
