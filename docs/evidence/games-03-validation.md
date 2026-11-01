@@ -100,13 +100,34 @@ paint + present**, **0.07 ms average VM update**, and **0 late VM frames** at
 frames; software rendering remains sensitive to CPU contention. The headless
 benchmark does not measure audio output or UI rendering.
 
+## Native Linux and Windows CI follow-up
+
+[GitHub Actions run 41318900007](https://github.com/ItsKorayYT/YamiNet/actions/runs/41318900007)
+passed for implementation commit `14820e9e825a69b900d3dcad49b5f4adab5af3cf`.
+Both `validate (ubuntu-24.04)` and `validate (windows-latest)` completed
+successfully. Their locked source verification included formatting, Clippy,
+workspace tests, debug builds and release builds on the native runner.
+
+- [Windows job](https://github.com/ItsKorayYT/YamiNet/actions/runs/41318900007/job/124884735333):
+  native MSVC package verification and installer upgrade lifecycle passed.
+- [Linux job](https://github.com/ItsKorayYT/YamiNet/actions/runs/41318900007/job/124884735520):
+  native packaging, virtual X11 lifecycle and input smoke checks passed.
+- Both jobs passed package regression checks, the independent-process YNS demo,
+  and the loopback testnet topology rehearsal; validated packages and diagnostic
+  evidence were uploaded by the workflow.
+
+This adds native Windows automated build/test and package lifecycle coverage.
+It does not establish interactive Windows game play or audible device testing.
+[Recorded CI job results](games-03-ci.json) identify the verified code commit;
+this documentation follow-up does not change its implementation.
+
 ## Testing limits
 
 No physical Windows host, Windows runtime window, physical high-DPI display,
 physical keyboard/mouse, real speakers/headphones, or owned remote Internet game
-publisher was available. Windows was cross-compiled/checked, not executed here;
-the existing Linux/Windows CI matrix remains enabled, with the Linux ALSA build
-dependency added. X11 input was synthetic and high-DPI geometry was tested in
+publisher was available. Windows was cross-compiled/checked in this container; native MSVC builds, tests
+and package lifecycle checks subsequently passed on the Windows CI runner as
+recorded above. The Linux ALSA build dependency is included in the CI workflow. X11 input was synthetic and high-DPI geometry was tested in
 native rendering tests. There was no usable default ALSA audio device: gameplay
 continued silently, exercising the unavailable-output path. Audio channel
 lifecycle tests use native idle sinks; actual audible output, device removal and

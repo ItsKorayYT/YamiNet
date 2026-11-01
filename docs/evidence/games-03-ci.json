@@ -1,0 +1,45 @@
+{
+  "verified_commit": "14820e9e825a69b900d3dcad49b5f4adab5af3cf",
+  "workflow_run": 41318900007,
+  "workflow_url": "https://github.com/ItsKorayYT/YamiNet/actions/runs/41318900007",
+  "conclusion": "success",
+  "jobs": [
+    {
+      "id": 124884735333,
+      "name": "validate (windows-latest)",
+      "status": "completed",
+      "conclusion": "success",
+      "successful_steps": [
+        "Set up job",
+        "Locked source verification",
+        "Independent-process YNS publication and discovery",
+        "Testnet topology rehearsal (loopback only)",
+        "Version verification",
+        "Package regression checks",
+        "Native Windows MSVC package and installer upgrade lifecycle",
+        "Upload validated packages",
+        "Preserve diagnostic evidence, including failures",
+        "Complete job"
+      ]
+    },
+    {
+      "id": 124884735520,
+      "name": "validate (ubuntu-24.04)",
+      "status": "completed",
+      "conclusion": "success",
+      "successful_steps": [
+        "Set up job",
+        "Linux native window dependencies",
+        "Locked source verification",
+        "Independent-process YNS publication and discovery",
+        "Testnet topology rehearsal (loopback only)",
+        "Version verification",
+        "Package regression checks",
+        "Native Linux package and virtual X11 lifecycle",
+        "Upload validated packages",
+        "Preserve diagnostic evidence, including failures",
+        "Complete job"
+      ]
+    }
+  ]
+}
