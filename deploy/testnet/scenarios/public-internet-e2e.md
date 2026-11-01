@@ -288,6 +288,14 @@ The browser's `--operator-relay-cycle` option prompts for operator confirmations
 and performs no remote service control; with `--game` it also retests game execution
 after recovery. GUI/game tests on real machines still need the operator checklist.
 
+The existing relay uses one single-use outbound registration per host. Between
+requests the host re-registers; the client now allows at most four authenticated
+busy/absent/expired-slot replies with bounded backoff inside the original request
+deadline. This does not extend timeouts or retry identity/authentication/policy
+failures. Persistent outages still fail. The loopback rehearsal also paces
+separate scenarios because all simulated machines share one source IP and the
+normal listener admission limits.
+
 ## Evidence and first-public-test decision
 
 Attach the three machines' commit/version, UTC times, their roles and distinct
