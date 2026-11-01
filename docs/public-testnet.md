@@ -10,6 +10,11 @@ check it from a separate client.
 > documents. Do not change a firewall, router or real server without the
 > operator's explicit authorization.
 
+For the current VPS DHT/relay/YNS provider + outbound home website/hosted game +
+independent-client topology, use the [first public-internet trial runbook](../deploy/testnet/scenarios/public-internet-e2e.md).
+It extends this existing kit, documents the `init --yns` configured-service opt-in,
+and records local rehearsal separately from real public-internet results.
+
 ## What you will build
 
 ```text

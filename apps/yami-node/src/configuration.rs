@@ -62,6 +62,12 @@ pub fn node_args(config: &Config) -> io::Result<Vec<String>> {
         if config.public_listen {
             args.push("--public".into());
         }
+        if config.yns {
+            args.extend([
+                "--yns-dir".into(),
+                config.state.join("yns").display().to_string(),
+            ]);
+        }
     }
     for route in &config.relays {
         args.extend([

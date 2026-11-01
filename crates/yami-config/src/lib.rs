@@ -28,6 +28,7 @@ pub struct Config {
     pub relays: Vec<RelayRoute>,
     pub relay_fallback: bool,
     pub dht: bool,
+    pub yns: bool,
     pub workers: usize,
     pub renew_secs: u64,
     pub health_secs: u64,
@@ -82,6 +83,7 @@ impl Config {
             "relay",
             "relay-fallback",
             "dht",
+            "yns",
             "workers",
             "renew-secs",
             "health-secs",
@@ -226,6 +228,7 @@ impl Config {
         advertised.sort();
         let relay_fallback = boolean("relay-fallback", false)?;
         let dht = boolean("dht", false)?;
+        let yns = boolean("yns", false)?;
         let workers = number("workers", 4, 1, 32)? as usize;
         let renew_secs = number("renew-secs", 21600, 30, 43200)?;
         let health_secs = number("health-secs", 300, 5, 3600)?;
@@ -242,6 +245,7 @@ impl Config {
                 "bootstrap",
                 "relay",
                 "dht",
+                "yns",
                 "workers",
                 "renew-secs",
                 "health-secs",
@@ -261,6 +265,9 @@ impl Config {
             return Err(invalid(format!(
                 "field {key} is not supported for role {role:?}"
             )));
+        }
+        if yns && (role != Role::Node || listen.is_none() || !relays.is_empty()) {
+            return Err(invalid("yns yes requires a directly listening node; an outbound relay host cannot provide YNS"));
         }
         match role {
             Role::Node => {
@@ -315,6 +322,7 @@ impl Config {
             relays,
             relay_fallback,
             dht,
+            yns,
             workers,
             renew_secs,
             health_secs,
@@ -396,6 +404,27 @@ mod tests {
         );
         assert!(Config::parse(&(base.clone() + &pin + &pin)).is_err());
         assert!(Config::parse(&(base + "network public\n" + &pin)).is_err());
+    }
+    #[test]
+    fn naming_is_explicit_and_requires_a_direct_node_listener() {
+        let base = format!(
+            "yaminet-config 1\nrole node\nidentity {}\nstate {}\nsite {}\nlisten 127.0.0.1:17444\n",
+            state(),
+            state(),
+            state()
+        );
+        assert!(!Config::parse(&base).unwrap().yns);
+        assert!(Config::parse(&(base.clone() + "yns yes\n")).unwrap().yns);
+        assert!(Config::parse(&(base.clone() + "yns maybe\n")).is_err());
+        assert!(Config::parse(&(base + "yns yes\nyns yes\n")).is_err());
+        let browser = format!(
+            "yaminet-config 1\nrole browser\nstate {}\nyns yes\n",
+            state()
+        );
+        assert!(Config::parse(&browser).is_err());
+        let id = yami_identity::NodeIdentity::generate().unwrap();
+        let host=format!("yaminet-config 1\nrole node\nidentity {}\nstate {}\nsite {}\nrelay {}@127.0.0.1:17550\nyns yes\n",state(),state(),state(),id.id());
+        assert!(Config::parse(&host).is_err());
     }
 }
 

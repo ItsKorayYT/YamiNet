@@ -27,7 +27,7 @@ Usage:
       [--bootstrap <NODE-ID@IPv4:port>]... [--route auto|direct|relay]
       [--timeout 5..60] [--check-listeners] [--include-endpoints] [--json]
   yami-testnet init --profile <DIR> [--mode loopback|public]
-      [--bind-ip <IPv4> --public-ip <IPv4>] [--relay] [--site] [--client]
+      [--bind-ip <IPv4> --public-ip <IPv4>] [--relay] [--site] [--client] [--yns]
       [--binary-dir <DIR>] [--user <ACCOUNT>] [--group <ACCOUNT>]
       [--bootstrap-port <PORT>] [--relay-port <PORT>] [--site-port <PORT>]
   yami-testnet init --profile <DIR> --home --site
@@ -358,6 +358,7 @@ fn init_command(args: &[String]) -> Result<i32, CliError> {
     let mut bind = None;
     let mut public = None;
     let mut relay = false;
+    let mut yns = false;
     let mut site = false;
     let mut client = false;
     let mut home = false;
@@ -412,6 +413,7 @@ fn init_command(args: &[String]) -> Result<i32, CliError> {
                 set_once(&mut public, address, "--public-ip")?;
             }
             "--relay" => relay = true,
+            "--yns" => yns = true,
             "--site" => site = true,
             "--client" => client = true,
             "--home" => home = true,
@@ -522,6 +524,7 @@ fn init_command(args: &[String]) -> Result<i32, CliError> {
         relay,
         site,
         client,
+        yns,
         binary_dir,
         user,
         group,

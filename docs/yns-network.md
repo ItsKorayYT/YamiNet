@@ -65,7 +65,11 @@ This milestone uses a separately versioned, resource-bounded YNP extension;
 ## Run a mirror and publish
 
 Use the existing node binary and TLS listener. Naming is disabled unless explicitly
-enabled with `--yns-dir`. Server owner keys are not namespace owner keys.
+enabled with `--yns-dir` or `yns yes` in a directly listening node configuration.
+Configured startup uses `state/yns`, inside the generated systemd unit's existing
+writable state directory. `yami-testnet init --yns` enables it on the bootstrap's
+existing TLS listener; no extra port or registry root is created. Outbound relay
+hosts cannot serve direct YNS. Server owner keys are not namespace owner keys.
 
 ```text
 # Public service: select one IPv4 interface, configure inbound TCP yourself.

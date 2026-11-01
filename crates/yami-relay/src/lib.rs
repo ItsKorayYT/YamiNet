@@ -72,24 +72,48 @@ impl Route {
             return Err(invalid("invalid relay client budget"));
         }
         let deadline = Instant::now() + budget;
-        let mut outer = self.session(budget, public)?;
-        let until = deadline.min(Instant::now() + Duration::from_secs(CHALLENGE_TTL));
-        wire::write(
-            &mut Control {
+        // A host has one single-use outbound slot and re-registers after each
+        // request. An authenticated busy/absent/expired slot can be transient
+        // between a page, its assets and navigation. Retry only those replies,
+        // with a fixed attempt cap inside the original total caller budget.
+        for attempt in 0..4 {
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            if remaining.is_zero() {
+                return Err(io::Error::new(
+                    io::ErrorKind::TimedOut,
+                    "relay client deadline exceeded",
+                ));
+            }
+            let mut outer = self.session(remaining, public)?;
+            let until = deadline.min(Instant::now() + Duration::from_secs(CHALLENGE_TTL));
+            wire::write(
+                &mut Control {
+                    stream: &mut *outer,
+                    until,
+                },
+                &wire::Frame::Connect(self.destination.public_key()),
+            )?;
+            let reply = wire::read(&mut Control {
                 stream: &mut *outer,
                 until,
-            },
-            &wire::Frame::Connect(self.destination.public_key()),
-        )?;
-        match wire::expect(wire::read(&mut Control {
-            stream: &mut *outer,
-            until,
-        })?)? {
-            wire::Frame::Paired(id) if id == self.destination.public_key() => {
-                Ok(Box::new(Tunnel(outer)))
+            })?;
+            let delay = Duration::from_millis(200 << attempt);
+            if matches!(reply, wire::Frame::Error(1 | 2 | 6))
+                && attempt < 3
+                && deadline.saturating_duration_since(Instant::now()) > delay
+            {
+                drop(outer);
+                thread::sleep(delay);
+                continue;
             }
-            _ => Err(invalid("relay did not pair the requested destination")),
+            return match wire::expect(reply)? {
+                wire::Frame::Paired(id) if id == self.destination.public_key() => {
+                    Ok(Box::new(Tunnel(outer)))
+                }
+                _ => Err(invalid("relay did not pair the requested destination")),
+            };
         }
+        unreachable!("last relay attempt always returns")
     }
     pub fn connect(&self) -> io::Result<Box<dyn Connection>> {
         self.connect_with_timeout(false, CLIENT_LIFETIME)
@@ -113,6 +137,88 @@ impl Route {
             return Err(invalid("destination TLS authentication required"));
         }
         ynp::request(&mut *connection, key)
+    }
+}
+#[cfg(test)]
+mod pairing_tests {
+    use super::*;
+
+    // Zero pairs the requested owner; 255 sends another owner. Other values are
+    // existing authenticated protocol refusal codes, not transport failures.
+    fn scripted(replies: &[u8], budget: Duration) -> (bool, usize, Duration) {
+        let relay = Arc::new(NodeIdentity::generate().unwrap());
+        let host = *NodeIdentity::generate().unwrap().id();
+        let wrong = *NodeIdentity::generate().unwrap().id();
+        let listener =
+            ynp_tls::TlsListener::bind("127.0.0.1:0".parse().unwrap(), relay.clone()).unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let route = Route {
+            relay: *relay.id(),
+            destination: host,
+            endpoint: listener.local_addr().unwrap(),
+        };
+        let replies = replies.to_vec();
+        let server = thread::spawn(move || {
+            let until = Instant::now() + Duration::from_secs(5);
+            let mut count = 0;
+            for reply in replies {
+                let mut stream = loop {
+                    match listener.accept_session(Duration::from_secs(2)) {
+                        Ok(stream) => break stream,
+                        Err(error)
+                            if error.kind() == io::ErrorKind::WouldBlock
+                                && Instant::now() < until =>
+                        {
+                            thread::sleep(Duration::from_millis(5))
+                        }
+                        Err(_) => return count,
+                    }
+                };
+                count += 1;
+                let Ok(request) = wire::read(&mut *stream) else {
+                    return count;
+                };
+                assert_eq!(request, wire::Frame::Connect(host.public_key()));
+                let frame = match reply {
+                    0 => wire::Frame::Paired(host.public_key()),
+                    255 => wire::Frame::Paired(wrong.public_key()),
+                    code => wire::Frame::Error(code),
+                };
+                let _ = wire::write(&mut *stream, &frame);
+            }
+            count
+        });
+        let started = Instant::now();
+        let success = route.open_tunnel_budget(false, budget).is_ok();
+        let elapsed = started.elapsed();
+        (success, server.join().unwrap(), elapsed)
+    }
+
+    #[test]
+    fn rotating_outbound_slot_retries_only_authenticated_transient_refusals() {
+        let (success, count, _) = scripted(&[1, 2, 6, 0], Duration::from_secs(4));
+        assert!(success);
+        assert_eq!(count, 4);
+    }
+
+    #[test]
+    fn pairing_retries_are_capped_and_preserve_the_original_deadline() {
+        let (success, count, _) = scripted(&[2; 4], Duration::from_secs(4));
+        assert!(!success);
+        assert_eq!(count, 4);
+        let (success, count, elapsed) = scripted(&[2], Duration::from_millis(100));
+        assert!(!success);
+        assert!(count <= 1);
+        assert!(elapsed < Duration::from_secs(1));
+    }
+
+    #[test]
+    fn pairing_never_retries_authentication_policy_or_wrong_owner_refusals() {
+        for code in [3, 4, 5, 255] {
+            let (success, count, _) = scripted(&[code], Duration::from_secs(4));
+            assert!(!success);
+            assert_eq!(count, 1);
+        }
     }
 }
 struct Tunnel(Box<dyn SecureStream>);

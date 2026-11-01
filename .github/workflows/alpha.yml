@@ -45,6 +45,8 @@ jobs:
           cargo build --workspace --release --locked 2>&1 | tee dist/release-build.log
       - name: Independent-process YNS publication and discovery
         run: python tools/yns-network-demo.py --report dist/yns-network-demo.json
+      - name: Testnet topology rehearsal (loopback only)
+        run: python deploy/testnet/scenarios/public-e2e-rehearsal.py --report dist/public-e2e-rehearsal.json
       - name: Version verification
         shell: bash
         run: |

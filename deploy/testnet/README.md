@@ -18,6 +18,9 @@ feed or mandatory hosting relationship.
 | `scenarios/loopback-rehearsal.sh` | Starts bootstrap + relay + outbound host on loopback and runs the same preflight path |
 | `scenarios/relay-fallback.md` | Reproducible direct-failure and relay-fallback procedure |
 | `scenarios/cross-network-checklist.md` | Record which checks actually ran on independent machines |
+| `scenarios/public-internet-e2e.md` | VPS/provider + relay, outbound home website/game, independent client commands and approval gates |
+| `scenarios/public-e2e-rehearsal.py` | Combined existing-kit rehearsal: YNS, DHT, pinned relay delivery, navigation, assets, sandboxed games, failures and recovery; LOOPBACK ONLY |
+| `results/2026-11-01-public-e2e.md` | Current observed local results and explicitly NOT RUN real-internet checks |
 | `VALIDATION.md` | What this checkout validated locally, and what remains NOT RUN |
 | `../../docs/public-testnet.md` | Full beginner deployment guide |
 
@@ -104,3 +107,23 @@ cargo fmt --all -- --check
 The loopback integration tests start real TLS listeners, signed DHT services,
 a real relay and an outbound host. Their PASS is still a single-machine
 simulation.
+
+## YNS 0.2 and hosted-game public trial
+
+Use [the three-machine runbook](scenarios/public-internet-e2e.md) and the
+[bootstrap/provider template](templates/bootstrap-yns.conf.example). `init --yns`
+is an explicit, offline opt-in for a directly listening bootstrap provider on its
+existing TLS port. It never enables YNS on an outbound home host. Existing configs
+are not silently rewritten when a new flag is supplied.
+
+The combined local rehearsal reuses this kit and the existing native binaries:
+
+```sh
+cargo build --workspace --locked
+python deploy/testnet/scenarios/public-e2e-rehearsal.py --report dist/public-e2e-rehearsal.json
+```
+
+It performs local child-process starts/stops only, never remote deployment,
+service installation, firewall edits or router changes. Its PASS cannot satisfy
+the public-internet gate: the report separately records that gate as NOT RUN.
+Both Windows and Linux CI run this same rehearsal.

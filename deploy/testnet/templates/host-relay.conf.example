@@ -1,5 +1,7 @@
 # TEMPLATE ONLY. Replace every placeholder before use.
-# Website host behind a router: outbound connections only, no inbound listener.
+# Website/game host behind a router: outbound connections only, no inbound listener.
+# No yns yes here: signed namespace records are published to the direct VPS provider.
+# Keep namespace owner keys outside the website and serving-node identity directory.
 yaminet-config 1
 role node
 network public

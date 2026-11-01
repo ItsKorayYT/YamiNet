@@ -16,6 +16,14 @@ fn step(steps: &mut Vec<Value>, name: &str, status: &str, evidence: &str) {
 fn observation(o: &validation::Observation, endpoints: bool) -> Value {
     json!({"destination":o.destination.to_string(),"route":if o.origin.relay.is_some(){"relay"}else{"direct"},"relay":o.origin.relay.map(|id|id.to_string()),"endpoint":if endpoints {Some(o.origin.endpoint.to_string())}else{None},"png":o.png,"elapsed_ms":o.elapsed_ms})
 }
+/// Optional checks are explicit operator requests. A game is fetched and run
+/// only when --game KEY is supplied, and only when advertised by the page.
+#[derive(Default, Clone, Copy)]
+pub struct Checks<'a> {
+    pub name: Option<&'a str>,
+    pub navigation: Option<&'a str>,
+    pub game: Option<&'a str>,
+}
 pub fn run(
     config: &Config,
     url: &str,
@@ -23,6 +31,25 @@ pub fn run(
     host: Option<&Config>,
     include_endpoints: bool,
     cycle: bool,
+) -> (Value, bool) {
+    run_with_checks(
+        config,
+        url,
+        asset,
+        host,
+        include_endpoints,
+        cycle,
+        Checks::default(),
+    )
+}
+pub fn run_with_checks(
+    config: &Config,
+    url: &str,
+    asset: &str,
+    host: Option<&Config>,
+    include_endpoints: bool,
+    cycle: bool,
+    checks: Checks<'_>,
 ) -> (Value, bool) {
     let mut steps = Vec::new();
     let mut phase = "configuration";
@@ -107,10 +134,63 @@ pub fn run(
                 "host filesystem not supplied on independent client; verify separately on host",
             );
         }
+        if let Some(name) = checks.name {
+            phase = "yns-resolution";
+            let name = yami_yns::Name::parse(name).map_err(|_| "invalid readable name")?;
+            if matches!(name, yami_yns::Name::Alias(_)) {
+                return Err("trial requires a published name, not a local alias".into());
+            }
+            let id = resolver.resolve_name_until(
+                &name,
+                Instant::now() + yami_yns::network::DISCOVERY_BUDGET,
+                true,
+            )?;
+            if id != address.id {
+                return Err("signed name targets a different identity than the explicitly pinned trial destination".into());
+            }
+            step(&mut steps,"yns-resolution","PASS","forced authenticated provider retrieval and validated cache; signed name matches the independently supplied full destination identity");
+        } else {
+            step(
+                &mut steps,
+                "yns-resolution",
+                "NOT RUN",
+                "pass --name CANONICAL-NAME to test a network YNS refresh",
+            );
+        }
         phase = "document-and-png";
         let baseline = validation::inspect(url, Some(asset), &resolver)?;
         steps.push(json!({"name":"document-and-png","status":"PASS","observation":observation(&baseline,include_endpoints)}));
         step(&mut steps,"authenticated-relay-registration",if baseline.origin.relay.is_some(){"PASS"}else{"NOT RUN"},"successful nested authenticated relay tunnel proves a live destination route at fetch time; direct routes do not test relays");
+        if let Some(key) = checks.navigation {
+            phase = "page-navigation";
+            ynp::validate_key(key).map_err(|_| "invalid navigation key")?;
+            if !baseline.link_targets.contains(&format!("/{key}"))
+                && !baseline
+                    .link_targets
+                    .contains(&format!("yami://{}/{key}", address.id))
+            {
+                return Err("requested navigation is not advertised as a same-node link".into());
+            }
+            let linked =
+                validation::inspect(&format!("yami://{}/{key}", address.id), None, &resolver)?;
+            if linked.destination != address.id {
+                return Err("navigation changed destination".into());
+            }
+            steps.push(json!({"name":"page-navigation","status":"PASS","observation":observation(&linked,include_endpoints),"evidence":"advertised same-node link fetched and parsed with the original destination pin"}));
+        } else {
+            step(
+                &mut steps,
+                "page-navigation",
+                "NOT RUN",
+                "pass --navigate PAGE-KEY; GUI click/back controls are checked separately",
+            );
+        }
+        if let Some(key) = checks.game {
+            phase = "hosted-game";
+            steps.push(game_check(&baseline, key)?);
+        } else {
+            step(&mut steps,"hosted-game","NOT RUN","game execution requires explicit --game GAME-KEY consent; pages alone never start a VM");
+        }
         if cycle {
             phase = "operator-relay-cycle";
             let relay = baseline
@@ -142,6 +222,12 @@ pub fn run(
             }
             if let Some(o) = recovered {
                 steps.push(json!({"name":"operator-relay-recovery","status":"PASS","observation":observation(&o,include_endpoints)}));
+                if let Some(key) = checks.game {
+                    phase = "hosted-game-after-recovery";
+                    let mut game = game_check(&o, key)?;
+                    game["name"] = json!("hosted-game-after-recovery");
+                    steps.push(game);
+                }
             } else {
                 step(
                     &mut steps,
@@ -161,13 +247,55 @@ pub fn run(
         Ok(())
     })();
     if outcome.is_err() {
-        step(&mut steps,phase,"FAIL","a configuration, identity, DHT, transport, document or PNG check failed; raw errors intentionally omitted");
+        step(&mut steps,phase,"FAIL","an explicitly requested configuration, identity, DHT, YNS, transport, navigation, PNG or sandboxed game check failed; raw errors intentionally omitted");
     }
     let success = outcome.is_ok() && !steps.iter().any(|s| s["status"] == "FAIL");
     (
         json!({"schema":"yaminet-network-trial-1","version":env!("CARGO_PKG_VERSION"),"result":if success{"PASS"}else{"FAIL"},"physical_topology":"NOT VERIFIED; operator must record independent machines and connection types", "gui_rendering":"NOT RUN", "endpoints_included":include_endpoints,"steps":steps}),
         success,
     )
+}
+fn game_check(observation: &validation::Observation, key: &str) -> Result<Value, String> {
+    use std::sync::Arc;
+    ynp::validate_asset_key(key).map_err(|_| "invalid game key")?;
+    if !observation.link_targets.contains(&format!("game:{key}")) {
+        return Err("requested game is not advertised by the authenticated page".into());
+    }
+    let session = crate::hosted_games::Source::Hosted {
+        origin: observation.origin.clone(),
+        key: key.into(),
+    }
+    .launch(Arc::new(|| {}))?;
+    let deadline = Instant::now() + Duration::from_secs(12);
+    let mut pressed_at = None;
+    while Instant::now() < deadline {
+        let snapshot = session.snapshot();
+        if let yami_games::Status::Failed(_) = snapshot.status {
+            session.stop();
+            return Err("hosted transfer, integrity, ABI or sandbox execution failed".into());
+        }
+        if snapshot.status == yami_games::Status::Running
+            && snapshot.frames > 0
+            && pressed_at.is_none()
+        {
+            session.key(yami_games::START, true);
+            pressed_at = Some(snapshot.frames);
+        }
+        if pressed_at.is_some_and(|frame| snapshot.frames >= frame + 3)
+            && snapshot
+                .frame
+                .as_ref()
+                .is_some_and(|f| !f.commands.is_empty())
+        {
+            session.stop();
+            return Ok(
+                json!({"name":"hosted-game","status":"PASS","frames":snapshot.frames,"draw_commands":snapshot.frame.as_ref().map(|f|f.commands.len()),"evidence":"explicit opt-in; manifest and Wasm fetched through original destination/relay pins; digest and ABI checked; existing bounded no-WASI sandbox produced draw commands after synthetic START input","gui_rendering":"NOT RUN"}),
+            );
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    session.stop();
+    Err("hosted game did not produce bounded frames before timeout".into())
 }
 fn confirmation(expected: &str) -> Result<(), String> {
     use std::io::{BufRead, Read};
