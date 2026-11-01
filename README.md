@@ -46,6 +46,12 @@ for creation, delegation, persistence and identity-change warnings, and the
 [network guide](docs/yns-network.md) for publication, bootstrap requirements and
 validation limits.
 
+### Optional YamiChain research prototype
+
+[YamiChain 0.1](docs/yamichain-0.1.md) is an isolated, non-financial Rust/Malachite
+local prototype. It has no wallet, issued YAMI or accepted payment proofs and is
+not production-ready. Browsing and hosting do not require or contact it.
+
 ## 🚀 Get started
 
 You don't need to know Rust or install programming tools to use a **prebuilt desktop package**.

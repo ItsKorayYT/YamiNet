@@ -1,0 +1,16 @@
+[package]
+name = "yami-validator"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+yami-chain = { path = "../../crates/yami-chain" }
+yami-chain-storage = { path = "../../crates/yami-chain-storage" }
+yami-chain-consensus = { path = "../../crates/yami-chain-consensus" }
+eyre = "0.6"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "signal"] }
