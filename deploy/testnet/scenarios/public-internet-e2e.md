@@ -296,6 +296,13 @@ failures. Persistent outages still fail. The loopback rehearsal also paces
 separate scenarios because all simulated machines share one source IP and the
 normal listener admission limits.
 
+After a successfully served request, the host retains its last authenticated
+relay location claim for at most two seconds while re-registering, capped by the
+original registration lease. This prevents ordinary request completion from
+publishing a DHT withdrawal. Health diagnostics count no active registration
+during rotation; actual failures withdraw the claim immediately. A cached or
+advertised location never replaces the client's relay/destination TLS checks.
+
 ## Evidence and first-public-test decision
 
 Attach the three machines' commit/version, UTC times, their roles and distinct

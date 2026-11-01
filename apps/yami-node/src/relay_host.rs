@@ -6,7 +6,7 @@ use std::{
     path::Path,
     sync::{Arc, Mutex},
     thread,
-    time::Instant,
+    time::{Duration, Instant},
 };
 use yami_dht::{Network, RelayRoute, Service};
 use yami_identity::NodeIdentity;
@@ -16,11 +16,19 @@ use yami_relay::{HostEvent, Route};
 pub struct ActiveRoutes(Arc<Mutex<Health>>);
 #[derive(Default)]
 struct Health {
-    routes: Vec<(RelayRoute, Instant)>,
+    routes: Vec<LiveRoute>,
     configured: usize,
     failures: u64,
     last_success: u64,
 }
+struct LiveRoute {
+    route: RelayRoute,
+    until: Instant,
+    rotating: bool,
+}
+// A successfully served single-use slot immediately re-registers. Retain only
+// its last authenticated location claim briefly, never past its original lease.
+const ROTATION_GRACE: Duration = Duration::from_secs(2);
 #[derive(Debug)]
 pub struct RelayHealth {
     pub id: yami_identity::NodeId,
@@ -56,6 +64,9 @@ pub fn read_health(directory: &Path) -> io::Result<RelayHealth> {
 }
 impl ActiveRoutes {
     pub fn current(&self) -> io::Result<Vec<RelayRoute>> {
+        self.current_at(Instant::now())
+    }
+    fn current_at(&self, at: Instant) -> io::Result<Vec<RelayRoute>> {
         let routes = self
             .0
             .lock()
@@ -63,17 +74,34 @@ impl ActiveRoutes {
         Ok(routes
             .routes
             .iter()
-            .filter(|(_, until)| *until > Instant::now())
-            .map(|(r, _)| *r)
+            .filter(|live| live.until > at)
+            .map(|live| live.route)
             .collect())
     }
     fn update(&self, route: RelayRoute, event: HostEvent) {
+        self.update_at(route, event, Instant::now());
+    }
+    fn update_at(&self, route: RelayRoute, event: HostEvent, at: Instant) {
         if let Ok(mut health) = self.0.lock() {
-            health.routes.retain(|(r, _)| *r != route);
+            if matches!(event, HostEvent::Served) {
+                if let Some(live) = health.routes.iter_mut().find(|live| live.route == route) {
+                    live.until = live.until.min(at + ROTATION_GRACE);
+                    live.rotating = true;
+                }
+                return;
+            }
+            health.routes.retain(|live| {
+                live.route != route
+                    || (matches!(event, HostEvent::Unregistered)
+                        && live.rotating
+                        && live.until > at)
+            });
             if matches!(event, HostEvent::Registered) && health.routes.len() < 2 {
-                health
-                    .routes
-                    .push((route, Instant::now() + yami_relay::REGISTRATION_LEASE));
+                health.routes.push(LiveRoute {
+                    route,
+                    until: at + yami_relay::REGISTRATION_LEASE,
+                    rotating: false,
+                });
                 health.last_success = yami_dht::now().unwrap_or(0);
             }
             if matches!(event, HostEvent::Retrying) {
@@ -95,7 +123,7 @@ impl ActiveRoutes {
             health
                 .routes
                 .iter()
-                .filter(|(_, until)| *until > Instant::now())
+                .filter(|live| !live.rotating && live.until > Instant::now())
                 .count()
         } else {
             0
@@ -230,6 +258,62 @@ impl Drop for Hosts {
 #[cfg(test)]
 mod tests {
     use super::*;
+    fn route() -> RelayRoute {
+        RelayRoute {
+            relay: *NodeIdentity::generate().unwrap().id(),
+            endpoint: "127.0.0.1:7443".parse().unwrap(),
+        }
+    }
+    #[test]
+    fn served_slot_rotation_preserves_a_bounded_location_claim_but_failures_withdraw() {
+        let active = ActiveRoutes::default();
+        let route = route();
+        let at = Instant::now();
+        active.update_at(route, HostEvent::Registered, at);
+        active.update_at(route, HostEvent::Served, at);
+        active.update_at(route, HostEvent::Unregistered, at);
+        assert_eq!(
+            active.current_at(at + Duration::from_secs(1)).unwrap(),
+            vec![route]
+        );
+        assert!(active.0.lock().unwrap().routes[0].rotating);
+        // Repeated notifications cannot extend a verified claim indefinitely.
+        active.update_at(route, HostEvent::Served, at + Duration::from_secs(1));
+        assert!(active.current_at(at + ROTATION_GRACE).unwrap().is_empty());
+        active.update_at(route, HostEvent::Retrying, at);
+        assert!(active.current_at(at).unwrap().is_empty());
+        active.update_at(route, HostEvent::Registered, at);
+        active.update_at(route, HostEvent::Unregistered, at);
+        assert!(active.current_at(at).unwrap().is_empty());
+    }
+    #[test]
+    fn rotation_never_invents_a_route_or_extends_the_original_authenticated_lease() {
+        let active = ActiveRoutes::default();
+        let route = route();
+        let at = Instant::now();
+        active.update_at(route, HostEvent::Served, at);
+        active.update_at(route, HostEvent::Unregistered, at);
+        assert!(active.current_at(at).unwrap().is_empty());
+        active.update_at(route, HostEvent::Registered, at);
+        let expires = at + yami_relay::REGISTRATION_LEASE;
+        active.update_at(
+            route,
+            HostEvent::Served,
+            expires - Duration::from_millis(100),
+        );
+        active.update_at(
+            route,
+            HostEvent::Unregistered,
+            expires - Duration::from_millis(100),
+        );
+        assert_eq!(
+            active
+                .current_at(expires - Duration::from_millis(50))
+                .unwrap(),
+            vec![route]
+        );
+        assert!(active.current_at(expires).unwrap().is_empty());
+    }
     #[test]
     fn expired_registration_is_not_published_and_health_counts_failures() {
         let active = ActiveRoutes::default();
@@ -239,7 +323,7 @@ mod tests {
         };
         active.update(route, HostEvent::Registered);
         assert_eq!(active.current().unwrap(), vec![route]);
-        active.0.lock().unwrap().routes[0].1 = Instant::now();
+        active.0.lock().unwrap().routes[0].until = Instant::now();
         assert!(active.current().unwrap().is_empty());
         active.update(route, HostEvent::Retrying);
         assert!(active.current().unwrap().is_empty());
