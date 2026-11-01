@@ -33,14 +33,24 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     }
     if args.first().is_some_and(|arg| arg == "--network-trial") {
         if args.len() < 6 || args[2] != "--config" || args[4] != "--asset" {
-            return Err("Usage: --network-trial yami://ID/KEY --config BROWSER-CONFIG --asset PNG-KEY [--host-config FILE] [--include-endpoints] [--operator-relay-cycle]".into());
+            return Err("Usage: --network-trial yami://ID/KEY --config BROWSER-CONFIG --asset PNG-KEY [--host-config FILE] [--name NAME] [--navigate PAGE] [--game GAME-KEY] [--include-endpoints] [--operator-relay-cycle]".into());
         }
         let (mut host_path, mut endpoints, mut cycle) = (None, false, false);
+        let mut checks = yami_browser::network_trial::Checks::default();
         let mut rest = args[6..].iter();
         while let Some(flag) = rest.next() {
             match flag.as_str() {
                 "--host-config" if host_path.is_none() => {
                     host_path = Some(rest.next().ok_or("host config file required")?)
+                }
+                "--name" if checks.name.is_none() => {
+                    checks.name = Some(rest.next().ok_or("canonical name required")?)
+                }
+                "--navigate" if checks.navigation.is_none() => {
+                    checks.navigation = Some(rest.next().ok_or("navigation page key required")?)
+                }
+                "--game" if checks.game.is_none() => {
+                    checks.game = Some(rest.next().ok_or("explicit hosted game key required")?)
                 }
                 "--include-endpoints" if !endpoints => endpoints = true,
                 "--operator-relay-cycle" if !cycle => cycle = true,
@@ -63,13 +73,14 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 return Err("network trial configuration failed".into());
             }
         };
-        let (report, success) = yami_browser::network_trial::run(
+        let (report, success) = yami_browser::network_trial::run_with_checks(
             &config,
             &args[1],
             &args[5],
             host.as_ref(),
             endpoints,
             cycle,
+            checks,
         );
         println!("{}", serde_json::to_string_pretty(&report)?);
         if !success {
@@ -184,7 +195,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         return Ok(());
     }
     if args.first().is_some_and(|s| s == "--help") {
-        println!("Yami Browser\n  --network-trial URL --config FILE --asset KEY [--host-config FILE] [--include-endpoints] [--operator-relay-cycle]\n  --diagnostic-log ABS-DIR | diagnostics report|clear ABS-DIR\n  --desktop-smoke ABS-REPORT (isolated test profile required)\n  --game LOCAL-MANIFEST                 Play a local WebAssembly game\n  --version | --probe URL [--asset KEY]  Explicit authenticated diagnostics\n  yami-browser                         Native desktop window\n  yami-browser --desktop [YNP URL]     Desktop with initial page\n  yami-browser --terminal [file]       Terminal viewer\n  yami-browser [file | YNP URL] [--style file] [--ppm image.ppm]\nConfiguration: --config FILE | check-config FILE | --network-status\nSettings: --enable-relays | --disable-relays; --bootstrap node-ID@IPv4:port\nSidebar: relay toggle and Add bootstrap peer (paste full ID@IPv4:port, Enter).\nNaming: yns (see docs/yns.md); yami://@alias/key; yami://label.full-owner-ID.yns/key\nYNP URLs: yami://node-id/key (DHT lookup, pinned TLS 1.3)\n          ynps://node-id@IP:port/key (TLS 1.3, loopback, LAN or public IPv4)\n          ynp://loopback-IP:port/key (plaintext, this computer only)\n{}\n{}", ynp::WARNING, ynp_tls::WARNING);
+        println!("Yami Browser\n  --network-trial URL --config FILE --asset KEY [--host-config FILE] [--name NAME] [--navigate PAGE] [--game GAME-KEY] [--include-endpoints] [--operator-relay-cycle]\n  --diagnostic-log ABS-DIR | diagnostics report|clear ABS-DIR\n  --desktop-smoke ABS-REPORT (isolated test profile required)\n  --game LOCAL-MANIFEST                 Play a local WebAssembly game\n  --version | --probe URL [--asset KEY]  Explicit authenticated diagnostics\n  yami-browser                         Native desktop window\n  yami-browser --desktop [YNP URL]     Desktop with initial page\n  yami-browser --terminal [file]       Terminal viewer\n  yami-browser [file | YNP URL] [--style file] [--ppm image.ppm]\nConfiguration: --config FILE | check-config FILE | --network-status\nSettings: --enable-relays | --disable-relays; --bootstrap node-ID@IPv4:port\nSidebar: relay toggle and Add bootstrap peer (paste full ID@IPv4:port, Enter).\nNaming: yns (see docs/yns.md); yami://@alias/key; yami://label.full-owner-ID.yns/key\nYNP URLs: yami://node-id/key (DHT lookup, pinned TLS 1.3)\n          ynps://node-id@IP:port/key (TLS 1.3, loopback, LAN or public IPv4)\n          ynp://loopback-IP:port/key (plaintext, this computer only)\n{}\n{}", ynp::WARNING, ynp_tls::WARNING);
         Ok(())
     } else if game_path.is_some() || args.is_empty() || args[0] == "--desktop" {
         if args.first().is_some_and(|arg| arg == "--desktop") {

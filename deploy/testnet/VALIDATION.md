@@ -1,5 +1,9 @@
 # Validation record for the public-testnet kit
 
+The historical record below is retained. See the [2026-11-01 public end-to-end
+readiness record](results/2026-11-01-public-e2e.md) for YNS 0.2, hosted games and
+current public-internet NOT RUN statuses.
+
 Revision: rebased onto `origin/main` at `fcace92`; feature branch commit
 `feat(testnet): add public test-network deployment and preflight kit`.
 

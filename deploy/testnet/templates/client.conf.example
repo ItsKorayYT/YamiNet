@@ -1,5 +1,8 @@
 # TEMPLATE ONLY. Replace every placeholder before use.
 # No identity or listener: this is the independent client profile.
+# Configure YNS separately, with this profile selected:
+# yami-browser --config CLIENT-CONFIG yns providers-set BOOTSTRAP_ID@PUBLIC_IPV4:17444
+# YNS providers must be directly reachable IPv4 TLS nodes; a relay-only home host is not a provider.
 yaminet-config 1
 role browser
 network public

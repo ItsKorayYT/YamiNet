@@ -112,6 +112,7 @@ pub struct InitOptions {
     pub relay: bool,
     pub site: bool,
     pub client: bool,
+    pub yns: bool,
     pub binary_dir: PathBuf,
     pub user: String,
     pub group: String,
@@ -373,9 +374,17 @@ fn advertised_for(mode: Mode, address: u16) -> SocketAddrV4 {
     }
 }
 
-fn bootstrap_config(mode: Mode, identity: &Path, state: &Path, site: &Path, port: u16) -> String {
+fn bootstrap_config(
+    mode: Mode,
+    identity: &Path,
+    state: &Path,
+    site: &Path,
+    port: u16,
+    yns: bool,
+) -> String {
     format!(
-        "yaminet-config 1\nrole node\nnetwork {network}\npublic-listen {public}\nidentity {identity}\nstate {state}\nsite {site}\nlisten {listen}\nadvertise {advertise}\ndht yes\nworkers 4\nrenew-secs 21600\nhealth-secs 300\n",
+        "yaminet-config 1\nrole node\nnetwork {network}\npublic-listen {public}\nidentity {identity}\nstate {state}\nsite {site}\nlisten {listen}\nadvertise {advertise}\ndht yes\n{naming}workers 4\nrenew-secs 21600\nhealth-secs 300\n",
+        naming = if yns { "yns yes\n" } else { "" },
         network = if mode.is_public() { "public" } else { "loopback" },
         public = if mode.is_public() { "yes" } else { "no" },
         identity = identity.display(),
@@ -478,6 +487,9 @@ fn init_join(options: &InitOptions, root: &Path) -> Result<InitReport, String> {
         .ok_or_else(|| "--home needs bootstrap and relay pins".to_string())?;
     if !options.site {
         return Err("--home needs --site to create a website profile".into());
+    }
+    if options.yns {
+        return Err("--home is outbound-only and cannot run a direct YNS provider".into());
     }
     if options.relay {
         return Err(
@@ -639,6 +651,7 @@ pub fn init(options: &InitOptions) -> Result<InitReport, String> {
                 &bootstrap_state,
                 &bootstrap_site,
                 ports.bootstrap,
+                options.yns,
             ),
         )?,
     );
@@ -770,6 +783,16 @@ pub fn init(options: &InitOptions) -> Result<InitReport, String> {
         "BOOTSTRAP_CONFIG",
         config_path(&root, "bootstrap").display().to_string(),
     ));
+    if options.yns {
+        addresses.push_str(&env_line(
+            "YNS_PROVIDER_PIN",
+            pin(bootstrap_id, bootstrap_endpoint),
+        ));
+        addresses.push_str(&env_line(
+            "YNS_STATE",
+            bootstrap_state.join("yns").display().to_string(),
+        ));
+    }
     if let Some((id, endpoint)) = relay {
         addresses.push_str(&env_line("RELAY_ID", id.to_string()));
         addresses.push_str(&env_line("RELAY_ENDPOINT", endpoint.to_string()));
@@ -984,6 +1007,7 @@ mod tests {
             relay: true,
             site: true,
             client: true,
+            yns: false,
             binary_dir,
             user: "yaminet".into(),
             group: "yaminet".into(),
@@ -1162,5 +1186,33 @@ mod tests {
     fn source_line_quoting_round_trips_shell_special_paths() {
         assert_eq!(env_value("a'b"), "'a'\\''b'");
         assert_eq!(env_value("/var/lib/a b"), "'/var/lib/a b'");
+    }
+    #[test]
+    fn yns_profile_reuses_bootstrap_listener_and_writable_state_without_new_authority() {
+        let path = base("yns");
+        let mut opts = options(&path);
+        opts.yns = true;
+        let report = init(&opts).unwrap();
+        let config = yami_config::Config::load(path.join("bootstrap/bootstrap.conf")).unwrap();
+        assert!(config.yns);
+        let args = yami_node::configuration::node_args(&config).unwrap();
+        assert!(args.windows(2).any(|pair| pair[0] == "--yns-dir"
+            && pair[1] == config.state.join("yns").display().to_string()));
+        assert!(
+            !yami_config::Config::load(path.join("host/host.conf"))
+                .unwrap()
+                .yns
+        );
+        let addresses = fs::read_to_string(path.join("addresses.env")).unwrap();
+        assert!(addresses.contains(&format!(
+            "YNS_PROVIDER_PIN='{}@{}'",
+            report.bootstrap_id, report.bootstrap_endpoint
+        )));
+        assert!(
+            !path.join("bootstrap/state/yns/yns.json").exists(),
+            "offline init must not run the naming service"
+        );
+        assert_eq!(init(&opts).unwrap().bootstrap_id, report.bootstrap_id);
+        fs::remove_dir_all(path).unwrap();
     }
 }

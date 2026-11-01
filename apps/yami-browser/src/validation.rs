@@ -12,6 +12,8 @@ pub struct Observation {
     pub origin: Origin,
     pub png: Option<(u32, u32)>,
     pub elapsed_ms: u128,
+    /// In-memory only: diagnostics report explicit requested checks, not page contents.
+    pub link_targets: Vec<String>,
 }
 pub fn inspect(url: &str, asset: Option<&str>, resolver: &Resolver) -> Result<Observation, String> {
     let location = Location::parse(url)?;
@@ -33,6 +35,16 @@ pub fn inspect(url: &str, asset: Option<&str>, resolver: &Resolver) -> Result<Ob
     };
     let document = crate::native::parse_document(&data.source)
         .map_err(|e| format!("Authenticated document syntax failed: {e}"))?;
+    let mut link_targets = Vec::new();
+    fn links(nodes: &[ylang::Node], output: &mut Vec<String>) {
+        for node in nodes {
+            if let ylang::NodeKind::Link { target, .. } = &node.kind {
+                output.push(target.clone());
+            }
+            links(node.kind.children(), output);
+        }
+    }
+    links(&document.nodes, &mut link_targets);
     let style = if data.style.is_empty() {
         ysl::Stylesheet::default()
     } else {
@@ -90,6 +102,7 @@ pub fn inspect(url: &str, asset: Option<&str>, resolver: &Resolver) -> Result<Ob
         origin,
         png,
         elapsed_ms: started.elapsed().as_millis(),
+        link_targets,
     })
 }
 pub fn probe(url: &str, asset: Option<&str>, resolver: &Resolver) -> Result<String, String> {

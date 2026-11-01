@@ -77,3 +77,22 @@ Choose one and keep the wording:
 
 This kit does not certify anonymity, production security, abuse resistance or
 permanent availability.
+
+## YNS 0.2 and hosted game extension
+
+Use [the current three-machine runbook](public-internet-e2e.md). Record these
+separately with PASS / FAIL / NOT RUN and actual UTC evidence:
+
+- [ ] Direct VPS provider pin checked independently; no home inbound YNS listener.
+- [ ] Signed scoped name published; owner key kept separate from serving identities.
+- [ ] Fresh client retrieves the name without record JSON imports and compares it to the independently supplied full host ID.
+- [ ] `--network-trial ... --name NAME --navigate about --game prism` completed; endpoint disclosure was an explicit choice.
+- [ ] Actual native-window navigation, Play, keyboard, pause/restart/stop observed on the independent connection (headless frames do not satisfy this row).
+- [ ] Wrong provider/bootstrap/destination identities reached the intended verifier and failed; no replacement pins were silently accepted.
+- [ ] Relay outage and recovery retained the original keys and history, and restored page/game delivery.
+- [ ] Short-lived YNS record expired in real time, expired cache was refused, and a higher signed sequence recovered.
+- [ ] Natural DHT record expiry observed or marked NOT RUN (fake-clock tests are separate software evidence).
+- [ ] No remote deployment, firewall or router changes occurred without the appropriate operator's explicit approval.
+
+The [current readiness ledger](../results/2026-11-01-public-e2e.md) starts all
+real-public-internet rows at NOT RUN. It is not an operator attestation.

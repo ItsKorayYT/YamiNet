@@ -1,0 +1,119 @@
+{
+  "schema": "yaminet-public-e2e-rehearsal-1",
+  "result": "PASS",
+  "scope": "independent processes on isolated IPv4 loopback; simulation only",
+  "public_internet_result": "NOT RUN",
+  "physical_topology": "NOT VERIFIED",
+  "infrastructure_changes": "NONE",
+  "checks": [
+    {
+      "name": "offline-profile-and-topology",
+      "status": "PASS",
+      "listener": "loopback bootstrap/provider and relay; host has no listener"
+    },
+    {
+      "name": "dht-pinned-relay-page-and-png",
+      "status": "PASS",
+      "observed": "PASS"
+    },
+    {
+      "name": "outbound-host-direct-route-refused",
+      "status": "PASS",
+      "expected": "FAIL at route-selection",
+      "observed": "FAIL"
+    },
+    {
+      "name": "yns-resolution",
+      "status": "PASS",
+      "evidence": "native browser trial; game execution explicitly requested"
+    },
+    {
+      "name": "signed-publication-resolution",
+      "status": "PASS",
+      "evidence": "native browser trial; game execution explicitly requested"
+    },
+    {
+      "name": "document-and-png",
+      "status": "PASS",
+      "evidence": "native browser trial; game execution explicitly requested"
+    },
+    {
+      "name": "page-navigation",
+      "status": "PASS",
+      "evidence": "native browser trial; game execution explicitly requested"
+    },
+    {
+      "name": "hosted-game",
+      "status": "PASS",
+      "evidence": "native browser trial; game execution explicitly requested"
+    },
+    {
+      "name": "wrong-destination-identity",
+      "status": "PASS",
+      "expected": "TLS identity mismatch before document retrieval"
+    },
+    {
+      "name": "wrong-provider-identity",
+      "status": "PASS",
+      "observed": "no record accepted into fresh cache"
+    },
+    {
+      "name": "wrong-bootstrap-identity",
+      "status": "PASS",
+      "expected": "FAIL at bootstrap-pin"
+    },
+    {
+      "name": "unadvertised-navigation-refused",
+      "status": "PASS"
+    },
+    {
+      "name": "hosted-module-integrity-refusal",
+      "status": "PASS",
+      "expected": "FAIL before game execution"
+    },
+    {
+      "name": "expired-yns-record-and-higher-sequence-recovery",
+      "status": "PASS",
+      "expected": "expired cached record refused, signed sequence 2 accepted"
+    },
+    {
+      "name": "relay-outage",
+      "status": "PASS",
+      "expected": "authenticated delivery fails without plaintext fallback"
+    },
+    {
+      "name": "relay-recovery-including-hosted-game",
+      "status": "PASS"
+    },
+    {
+      "name": "unavailable-bootstrap",
+      "status": "PASS",
+      "expected": "FAIL despite previously cached records"
+    },
+    {
+      "name": "real-vps-deployment",
+      "status": "NOT RUN",
+      "reason": "local rehearsal does not establish physical topology or operator authorization"
+    },
+    {
+      "name": "home-router-outbound-path",
+      "status": "NOT RUN",
+      "reason": "local rehearsal does not establish physical topology or operator authorization"
+    },
+    {
+      "name": "independent-internet-client",
+      "status": "NOT RUN",
+      "reason": "local rehearsal does not establish physical topology or operator authorization"
+    },
+    {
+      "name": "public-firewall-state",
+      "status": "NOT RUN",
+      "reason": "local rehearsal does not establish physical topology or operator authorization"
+    },
+    {
+      "name": "native-gui-click-and-keyboard",
+      "status": "NOT RUN",
+      "reason": "local rehearsal does not establish physical topology or operator authorization"
+    }
+  ]
+}

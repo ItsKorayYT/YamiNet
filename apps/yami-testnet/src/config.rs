@@ -80,12 +80,13 @@ pub fn describe(config: &Config) -> String {
         .map(|address| address.to_string())
         .unwrap_or_else(|| "none".into());
     format!(
-        "{mode}; network {:?}; listener {listener}; public-listen {}; {} bootstrap pin(s); {} relay pin(s); dht {}; relay-fallback {}",
+        "{mode}; network {:?}; listener {listener}; public-listen {}; {} bootstrap pin(s); {} relay pin(s); dht {}; yns {}; relay-fallback {}",
         config.network,
         config.public_listen,
         config.bootstrap.len(),
         config.relays.len(),
         config.dht,
+        config.yns,
         config.relay_fallback
     )
 }

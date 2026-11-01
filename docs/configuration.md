@@ -38,6 +38,7 @@ selecting public network policy does not enable a listener.
 | `relay` | One or two explicit `ID@IPv4:port` routes select outbound-only node hosting |
 | `relay-fallback` | Browser only, `yes`/`no` (default no) |
 | `dht` | Direct node only, `yes`/`no` (default no); yes enables existing maintenance |
+| `yns` | Direct node only, `yes`/`no` (default no); serves existing YNS on the same pinned TLS listener, storing records in `state/yns`; forbidden on outbound relay hosts |
 | `workers` | Direct node workers, 1..32 (default 4) |
 | `renew-secs` | Node maintenance renewal, 30..43200 (default 21600) |
 | `health-secs` | Node maintenance health, 5..3600 (default 300) |

@@ -115,7 +115,13 @@ then
     printf 'error: direct route unexpectedly passed for a relay-only host\n' >&2
     exit 1
 fi
-grep -E '^\[(FAIL|NOT RUN)\].*(Direct|route|Relay)' "$LOGS/direct.txt" || true
+# A random configuration/state/network error is not evidence of the intended refusal.
+if ! grep -q '^\[FAIL\] Direct versus relay route selection - the signed record has no direct endpoint' "$LOGS/direct.txt"; then
+    cat "$LOGS/direct.txt" >&2
+    printf 'error: direct request failed without reaching the expected no-direct-endpoint check\n' >&2
+    exit 1
+fi
+grep '^\[FAIL\] Direct versus relay route selection' "$LOGS/direct.txt"
 printf 'Direct route failed as expected; no plaintext fallback occurred.\n'
 
 if [ "$PASS" != "1" ]; then
