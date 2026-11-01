@@ -19,6 +19,9 @@ def run(args):
     output = args.output.resolve()
     output.mkdir(parents=True, exist_ok=True)
     repo = Path(__file__).resolve().parent.parent
+    game_title = "Lantern Drift" if args.game == "lantern" else "Prism Breakout"
+    requests = 6 if args.game == "lantern" else 2
+    play_y = args.play_y if args.play_y is not None else (374 if args.game == "lantern" else 156)
     report = {"schema": "yami-hosted-games-x11-1", "network": "same-machine authenticated loopback",
               "input": "synthetic X11/XTEST", "checks": []}
     with tempfile.TemporaryDirectory(prefix="yami-hosted-demo-") as directory:
@@ -29,6 +32,8 @@ def run(args):
             shutil.copyfile(repo / "sites/arcade" / name, site / name)
         subprocess.run([str(args.publisher.resolve()), str(repo / "games/breakout/game.yami-game.json"),
                         str(site), "prism"], check=True, capture_output=True, text=True)
+        subprocess.run([str(args.publisher.resolve()), str(repo / "games/lantern-drift/game.yami-game.json"),
+                        str(site), "lantern"], check=True, capture_output=True, text=True)
         subprocess.run([str(args.node.resolve()), "site", "check", str(site)], check=True, capture_output=True, text=True)
         identity = root / "publisher" / "identity"
         result = subprocess.run([str(args.node.resolve()), "identity", "new", "--dir", str(identity)],
@@ -63,6 +68,23 @@ def run(args):
                 path = output / (name + ".png")
                 subprocess.run(["import", "-window", window, "-strip", str(path)], env=env, check=True, timeout=10)
                 return path.read_bytes()
+            def stable(name):
+                previous = capture(name)
+                same = 0
+                deadline = time.monotonic() + 10
+                while time.monotonic() < deadline:
+                    time.sleep(0.2)
+                    current = capture(name)
+                    same = same + 1 if current == previous else 0
+                    if same >= 3: return current
+                    previous = current
+                raise AssertionError("native window did not settle: " + name)
+            def changed(reference, name):
+                deadline = time.monotonic() + 8
+                while time.monotonic() < deadline:
+                    if reference != capture(name): return
+                    time.sleep(0.15)
+                raise AssertionError("native window failed to repaint: " + name)
             def title(value):
                 wait(lambda: value in xdo("getwindowname", window), value)
             try:
@@ -91,25 +113,29 @@ def run(args):
                 report.update(address=url, publisher_pid=host.pid, browser_pid=proc.pid)
                 report["checks"].append("actual yami address, signed DHT resolution, inert page before consent")
                 # Fixed geometry of the shipped 1440x900 demo page, at 1x Xvfb DPI.
-                xdo("mousemove", "--window", window, args.play_x, args.play_y, "click", "1")
-                title("Prism Breakout"); time.sleep(0.5)
-                assert (output / "node.log").read_text().count("Served game resource prism") == 2
+                xdo("mousemove", "--window", window, args.play_x, play_y, "click", "1")
+                title(game_title); time.sleep(0.5)
+                assert (output / "node.log").read_text().count("Served game resource " + args.game) == requests
                 capture("hosted-start")
-                report["checks"].append("mouse Play fetches manifest and Wasm over pinned TLS into immersive game tab")
+                report["checks"].append("mouse Play fetches validated manifest, Wasm and declared assets over pinned TLS into native game tab")
                 key("space"); time.sleep(0.2); key("space"); time.sleep(0.5)
                 xdo("keydown", "Right"); time.sleep(0.2); xdo("keyup", "Right")
+                if args.game == "lantern":
+                    xdo("mousemove", "--window", window, "570", "370", "mousedown", "1")
+                    time.sleep(0.7); xdo("mouseup", "1"); key("z"); key("x"); time.sleep(0.2)
+                    capture("hosted-muted"); key("x")
                 capture("hosted-playing")
-                key("p"); time.sleep(0.5); first = capture("hosted-paused")
+                key("p"); time.sleep(0.5); first = stable("hosted-paused")
                 time.sleep(0.3); assert first == capture("hosted-paused-stable")
-                key("p"); time.sleep(0.6); assert first != capture("hosted-resumed")
+                key("p"); time.sleep(0.6); changed(first, "hosted-resumed")
                 report["checks"].append("game controls, stable pause and resume")
                 key("ctrl+t"); title("New tab")
                 key("ctrl+l"); xdo("type", "local:about"); key("Return"); title("About YamiNet")
-                key("ctrl+w"); title("Prism Breakout"); time.sleep(0.4)
-                first = capture("background-paused"); time.sleep(0.3)
+                key("ctrl+w"); title(game_title); time.sleep(0.4)
+                first = stable("background-paused"); time.sleep(0.3)
                 assert first == capture("background-stable")
                 key("ctrl+w"); title("YamiNet Arcade")
-                assert (output / "node.log").read_text().count("Served game resource prism") == 2
+                assert (output / "node.log").read_text().count("Served game resource " + args.game) == requests
                 assert not any(p.suffix in [".wasm", ".json"] for p in player.rglob("*")), "player persisted executable files"
                 report["checks"].append("responsive document tabs, background pause, preserved source page, no player executable files")
                 key("alt+F4"); assert proc.wait(timeout=10) == 0
@@ -135,8 +161,9 @@ if __name__ == "__main__":
     parser.add_argument("--publisher", type=Path, required=True, help="built yami-games publish example")
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--xdotool", default=shutil.which("xdotool"))
+    parser.add_argument("--game", choices=["prism", "lantern"], default="prism")
     parser.add_argument("--play-x", type=int, default=500)
-    parser.add_argument("--play-y", type=int, default=156)
+    parser.add_argument("--play-y", type=int)
     options = parser.parse_args()
     if not options.xdotool or not os.environ.get("DISPLAY"):
         parser.error("xdotool and DISPLAY are required (for example xvfb-run)")

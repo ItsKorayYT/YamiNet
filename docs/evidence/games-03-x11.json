@@ -1,0 +1,43 @@
+{
+  "local_abi2": {
+    "schema": "yami-games-x11-1",
+    "input": "synthetic X11/XTEST",
+    "checks": [
+      "immersive launch, Browser return, focused layout and explicit resume",
+      "CLI load, start, movement, pause freeze and resume",
+      "ABI 2 animated sprites, mouse steering, pulse, expanded keyboard and mute controls",
+      "browser shortcuts, document browsing, background pause and close-tab isolation",
+      "UI manifest launcher, stop, reload restart and viewport scaling",
+      "clean native window shutdown with a game tab"
+    ],
+    "result": "PASS"
+  },
+  "hosted_abi2": {
+    "schema": "yami-hosted-games-x11-1",
+    "network": "same-machine authenticated loopback",
+    "input": "synthetic X11/XTEST",
+    "checks": [
+      "actual yami address, signed DHT resolution, inert page before consent",
+      "mouse Play fetches validated manifest, Wasm and declared assets over pinned TLS into native game tab",
+      "game controls, stable pause and resume",
+      "responsive document tabs, background pause, preserved source page, no player executable files",
+      "clean browser and publisher process shutdown"
+    ],
+    "address": "yami://yn1-izpwpomrgn5gqisn2z2dmfrlzojq7pgjezl7renpba7ktw5qa6isgafcpi/home",
+    "publisher_pid": 45937,
+    "browser_pid": 45944,
+    "result": "PASS"
+  },
+  "local_abi1": {
+    "schema": "yami-games-x11-1",
+    "input": "synthetic X11/XTEST",
+    "checks": [
+      "immersive launch, Browser return, focused layout and explicit resume",
+      "CLI load, start, movement, pause freeze and resume",
+      "browser shortcuts, document browsing, background pause and close-tab isolation",
+      "UI manifest launcher, stop, reload restart and viewport scaling",
+      "clean native window shutdown with a game tab"
+    ],
+    "result": "PASS"
+  }
+}

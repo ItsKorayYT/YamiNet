@@ -5,3 +5,8 @@ Clear the prism wall. Keep the ball alive. Chase 500 points.
 > game:prism | Prism Breakout
 Use Left / Right or A / D to move, Space to start and launch, P to pause.
 The game starts only when you choose Play. No installation is needed.
+
+= Lantern Drift
+Guide a lantern through a moonlit marsh. Gather 24 lights and avoid the moths.
+> game:lantern | Lantern Drift
+WASD / arrows or hold the mouse to steer. Space / Z gathers nearby lights. X / right click mutes.

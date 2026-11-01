@@ -6,8 +6,8 @@ fn main() -> Result<(), String> {
         .nth(1)
         .ok_or("Pass a local game manifest")?;
     let start = Instant::now();
-    let (_, bytes) = load_local(Path::new(&path))?;
-    let mut vm = Runtime::new(&bytes)?;
+    let (manifest, bytes) = load_local(Path::new(&path))?;
+    let mut vm = Runtime::with_assets(&bytes, Some(manifest.abi), manifest.prepared)?;
     let load = start.elapsed();
     vm.frame(0, START)?;
     vm.frame(0, START)?;

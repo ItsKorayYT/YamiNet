@@ -132,6 +132,8 @@ impl Site {
         let extension = match resource {
             ynp::GameResource::Manifest => "json",
             ynp::GameResource::Module => "wasm",
+            ynp::GameResource::Png => "png",
+            ynp::GameResource::Wav => "wav",
         };
         let name = format!("{key}.{extension}");
         let path = directory.join(&name);

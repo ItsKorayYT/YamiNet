@@ -113,6 +113,10 @@ Search queries run on your computer, and there is no central search server. Refr
 
 ## 🎮 Play browser games
 
+Games 0.3 adds [Lantern Drift](games/README.md), an original animated sprite game
+with mouse steering, keyboard controls and bounded native audio. The [ABI 2 guide](docs/games-0.3.md)
+covers the SDK, validated hosted resources and sandbox limits. ABI 1 games remain supported.
+
 Choose **Open local game** in the browser sidebar and enter the full path to
 `games/breakout/game.yami-game.json` in the package. **Prism Breakout** opens in
 its own native tab. Use **Space** to start and launch the ball, **A/D** or the

@@ -442,3 +442,99 @@ fn relay_games_pin_both_relay_and_publisher_and_run_the_existing_vm() {
     wrong.destination = *NodeIdentity::generate().unwrap().id();
     assert!(yami_browser::hosted_games::fetch(&wrong, "prism", &AtomicBool::new(false)).is_err());
 }
+
+#[test]
+fn abi2_authenticated_assets_instant_play_integrity_and_no_guest_requests() {
+    let scratch = Scratch::new("abi2");
+    prepare(&scratch);
+    let source = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../games/lantern-drift");
+    let local: serde_json::Value =
+        serde_json::from_slice(&fs::read(source.join("game.yami-game.json")).unwrap()).unwrap();
+    let module = fs::read(source.join("lantern-drift.wasm")).unwrap();
+    let hash: String = yami_identity::sha256(&module)
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect();
+    let mut manifest = local.clone();
+    manifest["module"] = serde_json::json!({"key":"lantern","bytes":module.len(),"sha256":hash});
+    let directory = scratch.0.join("site/games");
+    fs::write(
+        directory.join("lantern.json"),
+        serde_json::to_vec(&manifest).unwrap(),
+    )
+    .unwrap();
+    fs::write(directory.join("lantern.wasm"), module).unwrap();
+    for asset in local["assets"].as_array().unwrap() {
+        let file = format!(
+            "{}.{}",
+            asset["key"].as_str().unwrap(),
+            asset["kind"].as_str().unwrap()
+        );
+        fs::copy(source.join(&file), directory.join(&file)).unwrap();
+    }
+    fs::write(
+        scratch.0.join("site/home.ylang"),
+        "@page 0.2\n  title Hosted arcade\n> game:lantern | Lantern Drift\n",
+    )
+    .unwrap();
+    let checked = yami_node::authoring::check(scratch.0.join("site")).unwrap();
+    assert_eq!(checked.game_assets.len(), 4);
+    let built = scratch.0.join("built-site");
+    assert_eq!(
+        yami_node::authoring::build(scratch.0.join("site"), &built)
+            .unwrap()
+            .game_assets
+            .len(),
+        4
+    );
+    let host = Host::start(&scratch);
+    let (mut browser, loader) = setup(&host, &scratch);
+    assert_eq!(host.requests.load(Ordering::SeqCst), 0);
+    browser.play_hosted("lantern", Arc::new(|| {})).unwrap();
+    game_wait(&mut browser, |s| {
+        s.frames > 2 && s.status == yami_games::Status::Running
+    });
+    assert_eq!(host.requests.load(Ordering::SeqCst), 6);
+    let PageState::Game(game) = &browser.active().state else {
+        panic!()
+    };
+    assert_eq!(game.snapshot.title, "Lantern Drift");
+    game.session.key(yami_games::START, true);
+    game.session.key(yami_games::START, false);
+    game.session.pointer(70, 140);
+    game.session.key(yami_games::MOUSE_LEFT, true);
+    game_wait(&mut browser, |s| s.frames > 30);
+    assert_eq!(
+        host.requests.load(Ordering::SeqCst),
+        6,
+        "guest must never initiate resource transfers"
+    );
+    browser.close_tab(1);
+    // Corruption of an authenticated publisher's resource still prevents any execution.
+    let mut png = fs::read(directory.join("sprites.png")).unwrap();
+    png[45] ^= 1;
+    fs::write(directory.join("sprites.png"), png).unwrap();
+    browser.play_hosted("lantern", Arc::new(|| {})).unwrap();
+    game_wait(&mut browser, |s| {
+        s.frames == 0
+            && matches!(&s.status,yami_games::Status::Failed(e) if e.contains("integrity"))
+    });
+    browser.close_tab(1);
+    manifest["assets"][0]["key"] = serde_json::json!("yami://wrong-owner/sprites");
+    fs::write(
+        directory.join("lantern.json"),
+        serde_json::to_vec(&manifest).unwrap(),
+    )
+    .unwrap();
+    let before = host.requests.load(Ordering::SeqCst);
+    browser.play_hosted("lantern", Arc::new(|| {})).unwrap();
+    game_wait(&mut browser, |s| {
+        s.frames == 0 && matches!(&s.status, yami_games::Status::Failed(_))
+    });
+    assert_eq!(
+        host.requests.load(Ordering::SeqCst),
+        before + 1,
+        "reject foreign asset keys before requesting them"
+    );
+    drop(loader);
+}

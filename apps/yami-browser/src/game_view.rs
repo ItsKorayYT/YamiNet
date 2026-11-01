@@ -234,14 +234,58 @@ pub fn paint(
     }
     if let (Some(frame), Some(pix)) = (&game.frame, &mut presentation.surface) {
         if resized
-            || !presentation
-                .frame
-                .as_ref()
-                .is_some_and(|last| Arc::ptr_eq(last, frame) || last.commands == frame.commands)
+            || !presentation.frame.as_ref().is_some_and(|last| {
+                Arc::ptr_eq(last, frame)
+                    || (Arc::ptr_eq(&last.assets, &frame.assets) && last.commands == frame.commands)
+            })
         {
             let mut gc = Canvas::new(pix, c.text, factor);
             for command in &frame.commands {
                 match command {
+                    Command::Sprite {
+                        asset,
+                        sx,
+                        sy,
+                        sw,
+                        sh,
+                        x,
+                        y,
+                        w,
+                        h,
+                        ..
+                    } => {
+                        if let Some(texture) = frame.assets.texture(*asset) {
+                            let scale_x = *w as f32 / *sw as f32 * factor;
+                            let scale_y = *h as f32 / *sh as f32 * factor;
+                            let transform = Transform::from_row(
+                                scale_x,
+                                0.,
+                                0.,
+                                scale_y,
+                                *x as f32 * factor - *sx as f32 * scale_x,
+                                *y as f32 * factor - *sy as f32 * scale_y,
+                            );
+                            let paint = Paint {
+                                shader: tiny_skia::Pattern::new(
+                                    texture.as_ref(),
+                                    tiny_skia::SpreadMode::Pad,
+                                    tiny_skia::FilterQuality::Nearest,
+                                    1.,
+                                    transform,
+                                ),
+                                anti_alias: false,
+                                ..Paint::default()
+                            };
+                            if let Some(rect) = tiny_skia::Rect::from_xywh(
+                                *x as f32 * factor,
+                                *y as f32 * factor,
+                                *w as f32 * factor,
+                                *h as f32 * factor,
+                            ) {
+                                gc.pix.fill_rect(rect, &paint, Transform::identity(), None);
+                            }
+                        }
+                    }
                     Command::Clear(value) => {
                         let v = color(*value);
                         gc.pix
@@ -333,7 +377,7 @@ pub fn paint(
         Status::Loading => Some((
             "YAMI ARCADE",
             "Getting ready",
-            "Opening your local game…",
+            "Loading validated game resources…",
             "Loading…",
             Action::GameReset,
         )),
@@ -401,7 +445,7 @@ pub fn paint(
     } else if let Status::Failed(error) = &game.status {
         format!("Game stopped: {error}")
     } else {
-        "A / D or ← / →  Move     SPACE  Start / serve     P / ESC  Pause     R  Restart".into()
+        "Controls appear in the game     P / ESC  Pause     R  Restart     F3  Performance".into()
     };
     c.text(
         &footer,

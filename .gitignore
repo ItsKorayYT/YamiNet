@@ -28,3 +28,7 @@ __pycache__/
 yns.json
 yns.lock
 yns.tmp
+/games/lantern-drift/target/
+
+/games/yami-game-api/target/
+/games/yami-game-api/Cargo.lock

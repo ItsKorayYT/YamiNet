@@ -16,6 +16,8 @@ import time
 def run(args):
     browser = args.browser.resolve()
     manifest = args.manifest.resolve()
+    game_info = json.loads(manifest.read_text())
+    game_title = game_info["title"]
     output = args.output.resolve()
     output.mkdir(parents=True, exist_ok=True)
     report = {"schema": "yami-games-x11-1", "input": "synthetic X11/XTEST", "checks": []}
@@ -35,6 +37,23 @@ def run(args):
                                                text=True, timeout=10).strip()
             def key(value):
                 xdo("key", "--clearmodifiers", value)
+            def stable(name):
+                previous = capture(name)
+                same = 0
+                deadline = time.monotonic() + 10
+                while time.monotonic() < deadline:
+                    time.sleep(0.2)
+                    current = capture(name)
+                    same = same + 1 if current == previous else 0
+                    if same >= 3: return current
+                    previous = current
+                raise AssertionError("native window did not settle: " + name)
+            def changed(reference, name):
+                deadline = time.monotonic() + 8
+                while time.monotonic() < deadline:
+                    if reference != capture(name): return
+                    time.sleep(0.15)
+                raise AssertionError("native window failed to repaint: " + name)
             def title(expected):
                 deadline = time.monotonic() + 10
                 while time.monotonic() < deadline:
@@ -62,7 +81,7 @@ def run(args):
                 if not window:
                     raise RuntimeError("native game window unavailable")
                 xdo("windowfocus", "--sync", window)
-                title("Prism Breakout")
+                title(game_title)
                 key("ctrl+r")  # deterministic restart/resume after focus during load
                 time.sleep(0.5)
                 capture("start-screen")
@@ -77,12 +96,20 @@ def run(args):
                 key("space"); time.sleep(0.3)
                 xdo("keydown", "Left"); time.sleep(0.25); xdo("keyup", "Left")
                 key("p"); time.sleep(0.4)
-                first = capture("paused")
+                first = stable("paused")
                 time.sleep(0.25)
                 assert first == capture("paused-stable"), "paused game changed"
                 key("p"); time.sleep(0.4)
-                assert first != capture("resumed"), "resume did not update window"
-                report["checks"].append("CLI load, start, launch, paddle, pause freeze and resume")
+                changed(first, "resumed")
+                report["checks"].append("CLI load, start, movement, pause freeze and resume")
+                if game_info["abi"] == 2:
+                    xdo("mousemove", "--window", window, "570", "370", "mousedown", "1")
+                    time.sleep(0.7); xdo("mouseup", "1")
+                    key("z"); key("x"); time.sleep(0.2)
+                    capture("mouse-pulse-muted")
+                    key("x")
+                    xdo("keydown", "w"); time.sleep(0.2); xdo("keyup", "w")
+                    report["checks"].append("ABI 2 animated sprites, mouse steering, pulse, expanded keyboard and mute controls")
                 # Keep the game active long enough to sample actual presentation statistics.
                 time.sleep(8)
                 capture("gameplay")
@@ -92,9 +119,9 @@ def run(args):
                 key("ctrl+t"); title("New tab")
                 key("ctrl+l"); xdo("type", "--clearmodifiers", "local:about"); key("Return")
                 title("About YamiNet")
-                key("ctrl+w"); title("Prism Breakout")
+                key("ctrl+w"); title(game_title)
                 time.sleep(0.3)
-                first = capture("background-paused")
+                first = stable("background-paused")
                 time.sleep(0.25)
                 assert first == capture("background-stable"), "background game failed to pause"
                 key("ctrl+w"); title("New tab")
@@ -105,18 +132,18 @@ def run(args):
                 # y=245 now activates New Tab rather than the local game launcher.
                 xdo("mousemove", "75", "273", "click", "1")
                 xdo("type", "--clearmodifiers", "--delay", "1", str(manifest)); key("Return")
-                title("Prism Breakout")
+                title(game_title)
                 time.sleep(0.5)
                 key("space"); time.sleep(0.1); key("space")
                 time.sleep(1)
                 capture("native-game")
                 xdo("mousemove", "1270", "32", "click", "1")  # Stop
                 time.sleep(0.4)
-                first = capture("stopped")
+                first = stable("stopped")
                 time.sleep(0.25)
                 assert first == capture("stopped-stable"), "stopped game changed"
                 key("ctrl+r"); time.sleep(0.5)
-                assert first != capture("restarted"), "stopped VM did not restart"
+                changed(first, "restarted")
                 xdo("windowsize", window, "900", "600"); time.sleep(0.5)
                 capture("scaled-900x600")
                 key("space"); time.sleep(0.1); key("space"); time.sleep(0.3)

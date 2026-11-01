@@ -1344,14 +1344,73 @@ impl Desktop {
             let _ = self.browser.follow(target, &self.loader);
         }
     }
+    /// Pointer coordinates use the same logical surface as painting, after DPI conversion.
+    fn game_pointer(&self, button: Option<(MouseButton, bool)>) -> bool {
+        let PageState::Game(game) = &self.browser.active().state else {
+            return false;
+        };
+        let bit = button.map(|(b, _)| {
+            if b == MouseButton::Left {
+                yami_games::MOUSE_LEFT
+            } else {
+                yami_games::MOUSE_RIGHT
+            }
+        });
+        // Releases reach the owning session even outside its surface or under a modal.
+        if let (Some(bit), Some((_, false))) = (bit, button) {
+            game.session.key(bit, false);
+        }
+        let (width, height, _) = self.size();
+        let area = if self.game_immersive {
+            Rect::new(0., 0., width, height)
+        } else {
+            chrome::viewport(width, height)
+        };
+        let view = super::game_view::surface(area);
+        let owns = self.editor.focus.is_none()
+            && self.keyboard_focus.is_none()
+            && !self.game_open
+            && !self.settings_open
+            && !self.library_open
+            && !self.discover.open
+            && !self.discovery.open
+            && !self.find_open
+            && !self.modifiers.control_key()
+            && !self.modifiers.super_key()
+            && !self.modifiers.alt_key()
+            && game.snapshot.status == yami_games::Status::Running
+            && view.contains(self.mouse.0, self.mouse.1);
+        if owns {
+            let x = ((self.mouse.0 - view.x) * yami_games::WIDTH as f32 / view.w).floor() as i32;
+            let y = ((self.mouse.1 - view.y) * yami_games::HEIGHT as f32 / view.h).floor() as i32;
+            game.session.pointer(x, y);
+            if let (Some(bit), Some((_, true))) = (bit, button) {
+                game.session.key(bit, true);
+            }
+        } else {
+            game.session.pointer(-1, -1);
+        }
+        owns
+    }
     fn game_key(&mut self, key: &winit::keyboard::PhysicalKey, down: bool, repeat: bool) -> bool {
         use winit::keyboard::{KeyCode, PhysicalKey};
-        let bit = match key {
-            PhysicalKey::Code(KeyCode::ArrowLeft | KeyCode::KeyA) => yami_games::LEFT,
-            PhysicalKey::Code(KeyCode::ArrowRight | KeyCode::KeyD) => yami_games::RIGHT,
-            PhysicalKey::Code(KeyCode::Space | KeyCode::Enter) => yami_games::START,
-            PhysicalKey::Code(KeyCode::KeyR) => yami_games::RESET,
-            _ => 0,
+        fn key_bit(code: &KeyCode) -> u32 {
+            match code {
+                KeyCode::ArrowLeft | KeyCode::KeyA => yami_games::LEFT,
+                KeyCode::ArrowRight | KeyCode::KeyD => yami_games::RIGHT,
+                KeyCode::Space | KeyCode::Enter => yami_games::START,
+                KeyCode::KeyR => yami_games::RESET,
+                KeyCode::ArrowUp | KeyCode::KeyW => yami_games::UP,
+                KeyCode::ArrowDown | KeyCode::KeyS => yami_games::DOWN,
+                KeyCode::KeyZ | KeyCode::KeyJ => yami_games::ACTION,
+                KeyCode::KeyX | KeyCode::KeyK => yami_games::SECONDARY,
+                _ => 0,
+            }
+        }
+        let bit = if let PhysicalKey::Code(code) = key {
+            key_bit(code)
+        } else {
+            0
         };
         let PageState::Game(game) = &self.browser.active().state else {
             return false;
@@ -1361,13 +1420,7 @@ impl Desktop {
             if let PhysicalKey::Code(code) = key {
                 self.game_keys.remove(code);
             }
-            let still_held = self.game_keys.iter().any(|code| match bit {
-                yami_games::LEFT => matches!(code, KeyCode::KeyA | KeyCode::ArrowLeft),
-                yami_games::RIGHT => matches!(code, KeyCode::KeyD | KeyCode::ArrowRight),
-                yami_games::START => matches!(code, KeyCode::Space | KeyCode::Enter),
-                yami_games::RESET => *code == KeyCode::KeyR,
-                _ => false,
-            });
+            let still_held = self.game_keys.iter().any(|code| key_bit(code) == bit);
             if !still_held {
                 game.session.key(bit, false);
             }
@@ -1769,6 +1822,7 @@ impl ApplicationHandler<()> for Desktop {
                 let previous_link = self.link();
                 let scale = self.window.as_ref().unwrap().scale_factor() as f32;
                 self.mouse = (position.x as f32 / scale, position.y as f32 / scale);
+                self.game_pointer(None);
                 if self.scroll_drag {
                     self.scroll_to_mouse();
                 }
@@ -1788,8 +1842,16 @@ impl ApplicationHandler<()> for Desktop {
             }
             WindowEvent::CursorLeft { .. } => {
                 self.mouse = (-1.0, -1.0);
+                self.game_pointer(None);
+                if let PageState::Game(game) = &self.browser.active().state {
+                    game.session
+                        .key(yami_games::MOUSE_LEFT | yami_games::MOUSE_RIGHT, false);
+                }
                 self.redraw();
             }
+            WindowEvent::MouseInput { state, button, .. }
+                if matches!(button, MouseButton::Left | MouseButton::Right)
+                    && self.game_pointer(Some((button, state == ElementState::Pressed))) => {}
             WindowEvent::MouseInput {
                 state: ElementState::Pressed,
                 button: MouseButton::Left,
@@ -1999,6 +2061,24 @@ mod tests {
     }
     #[test]
     fn game_rendering_preserves_aspect_and_clips_at_multiple_sizes_and_dpi() {
+        let png = yami_render::assets::encode_png(2, 1, &[255, 0, 0, 128, 0, 255, 0, 255]).unwrap();
+        let mut textures = yami_games::Assets::default();
+        textures
+            .insert(
+                &yami_games::AssetResource {
+                    id: 0,
+                    key: "test".into(),
+                    kind: yami_games::AssetKind::Png,
+                    bytes: png.len(),
+                    sha256: yami_identity::sha256(&png)
+                        .iter()
+                        .map(|b| format!("{b:02x}"))
+                        .collect(),
+                },
+                &png,
+            )
+            .unwrap();
+        let textures = Arc::new(textures);
         let mut app = headless(900., 600.);
         app.settings_open = false;
         app.browser
@@ -2027,6 +2107,7 @@ mod tests {
                 panic!()
             };
             game.snapshot.frame = Some(Arc::new(yami_games::Frame {
+                assets: textures.clone(),
                 commands: vec![
                     yami_games::Command::Clear(0xff0000ff),
                     yami_games::Command::Rect {
@@ -2035,6 +2116,37 @@ mod tests {
                         w: 24,
                         h: 12,
                         color: 0x00ff00ff,
+                    },
+                    yami_games::Command::Rect {
+                        x: 380,
+                        y: 240,
+                        w: 24,
+                        h: 12,
+                        color: 0x0000ffff,
+                    },
+                    yami_games::Command::Sprite {
+                        asset: 0,
+                        sx: 0,
+                        sy: 0,
+                        sw: 1,
+                        sh: 1,
+                        x: 380,
+                        y: 240,
+                        w: 24,
+                        h: 12,
+                        layer: 1,
+                    },
+                    yami_games::Command::Sprite {
+                        asset: 0,
+                        sx: 1,
+                        sy: 0,
+                        sw: 1,
+                        sh: 1,
+                        x: -12,
+                        y: 100,
+                        w: 24,
+                        h: 12,
+                        layer: 2,
                     },
                     yami_games::Command::Text {
                         x: 639,
@@ -2073,6 +2185,28 @@ mod tests {
                 (green.red(), green.green(), green.blue()),
                 (0, 255, 0),
                 "logical geometry must scale with the surface at {scale} DPI"
+            );
+            let blended = after
+                .pixel(
+                    (surface.x + surface.w * 0.61) as u32,
+                    (surface.y + surface.h * 0.51) as u32,
+                )
+                .unwrap();
+            assert_eq!(
+                (blended.red(), blended.green(), blended.blue()),
+                (128, 0, 127),
+                "alpha sprite source must not sample the neighboring green frame"
+            );
+            let clipped = after
+                .pixel(
+                    (surface.x + surface.w * 0.008) as u32,
+                    (surface.y + surface.h * 0.22) as u32,
+                )
+                .unwrap();
+            assert_eq!(
+                (clipped.red(), clipped.green(), clipped.blue()),
+                (0, 255, 0),
+                "source rectangles and negative destinations clip correctly"
             );
             for y in 0..after.height() {
                 for x in 0..after.width() {

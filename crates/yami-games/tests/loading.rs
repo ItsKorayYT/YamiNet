@@ -69,3 +69,28 @@ fn module_symlinks_cannot_escape_package() {
     )
     .is_err());
 }
+
+#[cfg(unix)]
+#[test]
+fn sprite_symlinks_cannot_escape_the_local_game_package() {
+    use sha2::{Digest, Sha256};
+    use std::os::unix::fs::symlink;
+    let f = Fixture::new();
+    let outside = Fixture::new();
+    let png = include_bytes!("../../../games/lantern-drift/sprites.png");
+    fs::write(outside.0.join("sheet.png"), png).unwrap();
+    fs::write(
+        f.0.join("test.wasm"),
+        include_bytes!("../../../games/lantern-drift/lantern-drift.wasm"),
+    )
+    .unwrap();
+    symlink(outside.0.join("sheet.png"), f.0.join("sheet.png")).unwrap();
+    let hash: String = Sha256::digest(png)
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect();
+    let body=serde_json::json!({"version":2,"abi":2,"title":"Test","description":"","module":"test.wasm","assets":[{"id":0,"key":"sheet","kind":"png","bytes":png.len(),"sha256":hash}]}).to_string();
+    assert!(load_local(&f.manifest(&body))
+        .unwrap_err()
+        .contains("inside the manifest directory"));
+}

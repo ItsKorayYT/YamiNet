@@ -6,18 +6,23 @@ pub const MAX_GAME_MODULE: usize = 1024 * 1024;
 pub enum GameResource {
     Manifest = 1,
     Module = 2,
+    Png = 3,
+    Wav = 4,
 }
 impl GameResource {
     pub fn limit(self) -> usize {
         match self {
             Self::Manifest => MAX_GAME_MANIFEST,
-            Self::Module => MAX_GAME_MODULE,
+            Self::Module | Self::Wav => MAX_GAME_MODULE,
+            Self::Png => 256 * 1024,
         }
     }
     fn decode(value: u8) -> io::Result<Self> {
         match value {
             1 => Ok(Self::Manifest),
             2 => Ok(Self::Module),
+            3 => Ok(Self::Png),
+            4 => Ok(Self::Wav),
             _ => Err(invalid("unsupported game resource type")),
         }
     }
@@ -219,7 +224,12 @@ mod tests {
     }
     #[test]
     fn v3_frames_roundtrip_and_reject_truncation_versions_types_lengths_and_trailing_data() {
-        for resource in [GameResource::Manifest, GameResource::Module] {
+        for resource in [
+            GameResource::Manifest,
+            GameResource::Module,
+            GameResource::Png,
+            GameResource::Wav,
+        ] {
             for message in [
                 Message::GetGame {
                     key: "prism".into(),

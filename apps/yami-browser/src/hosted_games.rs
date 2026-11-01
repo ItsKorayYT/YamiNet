@@ -28,7 +28,10 @@ impl Source {
 }
 const TRANSFER_TIME: Duration = Duration::from_secs(8);
 // Includes both frame headers and maximum keys; failed requests consume this budget too.
-const TRANSFER_BYTES: usize = ynp::MAX_GAME_MANIFEST + ynp::MAX_GAME_MODULE + 2 * (16 + 2 + 64 + 5);
+const TRANSFER_BYTES: usize = ynp::MAX_GAME_MANIFEST
+    + ynp::MAX_GAME_MODULE
+    + yami_games::MAX_ASSET_TOTAL
+    + 18 * (16 + 2 + 64 + 5);
 struct Transfer<'a> {
     inner: Box<dyn ynp::Connection>,
     cancel: &'a AtomicBool,
@@ -142,7 +145,14 @@ pub fn fetch(
         return Err("Game load cancelled".into());
     }
     manifest.validate_module(&bytes)?;
-    Ok((manifest.runtime_manifest(), bytes))
+    let mut prepared = yami_games::Assets::default();
+    for asset in &manifest.assets {
+        let data = request(&asset.key, asset.kind.wire())?;
+        prepared.insert(asset, &data)?;
+    }
+    let mut manifest = manifest.runtime_manifest();
+    manifest.prepared = Arc::new(prepared);
+    Ok((manifest, bytes))
 }
 
 #[cfg(test)]

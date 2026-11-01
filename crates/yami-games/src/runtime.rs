@@ -1,3 +1,4 @@
+use crate::audio::AudioCommand;
 use crate::*;
 use std::sync::Arc;
 use wasmi::{
@@ -8,6 +9,18 @@ use wasmi::{
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Command {
     Clear(u32),
+    Sprite {
+        asset: u32,
+        sx: i32,
+        sy: i32,
+        sw: i32,
+        sh: i32,
+        x: i32,
+        y: i32,
+        w: i32,
+        h: i32,
+        layer: i32,
+    },
     Rect {
         x: i32,
         y: i32,
@@ -32,6 +45,7 @@ pub enum Command {
 #[derive(Debug, Clone, Default)]
 pub struct Frame {
     pub commands: Vec<Command>,
+    pub assets: Arc<Assets>,
 }
 struct Host {
     limits: StoreLimits,
@@ -39,6 +53,10 @@ struct Host {
     drawing: bool,
     pixels: usize,
     text_bytes: usize,
+    abi: i32,
+    input: Input,
+    assets: Arc<Assets>,
+    audio: Vec<AudioCommand>,
 }
 impl Host {
     fn push(&mut self, command: Command) -> Result<(), Error> {
@@ -49,6 +67,11 @@ impl Host {
             return Err(Error::new("Drawing command limit exceeded"));
         }
         let pixels = match &command {
+            Command::Sprite { x, y, w, h, .. } => {
+                let width = (x + w).min(WIDTH) - (*x).max(0);
+                let height = (y + h).min(HEIGHT) - (*y).max(0);
+                (width.max(0) * height.max(0)) as usize
+            }
             Command::Clear(_) => (WIDTH * HEIGHT) as usize,
             Command::Rect { w, h, .. } => (w * h) as usize,
             Command::Circle { radius, .. } => (4 * radius * radius) as usize,
@@ -84,6 +107,13 @@ pub struct Runtime {
 }
 impl Runtime {
     pub fn new(bytes: &[u8]) -> Result<Self, String> {
+        Self::with_assets(bytes, None, Arc::default())
+    }
+    pub fn with_assets(
+        bytes: &[u8],
+        expected_abi: Option<u32>,
+        assets: Arc<Assets>,
+    ) -> Result<Self, String> {
         if bytes.len() > MAX_MODULE_BYTES || !bytes.starts_with(b"\0asm\x01\0\0\0") {
             return Err("Expected a bounded binary WebAssembly module".into());
         }
@@ -192,6 +222,119 @@ impl Runtime {
                 },
             )
             .map_err(|e| e.to_string())?;
+        // ABI 2 imports cannot be used by ABI 1 or during module start/negotiation.
+        linker
+            .func_wrap(
+                "yami_game_v2",
+                "input",
+                |c: Caller<'_, Host>, field: i32| -> Result<i32, Error> {
+                    if c.data().abi != 2 {
+                        return Err(Error::new("ABI 2 capability required"));
+                    }
+                    let i = c.data().input;
+                    match field {
+                        0 => Ok(i.held as i32),
+                        1 => Ok(i.pressed as i32),
+                        2 => Ok(i.released as i32),
+                        3 => Ok(i.x),
+                        4 => Ok(i.y),
+                        _ => Err(Error::new("Unknown input field")),
+                    }
+                },
+            )
+            .map_err(|e| e.to_string())?;
+        linker
+            .func_wrap(
+                "yami_game_v2",
+                "sprite",
+                |mut c: Caller<'_, Host>,
+                 asset: i32,
+                 sx: i32,
+                 sy: i32,
+                 sw: i32,
+                 sh: i32,
+                 x: i32,
+                 y: i32,
+                 w: i32,
+                 h: i32,
+                 layer: i32|
+                 -> Result<(), Error> {
+                    if c.data().abi != 2 {
+                        return Err(Error::new("ABI 2 capability required"));
+                    }
+                    let texture = c
+                        .data()
+                        .assets
+                        .texture(asset as u32)
+                        .ok_or_else(|| Error::new("Unknown sprite asset"))?;
+                    if sx < 0
+                        || sy < 0
+                        || sw <= 0
+                        || sh <= 0
+                        || sw > texture.width() as i32
+                        || sh > texture.height() as i32
+                        || sx > texture.width() as i32 - sw
+                        || sy > texture.height() as i32 - sh
+                        || !(-WIDTH..=WIDTH * 2).contains(&x)
+                        || !(-HEIGHT..=HEIGHT * 2).contains(&y)
+                        || !(1..=WIDTH * 2).contains(&w)
+                        || !(1..=HEIGHT * 2).contains(&h)
+                        || !(-128..=127).contains(&layer)
+                    {
+                        return Err(Error::new("Invalid sprite rectangle, scale or layer"));
+                    }
+                    c.data_mut().push(Command::Sprite {
+                        asset: asset as u32,
+                        sx,
+                        sy,
+                        sw,
+                        sh,
+                        x,
+                        y,
+                        w,
+                        h,
+                        layer,
+                    })
+                },
+            )
+            .map_err(|e| e.to_string())?;
+        linker
+            .func_wrap(
+                "yami_game_v2",
+                "audio",
+                |mut c: Caller<'_, Host>,
+                 op: i32,
+                 channel: i32,
+                 asset: i32,
+                 value: i32,
+                 looping: i32|
+                 -> Result<(), Error> {
+                    if c.data().abi != 2
+                        || !c.data().drawing
+                        || c.data().audio.len() >= 32
+                        || !(0..8).contains(&channel)
+                        || !(0..=1000).contains(&value)
+                        || !(0..=1).contains(&looping)
+                    {
+                        return Err(Error::new("Invalid audio command or budget exceeded"));
+                    }
+                    let command = match op {
+                        0 if c.data().assets.sound(asset as u32).is_some() => AudioCommand::Play {
+                            channel: channel as u8,
+                            asset: asset as u32,
+                            looping: looping == 1,
+                            volume: value as u16,
+                        },
+                        1 => AudioCommand::Stop(channel as u8),
+                        2 => AudioCommand::Volume(channel as u8, value as u16),
+                        3 if value <= 1 => AudioCommand::Mute(value == 1),
+                        _ => return Err(Error::new("Invalid audio operation or asset")),
+                    };
+                    c.data_mut().audio.push(command);
+                    Ok(())
+                },
+            )
+            .map_err(|e| e.to_string())?;
         let host = Host {
             limits: StoreLimitsBuilder::new()
                 .memory_size(MAX_MEMORY_BYTES)
@@ -205,21 +348,33 @@ impl Runtime {
             drawing: false,
             pixels: 0,
             text_bytes: 0,
+            abi: 0,
+            input: Input {
+                x: -1,
+                y: -1,
+                ..Input::default()
+            },
+            assets,
+            audio: Vec::new(),
         };
         let mut store = Store::new(&engine, host);
         store.limiter(|h| &mut h.limits);
         store.set_fuel(FRAME_FUEL).map_err(|e| e.to_string())?;
         // Start functions, ABI negotiation and init share a single fuel budget.
-        // Only the four drawing imports above exist; WASI and all other imports fail closed.
+        // Only explicitly versioned game imports exist; WASI and all other imports fail closed.
         let instance = linker
             .instantiate_and_start(&mut store, &module)
             .map_err(|e| e.to_string())?;
         let abi = instance
             .get_typed_func::<(), i32>(&store, "yami_game_abi")
             .map_err(|e| e.to_string())?;
-        if abi.call(&mut store, ()).map_err(|e| e.to_string())? != ABI_VERSION {
-            return Err("Unsupported game ABI".into());
+        let abi = abi.call(&mut store, ()).map_err(|e| e.to_string())?;
+        if !(1..=ABI_VERSION).contains(&abi)
+            || expected_abi.is_some_and(|expected| expected != abi as u32)
+        {
+            return Err("Unsupported or mismatched game ABI".into());
         }
+        store.data_mut().abi = abi;
         let init = instance
             .get_typed_func::<(), ()>(&store, "yami_game_init")
             .map_err(|e| e.to_string())?;
@@ -241,18 +396,42 @@ impl Runtime {
         })
     }
     pub fn reset(&mut self) -> Result<(), String> {
+        self.store.data_mut().audio.clear();
         self.store.set_fuel(FRAME_FUEL).map_err(|e| e.to_string())?;
         self.reset
             .call(&mut self.store, ())
             .map_err(|e| e.to_string())
     }
     pub fn frame(&mut self, held: u32, pressed: u32) -> Result<Arc<Frame>, String> {
+        self.frame_input(Input {
+            held,
+            pressed,
+            x: -1,
+            y: -1,
+            ..Input::default()
+        })
+    }
+    pub fn take_audio(&mut self) -> Vec<AudioCommand> {
+        std::mem::take(&mut self.store.data_mut().audio)
+    }
+    pub fn frame_input(&mut self, input: Input) -> Result<Arc<Frame>, String> {
+        self.store.data_mut().input = Input {
+            held: input.held & INPUT_MASK,
+            pressed: input.pressed & INPUT_MASK,
+            released: input.released & INPUT_MASK,
+            x: input.x.clamp(-1, WIDTH - 1),
+            y: input.y.clamp(-1, HEIGHT - 1),
+        };
+        self.store.data_mut().audio.clear();
         self.store.data_mut().commands.clear();
         self.store.data_mut().pixels = 0;
         self.store.data_mut().text_bytes = 0;
         self.store.set_fuel(FRAME_FUEL).map_err(|e| e.to_string())?;
         self.input
-            .call(&mut self.store, ((held & 15) as i32, (pressed & 15) as i32))
+            .call(
+                &mut self.store,
+                ((input.held & 15) as i32, (input.pressed & 15) as i32),
+            )
             .map_err(|e| e.to_string())?;
         self.store.data_mut().drawing = true;
         let result = self.update.call(&mut self.store, TICK_US);
@@ -262,6 +441,15 @@ impl Runtime {
         if !matches!(commands.first(), Some(Command::Clear(_))) {
             return Err("Every game frame must begin with clear".into());
         }
-        Ok(Arc::new(Frame { commands }))
+        // Clear is always first. Other commands use stable layer order; primitives are layer 0.
+        let mut commands = commands;
+        commands[1..].sort_by_key(|command| match command {
+            Command::Sprite { layer, .. } => *layer,
+            _ => 0,
+        });
+        Ok(Arc::new(Frame {
+            commands,
+            assets: Arc::clone(&self.store.data().assets),
+        }))
     }
 }

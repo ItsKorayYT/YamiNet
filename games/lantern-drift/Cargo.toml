@@ -1,0 +1,17 @@
+[package]
+name = "yami-lantern-drift"
+version = "0.2.0"
+edition = "2021"
+rust-version = "1.90"
+license = "GPL-3.0-only"
+publish = false
+[workspace]
+[lib]
+crate-type = ["cdylib"]
+[dependencies]
+yami-game-api = { path = "../yami-game-api" }
+[profile.release]
+opt-level = "s"
+lto = true
+panic = "abort"
+strip = true
