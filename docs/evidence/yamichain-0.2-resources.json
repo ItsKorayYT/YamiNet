@@ -1,0 +1,28 @@
+{
+  "result": "PASS",
+  "generated_at": "2026-11-02T13:30:15.919921+00:00",
+  "architecture": "x86_64",
+  "scope": "4 public-development-key processes, empty blocks after first test-name block; no proofs, payments, full pruning or large-state workload",
+  "profile": "debug (default unoptimized)",
+  "binary_sha256": "c6125acdb997ffe4269b5def73802860d0cc515ef373445740ccf6eff36f8c3a",
+  "cgroup_cpu_max": "200000 100000",
+  "cgroup_memory_max": "8589934592",
+  "height": 12,
+  "elapsed_seconds_including_8_second_history_linger": 26.322,
+  "total_validator_cpu_seconds": 34.43,
+  "sample_interval_seconds": 0.05,
+  "sampled_per_validator_peak_rss_bytes": [
+    32595968,
+    32305152,
+    32518144,
+    32583680
+  ],
+  "sampled_combined_peak_rss_bytes": 130002944,
+  "per_validator_allocated_store_bytes": [
+    217088,
+    204800,
+    217088,
+    192512
+  ],
+  "targets_verified": false
+}

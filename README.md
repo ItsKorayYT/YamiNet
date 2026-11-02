@@ -46,9 +46,9 @@ for creation, delegation, persistence and identity-change warnings, and the
 [network guide](docs/yns-network.md) for publication, bootstrap requirements and
 validation limits.
 
-### Optional YamiChain research prototype
+### Optional YamiChain development prototype
 
-[YamiChain 0.1](docs/yamichain-0.1.md) is an isolated, non-financial Rust/Malachite
+[YamiChain 0.2](docs/yamichain-0.2.md) continues the [0.1 foundation](docs/yamichain-0.1.md) as an isolated, non-financial Rust/Malachite
 local prototype. It has no wallet, issued YAMI or accepted payment proofs and is
 not production-ready. Browsing and hosting do not require or contact it.
 

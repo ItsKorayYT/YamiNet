@@ -1,0 +1,55 @@
+{
+  "validated_implementation_tree": "ea4c178f14b15b73ccae30feed0878fcfdd5d847",
+  "implementation_commit": "0dcdab00a96b2a3cb54eb56a5dbf89540e8b78d1",
+  "toolchain": "rustc 1.90.0 (1159e78c4 2025-09-14)",
+  "platform": "Linux x86_64 Debian 13",
+  "build_env": {
+    "CARGO_BUILD_JOBS": "2",
+    "CARGO_INCREMENTAL": "0",
+    "CARGO_PROFILE_DEV_DEBUG": "0",
+    "CARGO_PROFILE_TEST_DEBUG": "0"
+  },
+  "workspace_tests": {
+    "passed": 474,
+    "failed": 0,
+    "ignored": 9
+  },
+  "checks": {
+    "format": {
+      "result": "PASS",
+      "log_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "clippy": {
+      "result": "PASS",
+      "log_sha256": "28d2d04b86751050e992e3e5138ed5e240023e37457e1e11b082d3ebdd4b56cd"
+    },
+    "tests": {
+      "result": "PASS",
+      "log_sha256": "4bd328e52ee62a8536d6a9a065d9fef8b2b12b4eea549695dc6b242671263ecd"
+    },
+    "build": {
+      "result": "PASS",
+      "log_sha256": "c3182c9668ad7d180c125e490dc452adcee0e8cd60ab10d8b6157f8522ddcb20"
+    },
+    "independence": {
+      "result": "PASS",
+      "log_sha256": "36fdebd7e2c5488140386859a531c90ce575f097e3c5ee16faa33c74ef7b46bc"
+    },
+    "release_privacy": {
+      "result": "PASS",
+      "log_sha256": "c218e4f4f13bccf3d9e471280869e1c05bce379c752a615e4298d2e00e958bfd"
+    }
+  },
+  "process_scenarios_passed": 11,
+  "resource_driver_sha256": "adb80698e4115b583d156d9b62428ebb3a6d2465ea7ca940860eb2cc5e55cd63",
+  "audit": "FAIL: 3 vulnerabilities; no suppression",
+  "unverified": [
+    "independent security audit",
+    "public-network hostile soak",
+    "Windows execution/power-loss durability",
+    "ARM64 native operation",
+    "2 GB memory pressure",
+    "large/pruned state targets",
+    "proof backends and live payments"
+  ]
+}
