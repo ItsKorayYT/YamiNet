@@ -147,6 +147,22 @@ impl<'a> Canvas<'a> {
         if r.w <= 0.0 || r.h <= 0.0 {
             return;
         }
+        // Full-window solid backgrounds are common (immersive game painting and
+        // page fills). A direct pixmap fill avoids building and scanning a path
+        // for every frame while remaining pixel-identical for radius 0.
+        if radius <= 0.0
+            && top == bottom
+            && top[3] == 255
+            && border.is_none()
+            && self.scale > 0.0
+            && r.x <= 0.0
+            && r.y <= 0.0
+            && r.w * self.scale >= self.pix.width() as f32
+            && r.h * self.scale >= self.pix.height() as f32
+        {
+            self.pix.fill(color(top));
+            return;
+        }
         if let Some(path) = rounded_path(r, radius) {
             // Solid surfaces dominate continuous game painting. Sending equal
             // stops through a gradient shader needlessly evaluates every pixel.

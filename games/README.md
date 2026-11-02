@@ -1,4 +1,4 @@
-# Yami Games 0.2
+# Yami Games 0.3 · 0.4 SDK milestone 1
 
 Prism Breakout is an original Rust game running entirely through the reusable
 WebAssembly runtime. No browser-side Breakout logic is used.
@@ -58,3 +58,22 @@ cargo run --locked -p yami-browser -- --game "$PWD/games/lantern-drift/game.yami
 ```
 
 The checked-in Wasm and assets allow immediate play without a guest build. Asset regeneration uses `python3 games/lantern-drift/generate-assets.py` (standard library only). See [ABI 2 and hosted publishing](../docs/games-0.3.md) and the [SDK guide](yami-game-api/README.md). Prism Breakout remains an ABI 1 example.
+
+## Games 0.4 SDK milestone 1
+
+The reusable `yami-game-api` guest SDK now includes allocation-free helpers for
+fixed-step sprite animation and animation states, sprite sheets, culled
+tilemaps, AABB/circle collision, tile-collision movement, measured HUD text,
+panels/bars/pips and digital controller views. They are SDK-side helpers: ABI 1
+and ABI 2 host imports are unchanged, and no new filesystem, network or device
+capability is exposed to a guest.
+
+Native controllers are read only by Yami Browser. Up to four pads map their
+buttons and left stick to the same digital input bits as the keyboard. Windows
+uses XInput; Linux reads non-blocking `/dev/input/js*` devices. Focus loss,
+pausing, tab changes and disconnects release held pad bits, and a held button
+must be released before it can press again after resume. Games remain fully
+playable with keyboard/mouse alone.
+
+See [the SDK guide](yami-game-api/README.md) and
+[the milestone 1 report](../docs/games-0.4-milestone-1.md).

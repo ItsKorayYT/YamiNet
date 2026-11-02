@@ -2894,6 +2894,7 @@ dependencies = [
  "yami-config",
  "yami-dht",
  "yami-discover",
+ "yami-gamepad",
  "yami-games",
  "yami-identity",
  "yami-node",
@@ -2937,6 +2938,18 @@ dependencies = [
  "ylang",
  "ynp",
  "ynp-tls",
+]
+
+[[package]]
+name = "yami-game-api"
+version = "0.2.0"
+
+[[package]]
+name = "yami-gamepad"
+version = "0.1.0"
+dependencies = [
+ "libc",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

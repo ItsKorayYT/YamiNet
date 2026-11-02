@@ -441,12 +441,20 @@ impl Runtime {
         if !matches!(commands.first(), Some(Command::Clear(_))) {
             return Err("Every game frame must begin with clear".into());
         }
-        // Clear is always first. Other commands use stable layer order; primitives are layer 0.
+        // Clear is always first. Other commands use stable layer order; primitives
+        // are layer 0. Most frames are already in submission order, so only sort
+        // when a sprite actually crosses a layer boundary.
         let mut commands = commands;
-        commands[1..].sort_by_key(|command| match command {
+        let layer = |command: &Command| match command {
             Command::Sprite { layer, .. } => *layer,
             _ => 0,
-        });
+        };
+        if commands[1..]
+            .windows(2)
+            .any(|pair| layer(&pair[0]) > layer(&pair[1]))
+        {
+            commands[1..].sort_by_key(layer);
+        }
         Ok(Arc::new(Frame {
             commands,
             assets: Arc::clone(&self.store.data().assets),
