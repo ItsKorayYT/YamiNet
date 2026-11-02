@@ -105,6 +105,9 @@ pub(crate) fn validate_epochs(epochs: &[Epoch]) -> Result<()> {
 impl crate::Genesis {
     /// Public, non-financial simulation identities; never suitable for real keys.
     pub fn development_schedule(plan: &[(u64, usize)]) -> Result<Self> {
+        if plan.is_empty() || plan.len() > MAX_EPOCHS {
+            return Err(Error::Genesis);
+        }
         let epochs = plan
             .iter()
             .map(|(first, count)| {

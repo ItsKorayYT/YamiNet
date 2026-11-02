@@ -63,6 +63,30 @@ impl Candidates {
             })
             .transpose()
     }
+    fn decode_proposal(&self, state: &State, bytes: Vec<u8>) -> Result<Part> {
+        if let Some(metadata) = bytes.strip_prefix(b"YC-CACHED-2") {
+            let message: SignedConsensusMsg<Context> =
+                WireCodec::new(state.genesis()).decode(bytes::Bytes::copy_from_slice(metadata))?;
+            let SignedConsensusMsg::Proposal(signed) = message else {
+                return Err(eyre!("cached proposal message type"));
+            };
+            let p = signed.message;
+            let block = self
+                .block(p.height.0, p.value.0)?
+                .ok_or_else(|| eyre!("cached payload missing"))?;
+            Ok(Part {
+                height: p.height,
+                round: p.round,
+                valid_round: p.pol_round,
+                proposer: p.address,
+                block,
+                signature: signed.signature,
+            })
+        } else {
+            // Preserve stores created by PR #15; no unsafe rewrite/migration.
+            Ok(WireCodec::new(state.genesis()).decode(bytes.into())?)
+        }
+    }
     fn authenticated(state: &State, part: &Part) -> bool {
         part.height.0 == state.height() + 1
             && part.block.header.height == part.height.0
@@ -97,7 +121,7 @@ impl Candidates {
         }
         let name = Self::name(part.height.0, part.round)?;
         if let Some(bytes) = self.read(&name, MAX_RECORD_BYTES)? {
-            let original: Part = WireCodec::new(state.genesis()).decode(bytes.into())?;
+            let original = self.decode_proposal(state, bytes)?;
             if original.height != part.height || original.round != part.round {
                 return Err(eyre!("proposal filename mismatch"));
             }
@@ -128,14 +152,17 @@ impl Candidates {
             return Ok(false);
         }
         self.store_block(&part.block)?;
-        self.journal
-            .write_once(&name, &WireCodec::new(state.genesis()).encode(part)?)?;
+        let mut metadata = b"YC-CACHED-2".to_vec();
+        metadata.extend_from_slice(&WireCodec::new(state.genesis()).encode(
+            &SignedConsensusMsg::Proposal(m::SignedMessage::new(part.proposal()?, part.signature)),
+        )?);
+        self.journal.write_once(&name, &metadata)?;
         Ok(true)
     }
     pub fn recover(&self, state: &State, round: m::Round) -> Result<Option<Part>> {
         self.read(&Self::name(state.height() + 1, round)?, MAX_RECORD_BYTES)?
             .map(|bytes| {
-                let part: Part = WireCodec::new(state.genesis()).decode(bytes.into())?;
+                let part = self.decode_proposal(state, bytes)?;
                 if part.round != round || !Self::valid(state, &part) {
                     return Err(eyre!("invalid recovered proposal"));
                 }
@@ -273,6 +300,72 @@ mod retention_tests {
                 .is_some());
         }
         drop(candidates);
+        std::fs::remove_dir_all(path).unwrap();
+    }
+}
+
+#[cfg(test)]
+mod compact_storage_tests {
+    use super::*;
+    use yami_chain::{development_key, Genesis, Signer as _};
+    #[test]
+    fn metadata_is_bounded_and_legacy_payloads_recover_without_rewriting() {
+        let path =
+            std::env::temp_dir().join(format!("yami-compact-proposals-{}", std::process::id()));
+        let state = State::new(Genesis::local()).unwrap();
+        let journal = Arc::new(Journal::open(&path).unwrap());
+        let mut candidates = Candidates::new(journal.clone());
+        let make = |round| {
+            let proposer = Context
+                .select_proposer(&Committee::local(), Height(1), round)
+                .address;
+            let key = (0..4)
+                .map(|i| development_key("consensus", i))
+                .find(|k| k.verifying_key().to_bytes() == proposer.0 .0)
+                .unwrap();
+            let mut part = Part {
+                height: Height(1),
+                round,
+                valid_round: m::Round::Nil,
+                proposer,
+                block: state.development_workload_block(64).unwrap(),
+                signature: [0; 64],
+            };
+            part.signature = key
+                .sign(&proposal_preimage_for(state.genesis(), &part.proposal().unwrap()).unwrap())
+                .to_bytes();
+            part
+        };
+        let legacy = make(m::Round::ZERO);
+        candidates.store_block(&legacy.block).unwrap();
+        let name = Candidates::name(1, legacy.round).unwrap();
+        let bytes = WireCodec::new(state.genesis()).encode(&legacy).unwrap();
+        journal.write_once(&name, &bytes).unwrap();
+        assert_eq!(
+            candidates.recover(&state, legacy.round).unwrap(),
+            Some(legacy.clone())
+        );
+        assert!(candidates.admit(&state, legacy.round, &legacy).unwrap());
+        assert_eq!(
+            read_bounded(&path.join(name), MAX_RECORD_BYTES).unwrap(),
+            bytes
+        );
+        let current = make(m::Round::new(1));
+        assert!(candidates.admit(&state, current.round, &current).unwrap());
+        let metadata = read_bounded(
+            &path.join(Candidates::name(1, current.round).unwrap()),
+            MAX_RECORD_BYTES,
+        )
+        .unwrap();
+        assert!(metadata.starts_with(b"YC-CACHED-2"));
+        assert!(metadata.len() < 256);
+        assert!(current.block.canonical().unwrap().len() > 8000);
+        assert_eq!(
+            candidates.recover(&state, current.round).unwrap(),
+            Some(current)
+        );
+        drop(candidates);
+        drop(journal);
         std::fs::remove_dir_all(path).unwrap();
     }
 }

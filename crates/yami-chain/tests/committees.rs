@@ -1,6 +1,10 @@
 use yami_chain::*;
 #[test]
 fn schedules_and_role_isolation_reject_invalid_or_unauthorized_changes() {
+    assert_eq!(
+        Genesis::development_schedule(&vec![(1, 100); committee::MAX_EPOCHS + 1]),
+        Err(Error::Genesis)
+    );
     for plan in [
         vec![],
         vec![(0, 4)],

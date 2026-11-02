@@ -12,6 +12,27 @@ use yami_chain::{
 };
 
 pub const MAX_RECORD_BYTES: usize = MAX_BLOCK_BYTES + MAX_CERTIFICATE_BYTES + 32;
+/// A budget is a refusal bound, never permission to skip verification or return
+/// partially replayed state as a trusted tip. Archive operators can raise it.
+#[derive(Clone, Copy, Debug)]
+pub struct ReplayBudget {
+    pub max_records: u64,
+    pub max_bytes: u64,
+}
+impl Default for ReplayBudget {
+    fn default() -> Self {
+        Self {
+            max_records: 1_000_000,
+            max_bytes: 20 * 1024 * 1024 * 1024,
+        }
+    }
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum WriteStage {
+    FileSync,
+    Renamed,
+    DirectorySync,
+}
 
 #[derive(Clone, Debug)]
 pub struct FinalizedRecord {
@@ -116,6 +137,15 @@ impl Journal {
     }
     /// Under the store lock; never replace a committed destination.
     pub fn write_once(&self, name: &str, bytes: &[u8]) -> io::Result<()> {
+        self.write_once_inner(name, bytes, |_| Ok(()))
+    }
+    // The hook is private and used only to exercise I/O failure boundaries.
+    fn write_once_inner(
+        &self,
+        name: &str,
+        bytes: &[u8],
+        mut boundary: impl FnMut(WriteStage) -> io::Result<()>,
+    ) -> io::Result<()> {
         let _guard = self
             .write_lock
             .lock()
@@ -139,22 +169,46 @@ impl Journal {
             return Err(invalid("record cap"));
         }
         let final_path = self.path.join(name);
-        if fs::symlink_metadata(&final_path).is_ok() {
-            if read_bounded(&final_path, limit)? == bytes {
-                return Ok(());
+        match fs::symlink_metadata(&final_path) {
+            Ok(_) => {
+                if read_bounded(&final_path, limit)? != bytes {
+                    return Err(invalid("conflicting durable record"));
+                }
+                // A previous attempt may have renamed successfully but failed
+                // directory sync. Never release a signature on an unsynced retry.
+                boundary(WriteStage::FileSync)?;
+                OpenOptions::new()
+                    .read(true)
+                    .write(true)
+                    .open(&final_path)?
+                    .sync_all()?;
+                boundary(WriteStage::DirectorySync)?;
+                return self.sync_dir();
             }
-            return Err(invalid("conflicting durable record"));
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error),
         }
         let temp = self.path.join(format!(".pending-{name}"));
         let mut file = OpenOptions::new()
             .write(true)
             .create_new(true)
             .open(&temp)?;
-        file.write_all(bytes)?;
-        file.sync_all()?;
-        drop(file);
-        fs::rename(&temp, &final_path)?;
-        self.sync_dir()
+        let result = (|| {
+            file.write_all(bytes)?;
+            boundary(WriteStage::FileSync)?;
+            file.sync_all()?;
+            drop(file);
+            fs::rename(&temp, &final_path)?;
+            boundary(WriteStage::Renamed)?;
+            boundary(WriteStage::DirectorySync)?;
+            self.sync_dir()
+        })();
+        if result.is_err() {
+            // Only the temporary name is uncommitted. Preserve a destination
+            // whose rename succeeded, even when its durability is uncertain.
+            let _ = fs::remove_file(&temp);
+        }
+        result
     }
     pub fn record(&self, height: u64) -> io::Result<Option<FinalizedRecord>> {
         let path = self.path.join(format!("finalized-{height:020}.bin"));
@@ -175,8 +229,17 @@ impl Journal {
         genesis: Genesis,
         verify: impl Fn(&FinalizedRecord) -> io::Result<()>,
     ) -> io::Result<State> {
+        self.replay_with_budget(genesis, ReplayBudget::default(), verify)
+    }
+    pub fn replay_with_budget(
+        &self,
+        genesis: Genesis,
+        budget: ReplayBudget,
+        verify: impl Fn(&FinalizedRecord) -> io::Result<()>,
+    ) -> io::Result<State> {
         let mut state = State::new(genesis.clone()).map_err(invalid)?;
         self.write_once("genesis.bin", &genesis.canonical())?;
+        let mut remaining = budget.max_bytes;
         // Replay in height order with constant history-index memory. A second
         // streaming directory pass rejects gaps and noncanonical filenames.
         while let Some(record) = self.record(
@@ -185,6 +248,12 @@ impl Journal {
                 .checked_add(1)
                 .ok_or_else(|| invalid("height overflow"))?,
         )? {
+            if state.height() >= budget.max_records {
+                return Err(invalid("replay record budget exceeded"));
+            }
+            remaining = remaining
+                .checked_sub(record.canonical()?.len() as u64)
+                .ok_or_else(|| invalid("replay byte budget exceeded"))?;
             if record.block.header.height != state.height() + 1 {
                 return Err(invalid("record height mismatch"));
             }
@@ -382,6 +451,98 @@ mod genesis_limits {
             0
         );
         assert_eq!(journal.replay(genesis, |_| Ok(())).unwrap().height(), 0);
+        drop(journal);
+        fs::remove_dir_all(path).unwrap();
+    }
+}
+
+#[cfg(test)]
+mod io_boundaries {
+    use super::*;
+    #[test]
+    fn failed_temporary_writes_retry_and_uncertain_renames_resync_without_equivocation() {
+        let path = std::env::temp_dir().join(format!("yami-io-boundaries-{}", std::process::id()));
+        let journal = Journal::open(&path).unwrap();
+        for stage in [
+            WriteStage::FileSync,
+            WriteStage::Renamed,
+            WriteStage::DirectorySync,
+        ] {
+            let name = format!("signed-1-0-{stage:?}.bin");
+            assert!(journal
+                .write_once_inner(&name, b"reserved", |at| {
+                    if at == stage {
+                        Err(io::Error::other("injected storage failure"))
+                    } else {
+                        Ok(())
+                    }
+                })
+                .is_err());
+            assert!(!path.join(format!(".pending-{name}")).exists());
+            let mut directory_synced = false;
+            journal
+                .write_once_inner(&name, b"reserved", |at| {
+                    if at == WriteStage::DirectorySync {
+                        directory_synced = true;
+                    }
+                    Ok(())
+                })
+                .unwrap();
+            assert!(directory_synced);
+            assert!(journal.write_once(&name, b"conflicting preimage").is_err());
+        }
+        drop(journal);
+        let journal = Journal::open(&path).unwrap();
+        assert!(journal
+            .write_once("signed-1-0-Renamed.bin", b"conflicting preimage")
+            .is_err());
+        drop(journal);
+        fs::remove_dir_all(path).unwrap();
+    }
+    #[test]
+    fn replay_budgets_refuse_without_trusting_partial_history() {
+        let path = std::env::temp_dir().join(format!("yami-replay-budget-{}", std::process::id()));
+        let journal = Journal::open(&path).unwrap();
+        let genesis = Genesis::local();
+        let mut state = State::new(genesis.clone()).unwrap();
+        let mut bytes = 0;
+        for _ in 0..3 {
+            let block = state.development_block().unwrap();
+            state = state.execute(&block).unwrap();
+            let record = FinalizedRecord {
+                block,
+                certificate: vec![],
+            };
+            bytes += record.canonical().unwrap().len() as u64;
+            journal.append(&record).unwrap();
+        }
+        for budget in [
+            ReplayBudget {
+                max_records: 2,
+                max_bytes: bytes,
+            },
+            ReplayBudget {
+                max_records: 3,
+                max_bytes: bytes - 1,
+            },
+        ] {
+            assert!(journal
+                .replay_with_budget(genesis.clone(), budget, |_| Ok(()))
+                .is_err());
+        }
+        assert_eq!(
+            journal
+                .replay_with_budget(
+                    genesis,
+                    ReplayBudget {
+                        max_records: 3,
+                        max_bytes: bytes
+                    },
+                    |_| Ok(())
+                )
+                .unwrap(),
+            state
+        );
         drop(journal);
         fs::remove_dir_all(path).unwrap();
     }
