@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Run owned, network-isolated YamiChain process campaigns with explicit limits."""
 import argparse
+from contextlib import ExitStack
 import fcntl
 import json
 import os
@@ -25,7 +26,7 @@ CASES = {
 }
 
 
-def main():
+def run_lab(scope):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--case', choices=CASES, required=True)
     parser.add_argument('--output', type=Path, default=Path('work/chain-lab'))
@@ -37,7 +38,7 @@ def main():
     # accidentally run competing clusters on the same constrained parent.
     lock_path = repo / 'work' / '.chain-lab.lock'
     lock_path.parent.mkdir(exist_ok=True)
-    lab_lock = lock_path.open('a')
+    lab_lock = scope.enter_context(lock_path.open('a'))
     fcntl.flock(lab_lock, fcntl.LOCK_EX)
     output = args.output.resolve()
     output.mkdir(parents=True, exist_ok=True)
@@ -114,6 +115,11 @@ def main():
         raise SystemExit(1)
     finally:
         subprocess.run(cli + ['rm', '--force', name], env=environment, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)
+
+
+def main():
+    with ExitStack() as scope:
+        run_lab(scope)
 
 
 if __name__ == '__main__':

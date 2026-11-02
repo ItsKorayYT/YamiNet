@@ -44,7 +44,8 @@
   ],
   "python_benchmark_false_success_regression": {
     "result": "PASS",
-    "log_sha256": "02efc40f18ed11282aeb1d7a233af40fc306d02d36578ed7b600b560d99d9d1b"
+    "log_sha256": "20771b03cc66c84c1c42a14e70fb2afa86cd360987c2c759d27c940a4d92aa60",
+    "resource_warnings": "treated as errors; lab lock closes on success and failure"
   },
   "source_sha256": {
     "Cargo.lock": "876314641cbcf5d6afa5be53bebf1c68f4f39157477650c1c42875c16631ac06",
