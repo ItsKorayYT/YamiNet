@@ -11,18 +11,21 @@ use yami_chain::{
     Block, Digest, Genesis, State, MAX_BLOCK_BYTES, MAX_CERTIFICATE_BYTES,
 };
 
+pub const DEFAULT_ENTRY_BUDGET: u64 = 4_000_000;
 pub const MAX_RECORD_BYTES: usize = MAX_BLOCK_BYTES + MAX_CERTIFICATE_BYTES + 32;
 /// A budget is a refusal bound, never permission to skip verification or return
 /// partially replayed state as a trusted tip. Archive operators can raise it.
 #[derive(Clone, Copy, Debug)]
 pub struct ReplayBudget {
     pub max_records: u64,
+    pub max_directory_entries: u64,
     pub max_bytes: u64,
 }
 impl Default for ReplayBudget {
     fn default() -> Self {
         Self {
             max_records: 1_000_000,
+            max_directory_entries: DEFAULT_ENTRY_BUDGET,
             max_bytes: 20 * 1024 * 1024 * 1024,
         }
     }
@@ -91,6 +94,11 @@ pub struct Journal {
 }
 impl Journal {
     pub fn open(path: &Path) -> io::Result<Self> {
+        Self::open_with_entry_budget(path, DEFAULT_ENTRY_BUDGET)
+    }
+    /// Refuse oversized recovery before deleting any uncommitted temporary file.
+    /// This is a work limit, never a retention or safety-record deletion policy.
+    pub fn open_with_entry_budget(path: &Path, max_entries: u64) -> io::Result<Self> {
         fs::create_dir_all(path)?;
         if fs::symlink_metadata(path)?.file_type().is_symlink() {
             return Err(invalid("symlinked store"));
@@ -112,6 +120,7 @@ impl Journal {
             _lock: lock,
             write_lock: Mutex::new(()),
         };
+        journal.check_entry_budget(max_entries)?;
         // Only this process can mutate these files now. Unrenamed records were
         // never acknowledged. Malachite WAL has its own recovery semantics.
         for entry in fs::read_dir(path)? {
@@ -126,6 +135,15 @@ impl Journal {
         }
         journal.sync_dir()?;
         Ok(journal)
+    }
+    fn check_entry_budget(&self, max_entries: u64) -> io::Result<()> {
+        for (index, entry) in fs::read_dir(&self.path)?.enumerate() {
+            entry?;
+            if index as u64 >= max_entries {
+                return Err(invalid("store directory entry budget exceeded"));
+            }
+        }
+        Ok(())
     }
     pub fn path(&self) -> &Path {
         &self.path
@@ -237,6 +255,7 @@ impl Journal {
         budget: ReplayBudget,
         verify: impl Fn(&FinalizedRecord) -> io::Result<()>,
     ) -> io::Result<State> {
+        self.check_entry_budget(budget.max_directory_entries)?;
         let mut state = State::new(genesis.clone()).map_err(invalid)?;
         self.write_once("genesis.bin", &genesis.canonical())?;
         let mut remaining = budget.max_bytes;
@@ -260,7 +279,10 @@ impl Journal {
             verify(&record)?;
             state = state.execute(&record.block).map_err(invalid)?;
         }
-        for entry in fs::read_dir(&self.path)? {
+        for (index, entry) in fs::read_dir(&self.path)?.enumerate() {
+            if index as u64 >= budget.max_directory_entries {
+                return Err(invalid("store directory entry budget exceeded"));
+            }
             let name = entry?.file_name();
             let name = name.to_string_lossy();
             if let Some(height) = name
@@ -518,10 +540,12 @@ mod io_boundaries {
         }
         for budget in [
             ReplayBudget {
+                max_directory_entries: DEFAULT_ENTRY_BUDGET,
                 max_records: 2,
                 max_bytes: bytes,
             },
             ReplayBudget {
+                max_directory_entries: DEFAULT_ENTRY_BUDGET,
                 max_records: 3,
                 max_bytes: bytes - 1,
             },
@@ -535,6 +559,7 @@ mod io_boundaries {
                 .replay_with_budget(
                     genesis,
                     ReplayBudget {
+                        max_directory_entries: DEFAULT_ENTRY_BUDGET,
                         max_records: 3,
                         max_bytes: bytes
                     },
@@ -634,6 +659,37 @@ mod pressure_tests {
             (8, 8, 8, 16)
         );
         assert_eq!(fs::read(path.join("signed-fixture.bin")).unwrap(), [1; 8]);
+        drop(journal);
+        fs::remove_dir_all(path).unwrap();
+    }
+}
+
+#[cfg(test)]
+mod recovery_entry_tests {
+    use super::*;
+    #[test]
+    fn entry_budget_refuses_without_discarding_safety_or_pending_records() {
+        let path = std::env::temp_dir().join(format!("yami-entry-budget-{}", std::process::id()));
+        let journal = Journal::open(&path).unwrap();
+        journal.reserve_signature(1, 0, 1, b"safety").unwrap();
+        drop(journal);
+        fs::write(path.join(".pending-uncommitted.bin"), b"torn").unwrap();
+        assert!(Journal::open_with_entry_budget(&path, 1).is_err());
+        assert!(path.join(".pending-uncommitted.bin").exists());
+        let journal = Journal::open_with_entry_budget(&path, 10).unwrap();
+        assert!(journal.reserve_signature(1, 0, 1, b"conflict").is_err());
+        assert!(!path.join(".pending-uncommitted.bin").exists());
+        assert!(journal
+            .replay_with_budget(
+                Genesis::local(),
+                ReplayBudget {
+                    max_directory_entries: 0,
+                    ..Default::default()
+                },
+                |_| Ok(())
+            )
+            .is_err());
+        assert!(!path.join("genesis.bin").exists());
         drop(journal);
         fs::remove_dir_all(path).unwrap();
     }

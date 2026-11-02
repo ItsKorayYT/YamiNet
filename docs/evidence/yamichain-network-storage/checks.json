@@ -1,0 +1,106 @@
+{
+  "workspace_counts": {
+    "passed": 485,
+    "failed": 0,
+    "ignored": 10
+  },
+  "final_checks": [
+    {
+      "check": "fmt",
+      "exit": 0,
+      "log_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "check": "clippy",
+      "exit": 0,
+      "log_sha256": "7acae36e002b4f5be7c9423b9c3dd20620798a6748b14898c4d507976440f671"
+    },
+    {
+      "check": "build",
+      "exit": 0,
+      "log_sha256": "78247949b2333a0d58b8102f2312221c9abb3497f3c7769e67c68b02bb74545f"
+    },
+    {
+      "check": "tests",
+      "exit": 0,
+      "log_sha256": "6ba53d49891195cd187465f2b0b9a8818d6fe5cc0f548e7149fe5c8608183522"
+    },
+    {
+      "check": "retention",
+      "exit": 0,
+      "log_sha256": "c124c2bc2b89849576e03b462ab1c9ebb684d95408a096d99051307f5453702e"
+    }
+  ],
+  "additional_checks": [
+    {
+      "check": "fmt",
+      "exit": 0,
+      "log_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "check": "clippy",
+      "exit": 0,
+      "log_sha256": "2043c975a2514791995f5c8482fb2fdf73e9c3f829542fbffe975a6341ca632a"
+    },
+    {
+      "check": "tests",
+      "exit": 0,
+      "log_sha256": "6013288bec30ba58db10ef8940ac131012db353f1d0b63d4690191b2b296d23d"
+    },
+    {
+      "check": "build",
+      "exit": 0,
+      "log_sha256": "d7ba34e20b61e9242d2488631b62fd0c0608b42c1b083224644cb867e388fbb5"
+    },
+    {
+      "check": "privacy",
+      "exit": 0,
+      "log_sha256": "c218e4f4f13bccf3d9e471280869e1c05bce379c752a615e4298d2e00e958bfd"
+    },
+    {
+      "check": "independence",
+      "exit": 0,
+      "log_sha256": "36fdebd7e2c5488140386859a531c90ce575f097e3c5ee16faa33c74ef7b46bc"
+    },
+    {
+      "check": "core",
+      "exit": 0,
+      "log_sha256": "fdd9945ce672fb2fa64e734f1b4bba855979cbcccaa8cf22bb2c7df4eb8bdf71"
+    },
+    {
+      "check": "python",
+      "exit": 0,
+      "log_sha256": "6c95815d899d17c834fbf0d1ce69e47c6544af39770671261a9046afd5fbf013"
+    },
+    {
+      "check": "processes",
+      "exit": 0,
+      "log_sha256": "79c741d171a86329654f1a3e332a3c288d57aaec92b332bd37c8c1132c1afa2e"
+    }
+  ],
+  "manual_checks": [
+    {
+      "check": "captures",
+      "exit": 0,
+      "log_sha256": "17ecd41013eb8c8e4d7659baa62cf6b83ce0ec3b2543f55a92c563af483abd6e"
+    },
+    {
+      "check": "render",
+      "exit": 0,
+      "log_sha256": "dbf9b9089262f211ee24918c06222e049b941afb797a949a5aaa7526e62fc1fc"
+    },
+    {
+      "check": "lan",
+      "exit": 0,
+      "log_sha256": "5a3a768045030b9bf5e9bc37efb2754ff8d23bcfd25a4f294d1887bbe3099eac"
+    }
+  ],
+  "ignored_review": "12 core schedules explicitly ran, seven of the original nine ignored tests passed; two owned-public-endpoint tests remain unavailable.",
+  "source_sha256": {
+    "Cargo.lock": "876314641cbcf5d6afa5be53bebf1c68f4f39157477650c1c42875c16631ac06",
+    "crates/yami-chain-storage/src/lib.rs": "4b56b663d8f533649c1f14ba76e2f1b75c4cd6620acfd5ed5b4444be86c1098b",
+    "crates/yami-chain-consensus/src/node.rs": "f2e617e18914656188d6b48b13e64e3663cc72a517e21642c89740aeb9395540",
+    "tools/yamichain-stress.py": "4d7937ff8921d38f1474bc268f4e2e27e68df0c1b27511144db45a89202cb778",
+    "tools/yamichain-container-lab.py": "e166574afb8c6b53ee95f2591694836d4367dd4487adb2c2d8d998e3972894c5"
+  }
+}

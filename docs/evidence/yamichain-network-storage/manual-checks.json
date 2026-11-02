@@ -1,0 +1,17 @@
+[
+  {
+    "check": "captures",
+    "exit": 0,
+    "log_sha256": "17ecd41013eb8c8e4d7659baa62cf6b83ce0ec3b2543f55a92c563af483abd6e"
+  },
+  {
+    "check": "render",
+    "exit": 0,
+    "log_sha256": "dbf9b9089262f211ee24918c06222e049b941afb797a949a5aaa7526e62fc1fc"
+  },
+  {
+    "check": "lan",
+    "exit": 0,
+    "log_sha256": "5a3a768045030b9bf5e9bc37efb2754ff8d23bcfd25a4f294d1887bbe3099eac"
+  }
+]

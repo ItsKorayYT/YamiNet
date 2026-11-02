@@ -9,6 +9,8 @@ from pathlib import Path
 import subprocess
 
 CASES = {
+    **{f'wan-rehearsal{n}':dict(nodes=n,height=8,tx=4,timeout=360,memory='2g',sparse=True,distinct=True,barrier=45 if n==100 else 15,round_ms=5000,faults='partition,crash',delay=30,jitter=20,resets=0.1,plan=f'1:{n},3:{n-3},5:{n},7:{n-1}') for n in [25,50,100]},
+    'stall4':dict(nodes=4,height=12,tx=4,timeout=180,memory='2g',faults='partition,crash',partition_seconds=60),
     'tuned-rotate100': dict(nodes=100,height=12,tx=4,timeout=300,memory='2g',sparse=True,distinct=True,barrier=45,round_ms=5000,faults='crash',plan='1:100,4:97,7:100,10:99'),
     'barrier100': dict(nodes=100,height=8,tx=4,timeout=240,memory='2g',sparse=True,distinct=True,barrier=45,round_ms=5000,faults='partition,crash',delay=10),
     'diagnose100':dict(nodes=100,height=4,tx=4,timeout=45,memory='6g',sparse=True,direct=True,trace=True),
@@ -71,6 +73,8 @@ def run_lab(scope):
                 '--directory', f'/results/{args.case}', '--report', f'/results/{args.case}.json',
                 '--validators', str(case['nodes']), '--height', str(case['height']),
                 '--transactions', str(case['tx']), '--timeout', str(case['timeout'])]
+    for key,flag in [('jitter','--jitter-ms'),('resets','--stream-reset-percent'),('partition_seconds','--partition-seconds')]:
+        if case.get(key):command += [flag,str(case[key])]
     if case.get('round_ms'):
         command += ['--round-timeout-ms',str(case['round_ms'])]
     if case.get('barrier'):

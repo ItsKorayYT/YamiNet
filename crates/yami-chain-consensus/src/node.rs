@@ -145,6 +145,11 @@ pub fn inspect_with_genesis(directory: &Path, genesis: Genesis) -> Result<State>
     Ok(journal.replay(genesis.clone(), |record| verify_record(&genesis, record))?)
 }
 pub async fn run_node(options: NodeOptions) -> Result<State> {
+    let start_deadline = startup_deadline(
+        options.start_at,
+        std::time::SystemTime::now(),
+        tokio::time::Instant::now(),
+    )?;
     options.genesis.validate()?;
     let development_keys: std::collections::BTreeMap<_, _> = (0
         ..yami_chain::committee::MAX_VALIDATORS as u8)
@@ -172,6 +177,9 @@ pub async fn run_node(options: NodeOptions) -> Result<State> {
                 .verifying_key()
                 .to_bytes(),
         )
+        || options.timeout < Duration::from_secs(1)
+        || options.timeout > Duration::from_secs(3600)
+        || options.linger > Duration::from_secs(60)
         || options.round_timeout < Duration::from_millis(800)
         || options.round_timeout > Duration::from_secs(60)
         || options.test_transactions > yami_chain::MAX_TXS
@@ -183,7 +191,7 @@ pub async fn run_node(options: NodeOptions) -> Result<State> {
         || options.target_height > 100_000
     {
         return Err(eyre!(
-            "index must be a scheduled public development identity; base port 1024..65436, height 1..100000"
+            "invalid local options: scheduled identity, ports 1024..65436, height 1..100000, timeout 1..3600s, linger 0..60s, round timeout 800..60000ms"
         ));
     }
     let journal = Arc::new(Journal::open(&options.directory)?);
@@ -253,14 +261,9 @@ pub async fn run_node(options: NodeOptions) -> Result<State> {
     .with_default_request(RequestContext::new(16))
     .build()
     .await?;
-    // Local lab coordination only: never a block timestamp or election input.
-    if let Some(start) = options.start_at {
-        if let Ok(delay) = start.duration_since(std::time::SystemTime::now()) {
-            if delay > Duration::from_secs(60) {
-                return Err(eyre!("startup barrier exceeds 60 seconds"));
-            }
-            tokio::time::sleep(delay).await;
-        }
+    // A monotonic deadline prevents wall-clock changes from extending this wait.
+    if let Some(deadline) = start_deadline {
+        tokio::time::sleep_until(deadline).await;
     }
     let result = tokio::select! {
         result=app_loop(state,journal.clone(),&mut channels,&options,signer.clone())=>result,
@@ -603,5 +606,70 @@ mod topology_tests {
                 assert_eq!(seen.len(), usize::from(n - 1));
             }
         }
+    }
+}
+
+fn startup_deadline(
+    start: Option<std::time::SystemTime>,
+    wall: std::time::SystemTime,
+    monotonic: tokio::time::Instant,
+) -> Result<Option<tokio::time::Instant>> {
+    let Some(delay) = start.and_then(|s| s.duration_since(wall).ok()) else {
+        return Ok(None);
+    };
+    if delay > Duration::from_secs(60) {
+        return Err(eyre!("startup barrier exceeds 60 seconds"));
+    }
+    Ok(Some(monotonic + delay))
+}
+#[cfg(test)]
+mod startup_tests {
+    use super::*;
+    #[tokio::test]
+    async fn invalid_startup_creates_no_store_or_network_resources() {
+        let directory =
+            std::env::temp_dir().join(format!("yami-invalid-startup-{}", std::process::id()));
+        for (barrier, timeout) in [
+            (
+                Some(std::time::SystemTime::now() + Duration::from_secs(120)),
+                Duration::from_secs(60),
+            ),
+            (None, Duration::from_millis(500)),
+        ] {
+            let options = NodeOptions {
+                directory: directory.clone(),
+                genesis: Genesis::local(),
+                index: 0,
+                base_port: 28100,
+                peer_base_port: 28100,
+                test_transactions: 0,
+                sparse_peers: false,
+                start_at: barrier,
+                round_timeout: Duration::from_millis(800),
+                target_height: 1,
+                timeout,
+                linger: Duration::ZERO,
+                crash: None,
+            };
+            assert!(run_node(options).await.is_err());
+            assert!(!directory.exists());
+        }
+    }
+
+    #[test]
+    fn startup_uses_one_bounded_monotonic_deadline() {
+        let wall = std::time::UNIX_EPOCH + Duration::from_secs(1000);
+        let clock = tokio::time::Instant::now();
+        assert!(startup_deadline(Some(wall + Duration::from_secs(61)), wall, clock).is_err());
+        assert_eq!(
+            startup_deadline(Some(wall + Duration::from_secs(60)), wall, clock).unwrap(),
+            Some(clock + Duration::from_secs(60))
+        );
+        assert!(
+            startup_deadline(Some(wall - Duration::from_secs(1)), wall, clock)
+                .unwrap()
+                .is_none()
+        );
+        assert!(startup_deadline(None, wall, clock).unwrap().is_none());
     }
 }

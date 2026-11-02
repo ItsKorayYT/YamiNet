@@ -302,6 +302,10 @@ mod retention_tests {
                 .to_bytes();
             assert!(candidates.admit(&state, round, &part).unwrap());
             ids.push(part.block.id().unwrap());
+            if [15, 63, 79].contains(&r) {
+                let footprint = candidates.journal.storage_footprint(1000).unwrap();
+                println!("stall-candidates rounds={} state_height={} entries={} logical_bytes={} retained_candidate_bytes={}",r+1,state.height(),footprint.entries,footprint.bytes,footprint.retained_candidate_bytes);
+            }
         }
         drop(candidates);
         let candidates = Candidates::new(Arc::new(Journal::open(&path).unwrap()));

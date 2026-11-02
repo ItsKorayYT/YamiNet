@@ -15,6 +15,7 @@ import os
 from pathlib import Path
 import platform
 import resource
+import random
 import signal
 import subprocess
 import time
@@ -60,8 +61,12 @@ def usage(path):
 
 
 class Proxies:
-    def __init__(self, count, base, proxy_base, delay, distinct=False):
+    def __init__(self, count, base, proxy_base, delay, distinct=False, jitter=0, reset_percent=0, seed=17):
         self.count, self.base, self.proxy_base, self.delay = count, base, proxy_base, delay
+        self.jitter, self.reset_percent = jitter, reset_percent
+        # Fault scheduling only; this PRNG is never an election or consensus input.
+        self.rng = random.Random(seed)
+        self.reset_count = 0
         self.distinct = distinct
         self.partitioned = False
         self.forwarded = [0] * count
@@ -105,8 +110,12 @@ class Proxies:
                 while data := await source.read(65536):
                     if self.partitioned and cross:
                         break
-                    if self.delay:
-                        await asyncio.sleep(self.delay)
+                    if self.reset_percent and self.rng.random()*100 < self.reset_percent:
+                        self.reset_count += 1
+                        break  # Close the entire encrypted TCP stream; never drop ciphertext bytes.
+                    delay=max(0,self.delay+self.rng.uniform(-self.jitter,self.jitter))
+                    if delay:
+                        await asyncio.sleep(delay)
                     target.write(data)
                     await target.drain()
                     self.forwarded[destination] += len(data)
@@ -156,7 +165,7 @@ async def run(args):
     root.mkdir(parents=True, exist_ok=True)
     binary = args.binary.resolve()
     plan = args.committee_plan or f'1:{args.validators}'
-    proxy = Proxies(args.validators, args.base_port, args.proxy_base_port, args.delay_ms / 1000, args.distinct_source_ips)
+    proxy = Proxies(args.validators, args.base_port, args.proxy_base_port, args.delay_ms / 1000, args.distinct_source_ips, args.jitter_ms/1000, args.stream_reset_percent, args.seed)
     if not args.direct:
         await proxy.start()
     processes, logs, offsets, states, observed = {}, [], {}, {}, {}
@@ -243,7 +252,7 @@ async def run(args):
               'cpu_model': next((line.split(':', 1)[1].strip() for line in Path('/proc/cpuinfo').read_text().splitlines() if line.startswith('model name')), 'not reported'),
               'network_path': 'direct loopback' if args.direct else 'encrypted TCP fault proxy',
               'round_timeout_ms':args.round_timeout_ms, 'startup_barrier_seconds': args.startup_barrier, 'distinct_loopback_source_ips': args.distinct_source_ips, 'sparse_authenticated_neighbors': args.sparse, 'validators': args.validators, 'committee_plan': plan, 'target_height': args.height,
-              'transactions_per_block': args.transactions, 'delay_ms_per_stream_read': args.delay_ms,
+              'transactions_per_block': args.transactions, 'delay_ms_per_stream_read': args.delay_ms, 'jitter_ms_per_read':args.jitter_ms, 'stream_reset_percent_per_read':args.stream_reset_percent, 'fault_seed':args.seed, 'partition_seconds':args.partition_seconds,
               'cgroup': {name: limit(name) for name in ['cpu.max', 'memory.max', 'memory.swap.max']},
               'unverified_targets': ['20 GB SSD capacity and physical SSD performance', 'large/pruned state', 'native ARM64 unless architecture reports aarch64', 'shielded payment/proof workload']}
     try:
@@ -269,11 +278,14 @@ async def run(args):
                 io_peaks[pid] = {k: max(io_peaks.get(pid, {}).get(k, 0), s[k]) for k in ['read_bytes', 'write_bytes']}
             if elapsed - last_sample >= 5:
                 last_sample = elapsed
+                store_samples=[usage(root/f'node-{i}') for i in range(args.validators)]
                 samples.append({'seconds': round(elapsed, 3), 'height_min': min((s['height'] for s in states.values()), default=0),
                                 'height_max': max((s['height'] for s in states.values()), default=0),
                                 'sampled_combined_rss_bytes': sum(s['rss'] for s in snapshots),
                                 'forwarded_transport_bytes': sum(proxy.forwarded),
-                                'store_logical_bytes': sum(usage(root / f'node-{i}')['logical_bytes'] for i in range(args.validators))})
+                                'store_logical_bytes': sum(s['logical_bytes'] for s in store_samples),
+                                'wal_bytes':sum(s['wal_bytes'] for s in store_samples),
+                                'signing_bytes':sum(s['signing_bytes'] for s in store_samples)})
                 # A host/container deadline must not erase a stalled campaign's
                 # last measured progress. Only independent final replay sets PASS.
                 result.update(in_progress=True, elapsed_seconds=round(elapsed, 3),
@@ -294,7 +306,7 @@ async def run(args):
             if partition_time is not None:
                 if elapsed - partition_time >= 2 and stable_height is None:
                     stable_height = max(s['height'] for s in states.values())
-                if elapsed - partition_time >= 7:
+                if elapsed - partition_time >= args.partition_seconds:
                     assert max(s['height'] for s in states.values()) == stable_height, 'partition obtained a quorum or bypassed proxy'
                     proxy.partitioned = False
                     faults.append({'kind': 'partition-healed', 'seconds': round(elapsed, 3), 'no_quorum_height': stable_height})
@@ -359,6 +371,8 @@ async def run(args):
                 raise RuntimeError('process campaign deadline')
         if fuzz_task:
             await fuzz_task
+        if args.stream_reset_percent:
+            assert proxy.reset_count > 0, 'requested TCP reset distribution produced no resets'
         assert completed_faults == set(pending_faults), 'requested faults were not reached'
         assert all(p.returncode == 0 for p in processes.values()), {i: p.returncode for i, p in processes.items()}
         after = resource.getrusage(resource.RUSAGE_CHILDREN)
@@ -405,7 +419,7 @@ async def run(args):
                       sampled_processes=len(io_peaks), processes_with_observed_io_counters=len(io_observed_pids),
                       sampled_block_io_bytes={'read': sum(v['read_bytes'] for v in io_peaks.values()), 'write': sum(v['write_bytes'] for v in io_peaks.values())},
                       per_destination_forwarded_transport_bytes=proxy.forwarded, forwarded_transport_bytes=sum(proxy.forwarded),
-                      observed_proxy_source_ips=sorted(proxy.observed_source_ips), proxy_connections=proxy.connections, partition_rejected_connections=proxy.rejected,
+                      stream_resets=proxy.reset_count, observed_proxy_source_ips=sorted(proxy.observed_source_ips), proxy_connections=proxy.connections, partition_rejected_connections=proxy.rejected,
                       stores=[usage(root / f'node-{i}') for i in range(args.validators)], samples=samples)
         args.report.parent.mkdir(parents=True, exist_ok=True)
         args.report.write_text(json.dumps(result, indent=2) + '\n')
@@ -422,6 +436,10 @@ def main():
     parser.add_argument('--height', type=int, default=256)
     parser.add_argument('--transactions', type=int, default=16)
     parser.add_argument('--timeout', type=int, default=600)
+    parser.add_argument('--partition-seconds', type=int, choices=range(7,301), default=7)
+    parser.add_argument('--jitter-ms', type=float, default=0)
+    parser.add_argument('--stream-reset-percent', type=float, default=0)
+    parser.add_argument('--seed', type=int, default=17)
     parser.add_argument('--delay-ms', type=float, default=0)
     parser.add_argument('--faults', default='')
     parser.add_argument('--distinct-source-ips', action='store_true')
@@ -437,6 +455,10 @@ def main():
     args = parser.parse_args()
     if not 0 <= args.transactions <= 64 or not 1 <= args.height <= 100000 or not 0 <= args.delay_ms <= 1000:
         parser.error('workload bounds exceeded')
+    if not 0 <= args.jitter_ms <= 1000 or not 0 <= args.stream_reset_percent <= 10:
+        parser.error('fault bounds exceeded')
+    if args.direct and (args.jitter_ms or args.stream_reset_percent):
+        parser.error('TCP proxy faults require proxy mode')
     if args.distinct_source_ips and (args.direct or not args.sparse):
         parser.error('distinct source IPs require the sparse proxy topology')
     if args.direct and ('partition' in args.faults or args.delay_ms):

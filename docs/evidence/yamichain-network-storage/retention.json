@@ -1,0 +1,27 @@
+{
+  "scope": "Cache-only signed proposal retention at one fixed application height; no live WAL or signing-reservation workload. Every payload recovered after reopening.",
+  "samples": [
+    {
+      "rounds": 16,
+      "state_height": 0,
+      "entries": 33,
+      "logical_bytes": 8822,
+      "retained_candidate_bytes": 8822
+    },
+    {
+      "rounds": 64,
+      "state_height": 0,
+      "entries": 129,
+      "logical_bytes": 35318,
+      "retained_candidate_bytes": 35318
+    },
+    {
+      "rounds": 80,
+      "state_height": 0,
+      "entries": 161,
+      "logical_bytes": 44150,
+      "retained_candidate_bytes": 44150
+    }
+  ],
+  "log_sha256": "c124c2bc2b89849576e03b462ab1c9ebb684d95408a096d99051307f5453702e"
+}
