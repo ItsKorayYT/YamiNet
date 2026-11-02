@@ -55,6 +55,15 @@ the root AGENTS.md workflow policy: all preexisting features, tests, fixes,
 validation evidence and commit history remain intact. No code changed, so
 application tests were not rerun for this documentation-only consolidation.
 
-PRs #14–18 can all be closed as superseded once the user approves. They and their
-branches remain preserved; no closing, deletion, merge or history rewrite is part
-of consolidation.
+## Approved cleanup
+
+With the user's approval, PRs #14–18 were closed as superseded and their five
+obsolete remote head branches were deleted. GitHub retains the closed PR records.
+Every former remote head was verified as an ancestor of this permanent branch
+before deletion; no code or PR commit was removed from its history.
+
+Nine obsolete local branch copies were also removed after checking all their
+unique commit trees against the permanent history. A verified Git bundle outside
+the checkout preserves those copies, including local-only author/committer variants.
+Only `main` and `development/yamichain` remain on the remote. Main was not modified
+or merged. Further closures or branch deletions require user authorization.
