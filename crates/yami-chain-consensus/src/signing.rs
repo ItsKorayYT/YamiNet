@@ -23,10 +23,6 @@ pub(crate) fn vote_preimage_for(genesis: &Genesis, v: &Vote) -> yami_chain::Resu
     put_vote(&mut w, v)?;
     Ok(w.0)
 }
-#[cfg(test)]
-pub(crate) fn vote_preimage(v: &Vote) -> yami_chain::Result<Vec<u8>> {
-    vote_preimage_for(&Genesis::local(), v)
-}
 pub(crate) fn proposal_preimage_for(
     genesis: &Genesis,
     p: &Proposal,

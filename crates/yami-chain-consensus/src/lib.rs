@@ -14,3 +14,8 @@ mod tests;
 
 #[cfg(test)]
 mod staking_sim;
+
+#[cfg(any(test, feature = "fuzzing"))]
+mod fuzzing;
+#[cfg(feature = "fuzzing")]
+pub use fuzzing::{fuzz_decode, fuzz_seeds};

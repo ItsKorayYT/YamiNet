@@ -60,7 +60,7 @@ fn transport(index: u8) -> Result<Keypair> {
         development_key("transport", index).to_bytes(),
     )?)
 }
-fn config(index: u8, base: u16, genesis: &Genesis) -> Result<Config> {
+fn config(index: u8, base: u16, peer_base: u16, genesis: &Genesis) -> Result<Config> {
     let mut consensus = config::ConsensusConfig::default();
     consensus.p2p.listen_addr =
         format!("/ip4/127.0.0.1/tcp/{}", base + u16::from(index)).parse()?;
@@ -72,7 +72,7 @@ fn config(index: u8, base: u16, genesis: &Genesis) -> Result<Config> {
         })
         .map(|i| {
             let peer = transport(i)?.public().to_peer_id();
-            Ok(format!("/ip4/127.0.0.1/tcp/{}/p2p/{peer}", base + u16::from(i)).parse()?)
+            Ok(format!("/ip4/127.0.0.1/tcp/{}/p2p/{peer}", peer_base + u16::from(i)).parse()?)
         })
         .collect::<Result<_>>()?;
     consensus.p2p.persistent_peers_only = true;
@@ -117,6 +117,8 @@ pub struct NodeOptions {
     pub genesis: Genesis,
     pub index: u8,
     pub base_port: u16,
+    pub peer_base_port: u16,
+    pub test_transactions: usize,
     pub target_height: u64,
     pub timeout: Duration,
     pub linger: Duration,
@@ -160,6 +162,9 @@ pub async fn run_node(options: NodeOptions) -> Result<State> {
                 .verifying_key()
                 .to_bytes(),
         )
+        || options.test_transactions > yami_chain::MAX_TXS
+        || options.peer_base_port < 1024
+        || options.peer_base_port > 65436
         || options.base_port < 1024
         || options.base_port > 65436
         || options.target_height == 0
@@ -211,7 +216,12 @@ pub async fn run_node(options: NodeOptions) -> Result<State> {
     std::fs::create_dir_all(options.directory.join("wal"))?;
     let (mut channels, handle) = EngineBuilder::new(
         Context,
-        config(options.index, options.base_port, &options.genesis)?,
+        config(
+            options.index,
+            options.base_port,
+            options.peer_base_port,
+            &options.genesis,
+        )?,
     )
     .with_default_wal(WalContext::new(
         options.directory.join("wal/consensus.wal"),
@@ -326,7 +336,7 @@ async fn app_loop(
                 if height.0 != state.height() + 1 {
                     return Err(eyre!("proposal height mismatch"));
                 }
-                let block = state.development_block()?;
+                let block = state.development_workload_block(options.test_transactions)?;
                 candidates.store_block(&block)?;
                 let proposer = Context
                     .select_proposer(&Committee::at(state.genesis(), height.0)?, height, round)

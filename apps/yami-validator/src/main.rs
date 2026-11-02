@@ -1,7 +1,7 @@
 use eyre::{eyre, Result};
 use std::{path::PathBuf, time::Duration};
 use yami_chain_consensus::{inspect_with_genesis, run_node, status_json, CrashPoint, NodeOptions};
-const HELP:&str="yami-validator 0.2 — NOT production-ready; no real money\n\nIsolated configurable-committee Malachite prototype. Public development keys; loopback only.\nAll YAMI payments and value-bearing protocol actions are disabled.\n\nUsage:\n  yami-validator run --dir PATH --index N [--base-port 28100] [--height 10] [--timeout 60]\n  yami-validator status --dir PATH\n  yami-validator inspect --dir PATH\n\nrun starts one independent process, binding only 127.0.0.1:base-port+index.\nLaunch the scheduled public development identities with separate stores.\n--committee-plan 1:4,5:7,9:5 pins sizes at activation heights; default 1:4.\nSupply the same plan for run/status/inspect; changing it refuses the existing store.\nstatus/inspect replay and authenticate durable finalized history under an exclusive\nstore lock; stop that validator before inspecting it. No wallet, public RPC or mint.\n\nOptional --linger SECONDS serves certified history at the terminal demo height.\nTest fault injection: --crash-after proposal|vote|before-commit|epoch (run only).\nThe process exits 86 once per directory at the selected durable boundary.\nPreserve the entire directory, including signing records and WAL, when restarting.\n";
+const HELP:&str="yami-validator 0.2 — NOT production-ready; no real money\n\nIsolated configurable-committee Malachite prototype. Public development keys; loopback only.\nAll YAMI payments and value-bearing protocol actions are disabled.\n\nUsage:\n  yami-validator run --dir PATH --index N [--base-port 28100] [--height 10] [--timeout 60]\n  yami-validator status --dir PATH\n  yami-validator inspect --dir PATH\n\nrun starts one independent process, binding only 127.0.0.1:base-port+index.\nLaunch the scheduled public development identities with separate stores.\n--committee-plan 1:4,5:7,9:5 pins sizes at activation heights; default 1:4.\nSupply the same plan for run/status/inspect; changing it refuses the existing store.\nstatus/inspect replay and authenticate durable finalized history under an exclusive\nstore lock; stop that validator before inspecting it. No wallet, public RPC or mint.\n\nTest workloads: --test-transactions 0..64; zero preserves the original workload.\nLoopback fault proxy: --peer-base-port PORT changes only outbound loopback ports.\nOptional --linger SECONDS serves certified history at the terminal demo height.\nTest fault injection: --crash-after proposal|vote|before-commit|epoch (run only).\nThe process exits 86 once per directory at the selected durable boundary.\nPreserve the entire directory, including signing records and WAL, when restarting.\n";
 #[tokio::main(flavor = "multi_thread", worker_threads = 2)]
 async fn main() {
     if let Err(error) = run().await {
@@ -23,6 +23,8 @@ async fn run() -> Result<()> {
     let mut index = None;
     let mut base_port = 28100;
     let mut height = 10;
+    let mut peer_base_port = None;
+    let mut test_transactions = 0;
     let mut timeout = 60;
     let mut linger = 0;
     let mut crash = None;
@@ -49,6 +51,8 @@ async fn run() -> Result<()> {
             "--index" if command == "run" => index = Some(value.parse()?),
             "--base-port" if command == "run" => base_port = value.parse()?,
             "--height" if command == "run" => height = value.parse()?,
+            "--peer-base-port" if command == "run" => peer_base_port = Some(value.parse()?),
+            "--test-transactions" if command == "run" => test_transactions = value.parse()?,
             "--timeout" if command == "run" => timeout = value.parse()?,
             "--linger" if command == "run" => linger = value.parse()?,
             "--crash-after" if command == "run" => {
@@ -75,6 +79,8 @@ async fn run() -> Result<()> {
             genesis,
             index: index.ok_or_else(|| eyre!("--index is required"))?,
             base_port,
+            peer_base_port: peer_base_port.unwrap_or(base_port),
+            test_transactions,
             target_height: height,
             timeout: Duration::from_secs(timeout),
             linger: Duration::from_secs(linger),

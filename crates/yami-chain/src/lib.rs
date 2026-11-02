@@ -422,6 +422,34 @@ impl State {
         next.tip = block.id()?;
         Ok(next)
     }
+    /// Sustained, deterministic test-naming traffic, never financial value.
+    /// Zero keeps the existing prototype workload exactly unchanged.
+    pub fn development_workload_block(&self, count: usize) -> Result<Block> {
+        if count == 0 {
+            return self.development_block();
+        }
+        if count > MAX_TXS {
+            return Err(Error::Limit);
+        }
+        let owner = development_key("registry", 0);
+        let nonce = self
+            .nonces
+            .get(&owner.verifying_key().to_bytes())
+            .copied()
+            .unwrap_or(0);
+        let height = self.height.checked_add(1).ok_or(Error::Overflow)?;
+        let transactions = (0..count)
+            .map(|i| {
+                Transaction::sign(
+                    &format!("test-load-{height}-{i}"),
+                    nonce.checked_add(i as u64).ok_or(Error::Overflow)?,
+                    height,
+                    &owner,
+                )
+            })
+            .collect::<Result<Vec<_>>>()?;
+        self.propose(transactions)
+    }
     /// Repeatable local non-financial workload, identical for every proposer/round.
     pub fn development_block(&self) -> Result<Block> {
         let txs = if self.height == 0 {

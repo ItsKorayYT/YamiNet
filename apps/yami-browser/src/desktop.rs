@@ -3247,7 +3247,7 @@ mod tests {
     /// Writes 1440×900 captures of the start page and a YLang document to
     /// `target/screenshots`. Run with `cargo test -p yami-browser -- --ignored`.
     #[test]
-    #[ignore]
+    #[ignore = "manual visual QA screenshots under target/screenshots"]
     fn capture_screenshots() {
         let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target/screenshots");
         std::fs::create_dir_all(&dir).unwrap();

@@ -1,7 +1,7 @@
 //! Controlled single-height Malachite core schedules, alongside the process demo.
 //! This harness reorders authenticated messages; timers and I/O are modeled.
 use crate::{
-    signing::{vote_preimage, DurableSigner, SignatureVerifier},
+    signing::{DurableSigner, SignatureVerifier},
     types::*,
     wire::*,
 };
@@ -23,6 +23,14 @@ struct Network {
     timers: VecDeque<(usize, m::Timeout)>,
     active: usize,
     value: Value,
+    partitioned: bool,
+}
+impl Network {
+    fn deliver(&mut self, source: usize, target: usize, input: Input<Context>) {
+        if !self.partitioned || (source < self.active / 2) == (target < self.active / 2) {
+            self.messages.push_back((target, input));
+        }
+    }
 }
 struct Node {
     metrics: Metrics,
@@ -137,7 +145,7 @@ async fn effect(
                         Input::RoundCertificate(c.clone())
                     }
                 };
-                net.messages.push_back((target, input));
+                net.deliver(node, target, input);
             }
             r.resume_with(())
         }
@@ -156,20 +164,19 @@ async fn effect(
                     SignedConsensusMsg::Vote(v) => Input::Vote(v.clone()),
                     SignedConsensusMsg::Proposal(p) => Input::Proposal(p.clone()),
                 };
-                net.messages.push_back((target, input));
+                net.deliver(node, target, input);
             }
             r.resume_with(())
         }
         Effect::RepublishVote(vote, r) => {
             for target in 0..net.active {
-                net.messages.push_back((target, Input::Vote(vote.clone())));
+                net.deliver(node, target, Input::Vote(vote.clone()));
             }
             r.resume_with(())
         }
         Effect::RepublishRoundCertificate(cert, r) => {
             for target in 0..net.active {
-                net.messages
-                    .push_back((target, Input::RoundCertificate(cert.clone())));
+                net.deliver(node, target, Input::RoundCertificate(cert.clone()));
             }
             r.resume_with(())
         }
@@ -196,7 +203,17 @@ async fn schedule_at(
     height: u64,
     active: usize,
     equivocate: bool,
+    seed: u64,
+) -> Vec<Vec<m::CommitCertificate<Context>>> {
+    schedule_faults(genesis, height, active, equivocate, seed, false).await
+}
+async fn schedule_faults(
+    genesis: Genesis,
+    height: u64,
+    active: usize,
+    equivocate: bool,
     mut seed: u64,
+    partitioned: bool,
 ) -> Vec<Vec<m::CommitCertificate<Context>>> {
     let root = std::env::temp_dir().join(format!(
         "yami-consensus-{}-{}",
@@ -261,6 +278,7 @@ async fn schedule_at(
         timers: VecDeque::new(),
         active,
         value,
+        partitioned,
     };
     // Start every node before any reordered traffic.
     while let Some((i, input)) = start.pop_front() {
@@ -269,13 +287,34 @@ async fn schedule_at(
         result.unwrap();
     }
     if equivocate {
-        assert_eq!(active, 3);
-        let address = committee.members()[3].address;
+        assert_eq!(active + 1, committee.members().len());
+        let address = committee.members()[active].address;
         let key = (0..100)
             .map(|i| development_key("consensus", i))
             .find(|k| k.verifying_key().to_bytes() == address.0 .0)
             .unwrap();
-        // Deliberately malicious fourth key bypasses the production signing guard.
+        // Isolated malicious key bypasses only the test signing guard.
+        // Competing proposals are authenticated, but a builder value for the
+        // forged block is never supplied to honest application execution.
+        for v in [value, Value(Digest([0xA5; 32]))] {
+            let p = Proposal {
+                height: Height(height),
+                round: m::Round::ZERO,
+                value: v,
+                pol_round: m::Round::Nil,
+                address,
+            };
+            let sig = key
+                .sign(&crate::signing::proposal_preimage_for(&genesis, &p).unwrap())
+                .to_bytes();
+            for i in 0..active {
+                network.deliver(
+                    active,
+                    i,
+                    Input::Proposal(m::SignedMessage::new(p.clone(), sig)),
+                );
+            }
+        }
         for i in 0..active {
             for step in [m::VoteType::Prevote, m::VoteType::Precommit] {
                 for v in [value, Value(Digest([0xA5; 32]))] {
@@ -287,10 +326,10 @@ async fn schedule_at(
                         address,
                         extension: None,
                     };
-                    let sig = key.sign(&vote_preimage(&vote).unwrap()).to_bytes();
-                    network
-                        .messages
-                        .push_back((i, Input::Vote(m::SignedMessage::new(vote, sig))));
+                    let sig = key
+                        .sign(&crate::signing::vote_preimage_for(&genesis, &vote).unwrap())
+                        .to_bytes();
+                    network.deliver(active, i, Input::Vote(m::SignedMessage::new(vote, sig)));
                 }
             }
         }
@@ -304,8 +343,15 @@ async fn schedule_at(
             let index = (seed as usize) % network.messages.len();
             network.messages.remove(index).unwrap()
         } else {
-            if nodes.iter().all(|n| !n.decisions.is_empty()) || timer_events >= 24 {
+            if nodes.iter().all(|n| !n.decisions.is_empty()) || timer_events >= 24 * active.max(1) {
                 break;
+            }
+            if network.partitioned && timer_events >= 2 * active {
+                assert!(
+                    nodes.iter().all(|n| n.decisions.is_empty()),
+                    "partition obtained a false quorum"
+                );
+                network.partitioned = false;
             }
             // Eventual certified history delivery, as provided by the live sync actor.
             if let Some(cert) = nodes
@@ -731,4 +777,42 @@ async fn transport_binding_malformed_votes_and_proposal_reservations_fail_closed
     assert!(signer.sign_proposal(conflict).await.is_err());
     drop(signer);
     std::fs::remove_dir_all(path).unwrap();
+}
+
+#[tokio::test]
+#[ignore = "manual 4/25/100-validator authenticated Malachite schedules; run in release as documented"]
+async fn scale_stress_authenticated_core() {
+    for size in [4, 25, 100] {
+        let genesis = Genesis::development_schedule(&[(1, size)]).unwrap();
+        for (name, active, malicious, partitioned) in [
+            ("reordered", size, false, false),
+            ("malicious", size - 1, true, false),
+            ("partition-recovery", size, false, true),
+        ] {
+            let start = std::time::Instant::now();
+            let result = schedule_faults(
+                genesis.clone(),
+                size as u64,
+                active,
+                malicious,
+                17,
+                partitioned,
+            )
+            .await;
+            assert!(
+                result.iter().all(|d| d.len() == 1),
+                "size={size} case={name}: {:?}",
+                result.iter().map(Vec::len).collect::<Vec<_>>()
+            );
+            assert!(result
+                .iter()
+                .flatten()
+                .all(|c| c.value_id == result[0][0].value_id));
+            println!(
+                "scale-core size={size} case={name} elapsed_ms={} authenticated_decisions={}",
+                start.elapsed().as_millis(),
+                result.len()
+            );
+        }
+    }
 }

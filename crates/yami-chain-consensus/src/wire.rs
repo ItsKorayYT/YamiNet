@@ -35,7 +35,7 @@ impl WireCodec {
         }
     }
 }
-fn encode<T: Wire>(genesis: Digest, value: &T) -> Result<Bytes> {
+pub(crate) fn encode<T: Wire>(genesis: Digest, value: &T) -> Result<Bytes> {
     let mut w = Writer::default();
     w.raw(b"YC-MSG-1");
     w.raw(&genesis.0);
@@ -46,7 +46,7 @@ fn encode<T: Wire>(genesis: Digest, value: &T) -> Result<Bytes> {
     }
     Ok(w.0.into())
 }
-fn decode<T: Wire>(genesis: Digest, bytes: Bytes) -> Result<T> {
+pub(crate) fn decode<T: Wire>(genesis: Digest, bytes: Bytes) -> Result<T> {
     let mut r = Reader::new(&bytes, MAX_MESSAGE)?;
     if r.take(8)? != b"YC-MSG-1" || r.array::<32>()? != genesis.0 || r.u8()? != T::TAG {
         return Err(Error::Encoding);

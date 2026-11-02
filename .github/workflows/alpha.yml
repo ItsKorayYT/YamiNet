@@ -98,3 +98,41 @@ jobs:
             dist/*.txt
             dist/*.png
           if-no-files-found: warn
+  chain-hardware-lab:
+    name: Chain lab (${{ matrix.os }})
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, ubuntu-24.04-arm]
+    runs-on: ${{ matrix.os }}
+    env:
+      CARGO_BUILD_JOBS: 2
+      CARGO_INCREMENTAL: 0
+      CARGO_PROFILE_RELEASE_DEBUG: 0
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@1.90.0
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Release chain checks and authenticated 4/25/100-core schedules
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist/chain-lab
+          cargo test -p yami-chain -p yami-chain-storage -p yami-chain-consensus -p yami-chain-privacy --release --locked 2>&1 | tee dist/chain-lab/tests.log
+          cargo test -p yami-chain-consensus scale_stress_authenticated_core --release --locked -- --ignored --nocapture 2>&1 | tee dist/chain-lab/core-scale.log
+          cargo build -p yami-validator --release --locked
+      - name: Sustained native chain workload within two CPU equivalents and 2 GiB
+        run: python tools/yamichain-container-lab.py --case sustain4 --output dist/chain-lab
+      - name: Retain actual native measurements and diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Chain-hardware-${{ matrix.os }}
+          path: |
+            dist/chain-lab/*.json
+            dist/chain-lab/*.log
+          if-no-files-found: warn

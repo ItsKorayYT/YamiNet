@@ -1,0 +1,24 @@
+[package]
+name = "yamichain-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2021"
+rust-version = "1.90"
+
+[package.metadata]
+cargo-fuzz = true
+
+[workspace]
+members = ["."]
+resolver = "2"
+
+[dependencies]
+libfuzzer-sys = "0.4"
+yami-chain-consensus = { path = "../crates/yami-chain-consensus", features = ["fuzzing"] }
+
+[[bin]]
+name = "wire"
+path = "fuzz_targets/wire.rs"
+test = false
+doc = false
+bench = false

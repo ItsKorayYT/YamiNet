@@ -32,3 +32,8 @@ yns.tmp
 
 /games/yami-game-api/target/
 /games/yami-game-api/Cargo.lock
+
+/fuzz/target/
+/fuzz/corpus/
+/fuzz/artifacts/
+/fuzz/coverage/

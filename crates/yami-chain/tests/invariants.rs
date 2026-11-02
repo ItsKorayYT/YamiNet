@@ -114,3 +114,25 @@ fn amount_overflow_underflow_and_privacy_types_never_decode_as_actions() {
         assert_eq!(Transaction::decode(&bytes), Err(Error::Unsupported));
     }
 }
+
+#[test]
+fn sustained_test_workload_is_deterministic_non_financial_and_bounded() {
+    let mut a = state();
+    let mut b = a.clone();
+    assert_eq!(
+        a.development_workload_block(0).unwrap(),
+        a.development_block().unwrap()
+    );
+    assert_eq!(a.development_workload_block(MAX_TXS + 1), Err(Error::Limit));
+    for _ in 0..8 {
+        let block = a.development_workload_block(16).unwrap();
+        assert_eq!(block.transactions.len(), 16);
+        assert_eq!(block, b.development_workload_block(16).unwrap());
+        a = a.execute(&block).unwrap();
+        b = b
+            .execute(&Block::decode(&block.canonical().unwrap()).unwrap())
+            .unwrap();
+    }
+    assert_eq!(a, b);
+    assert_eq!(a.names().entries().count(), 128);
+}
