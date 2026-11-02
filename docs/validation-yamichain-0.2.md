@@ -1,5 +1,8 @@
 # YamiChain 0.2 validation — 2026-11-02
 
+Historical PR #15 evidence. See [the subsequent stress/hardware results](validation-yamichain-stress.md)
+for PR #16, including native ARM64, enforced 2-GiB runs and newly discovered failures.
+
 Linux x86_64, Debian 13, Rust/Cargo 1.90.0. This is implementation evidence,
 not an audit, Windows/ARM64 attestation or production-release approval.
 

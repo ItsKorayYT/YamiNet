@@ -1,0 +1,18 @@
+{
+  "result": "PASS: no crash found in this bounded run",
+  "tool": "cargo-fuzz 0.13.2 / libFuzzer / AddressSanitizer default",
+  "toolchain": "rustc 1.92.0-nightly (fa3155a64 2025-09-30)",
+  "runs": 924772,
+  "elapsed_seconds": 61,
+  "command": "cargo +nightly-2025-10-01 fuzz run wire -- -max_total_time=60 -max_len=1048577 -rss_limit_mb=1536 -seed=17",
+  "log_sha256": "962c9ab89d2b6ebacf186146c7f3bb86a499e6a4b2ba06b2a8c9efea1ba96918",
+  "fuzz_lock_sha256": "6fd52fb93198b6056dfdaad4f40d6b1605c6393bcf0e452260513f6860c17d39",
+  "source_sha256": "d1bc94dcdd879c47154200476e375f5c5981117bb3ecd386770ac14beb94ee83",
+  "final_libfuzzer_status": "#924772\tDONE   cov: 1775 ft: 2248 corp: 330/45Kb lim: 6256 exec/s: 15160 rss: 457Mb",
+  "scope": "11 application network/WAL codecs, blocks, transactions and finalized record parsing; parser-only, no acceptance or payment path",
+  "limitations": [
+    "60-second campaign is not exhaustive or an audit",
+    "Nightly fuzz workspace has a separate locked dependency graph",
+    "Locked node graph is additionally exercised by deterministic mutations and truncations"
+  ]
+}

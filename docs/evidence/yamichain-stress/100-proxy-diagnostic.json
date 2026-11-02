@@ -1,0 +1,16 @@
+{
+  "scope": "external diagnostic snapshot of 100-validator delayed proxy failure; not a successful benchmark",
+  "cpu_max": "200000 100000\n",
+  "memory_max": "6442450944\n",
+  "memory_peak": "4441047040\n",
+  "cpu_stat": "usage_usec 1146579232\nuser_usec 979600246\nsystem_usec 166978986\nnice_usec 0\nnr_periods 5886\nnr_throttled 5143\nthrottled_usec 267241764\nnr_bursts 0\nburst_usec 0\n",
+  "memory_events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\n",
+  "loopback_rx_bytes": "25621754886\n",
+  "node_log_count": 100,
+  "logs_sample": {
+    "node-73-73.log": "NOT production-ready; no real money. Public development keys; loopback only.\n",
+    "node-28-28.log": "NOT production-ready; no real money. Public development keys; loopback only.\n",
+    "node-72-72.log": "NOT production-ready; no real money. Public development keys; loopback only.\n",
+    "node-98-98.log": "NOT production-ready; no real money. Public development keys; loopback only.\n"
+  }
+}

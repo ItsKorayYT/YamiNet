@@ -1,0 +1,241 @@
+{
+  "runtime_fix_commit": "f226924e60481f09bff230ace9b0a1725740f5a4",
+  "platform": "Linux x86_64, Debian 13, rustc 1.90.0",
+  "workspace_counts": {
+    "passed": 479,
+    "failed": 0,
+    "ignored": 10
+  },
+  "checks": [
+    {
+      "check": "fmt",
+      "command": [
+        "cargo",
+        "fmt",
+        "--all",
+        "--",
+        "--check"
+      ],
+      "exit": 0,
+      "log_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "check": "clippy",
+      "command": [
+        "cargo",
+        "clippy",
+        "--workspace",
+        "--all-targets",
+        "--locked",
+        "--",
+        "-D",
+        "warnings"
+      ],
+      "exit": 0,
+      "log_sha256": "ad3612161267f71299f6ec3f3133d9c904726401841e40f5d5d2b4ca787cbc1c"
+    },
+    {
+      "check": "test",
+      "command": [
+        "cargo",
+        "test",
+        "--workspace",
+        "--locked"
+      ],
+      "exit": 0,
+      "log_sha256": "06e3a98a31369f2dd67c28d4d921d37f44e066dfb0f268949b5154343fd8625f"
+    },
+    {
+      "check": "build",
+      "command": [
+        "cargo",
+        "build",
+        "--workspace",
+        "--locked"
+      ],
+      "exit": 0,
+      "log_sha256": "afb5e4c62a9a33554d8c9d5e5eb2459ac5468f91c2e743d623f39fa1355368a2"
+    },
+    {
+      "check": "privacy",
+      "command": [
+        "cargo",
+        "test",
+        "-p",
+        "yami-chain-privacy",
+        "--release",
+        "--locked"
+      ],
+      "exit": 0,
+      "log_sha256": "8c5c630c6acacd625072beec2c33e4262d34cad31f037ebf1718f8f3643cbd18"
+    },
+    {
+      "check": "independence",
+      "command": [
+        "python3",
+        "tools/check-chain-independence.py"
+      ],
+      "exit": 0,
+      "log_sha256": "36fdebd7e2c5488140386859a531c90ce575f097e3c5ee16faa33c74ef7b46bc"
+    }
+  ],
+  "other_checks": {
+    "locked_parser_mutations": 20000,
+    "asan_fuzzer_runs": 924772,
+    "original_ignored_passed": 7,
+    "original_ignored_blocked": 2,
+    "authenticated_core_schedules_passed": 9
+  },
+  "build_environment": {
+    "CARGO_BUILD_JOBS": "2",
+    "CARGO_INCREMENTAL": "0",
+    "CARGO_PROFILE_DEV_DEBUG": "0",
+    "CARGO_PROFILE_TEST_DEBUG": "0",
+    "native_link_setup": "Debian ALSA dev metadata from local prefix, existing system runtime"
+  },
+  "source_note": "Final production Rust changes verified; later changes are docs and Python lab assertions/reporting.",
+  "native_fixed_core_schedules": {
+    "arm64": {
+      "log_sha256": "bfafa451be299fe66f5dbaee24ccd6c43272a8f01a45a6d12f365a8ba7f0a401",
+      "cases": [
+        {
+          "validators": 4,
+          "case": "reordered",
+          "elapsed_ms": 16,
+          "authenticated_decisions": 4
+        },
+        {
+          "validators": 4,
+          "case": "malicious",
+          "elapsed_ms": 7,
+          "authenticated_decisions": 3
+        },
+        {
+          "validators": 4,
+          "case": "partition-recovery",
+          "elapsed_ms": 16,
+          "authenticated_decisions": 4
+        },
+        {
+          "validators": 25,
+          "case": "reordered",
+          "elapsed_ms": 316,
+          "authenticated_decisions": 25
+        },
+        {
+          "validators": 25,
+          "case": "malicious",
+          "elapsed_ms": 163,
+          "authenticated_decisions": 24
+        },
+        {
+          "validators": 25,
+          "case": "partition-recovery",
+          "elapsed_ms": 274,
+          "authenticated_decisions": 25
+        },
+        {
+          "validators": 100,
+          "case": "reordered",
+          "elapsed_ms": 2628,
+          "authenticated_decisions": 100
+        },
+        {
+          "validators": 100,
+          "case": "malicious",
+          "elapsed_ms": 2562,
+          "authenticated_decisions": 99
+        },
+        {
+          "validators": 100,
+          "case": "partition-recovery",
+          "elapsed_ms": 4247,
+          "authenticated_decisions": 100
+        }
+      ]
+    },
+    "x86": {
+      "log_sha256": "724ef8739bc93318c1109aba244f227348b8b2bd3d8ca6a9df0bea2aaba43dea",
+      "cases": [
+        {
+          "validators": 4,
+          "case": "reordered",
+          "elapsed_ms": 11,
+          "authenticated_decisions": 4
+        },
+        {
+          "validators": 4,
+          "case": "malicious",
+          "elapsed_ms": 10,
+          "authenticated_decisions": 3
+        },
+        {
+          "validators": 4,
+          "case": "partition-recovery",
+          "elapsed_ms": 17,
+          "authenticated_decisions": 4
+        },
+        {
+          "validators": 25,
+          "case": "reordered",
+          "elapsed_ms": 184,
+          "authenticated_decisions": 25
+        },
+        {
+          "validators": 25,
+          "case": "malicious",
+          "elapsed_ms": 158,
+          "authenticated_decisions": 24
+        },
+        {
+          "validators": 25,
+          "case": "partition-recovery",
+          "elapsed_ms": 266,
+          "authenticated_decisions": 25
+        },
+        {
+          "validators": 100,
+          "case": "reordered",
+          "elapsed_ms": 2544,
+          "authenticated_decisions": 100
+        },
+        {
+          "validators": 100,
+          "case": "malicious",
+          "elapsed_ms": 2492,
+          "authenticated_decisions": 99
+        },
+        {
+          "validators": 100,
+          "case": "partition-recovery",
+          "elapsed_ms": 4093,
+          "authenticated_decisions": 100
+        }
+      ]
+    }
+  },
+  "manual_ignored_log_sha256": {
+    "captures": "35f36224221e4abf72966161bd4fa9e64fc4bfefb1b5506e2614ce9540c37ce6",
+    "render": "fbea876a7d603eb2f3f6117579fa273bb86e26856e84629d664e9ab2aff88bd1",
+    "lan": "5a3a768045030b9bf5e9bc37efb2754ff8d23bcfd25a4f294d1887bbe3099eac"
+  },
+  "original_process_scenarios_passed": 11,
+  "fixed_ci_run": "https://github.com/ItsKorayYT/YamiNet/actions/runs/41476153728",
+  "fixed_ci_result": "all jobs passed",
+  "final_driver_smoke": {
+    "result": "PASS",
+    "driver_sha256": "e64c38fbf1bd521e441609c3b42e17a17ebda66eada4c53fec4619f754efc078",
+    "binary_sha256": "e714c422a99b53f45a3f5ae3f23ded3411aa138260107a5240ceb8d57bf6d46e",
+    "final_height": 16,
+    "last_observed_heights": {
+      "0": 16,
+      "1": 16,
+      "2": 16,
+      "3": 16
+    },
+    "in_progress": false,
+    "sampled_processes": 4,
+    "processes_with_observed_io_counters": 4,
+    "original_report_sha256": "0eb183ade263775b8fc6f5c674e78eb3b424cb477284475af9dd64cdba558a18"
+  }
+}

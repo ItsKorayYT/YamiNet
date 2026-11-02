@@ -158,7 +158,7 @@ async def run(args):
     peak = [0] * args.validators
     io_peaks = {}
     combined = 0
-    process_io_available = False
+    io_observed_pids = set()
     samples, faults = [], []
     network_before = network_bytes()
     before = resource.getrusage(resource.RUSAGE_CHILDREN)
@@ -253,11 +253,12 @@ async def run(args):
                 if all(s['height'] == args.height for s in states.values()) and all_target_time is None:
                     all_target_time = elapsed
             snapshots = [proc_sample(processes[i].pid) for i in range(args.validators)]
-            process_io_available = process_io_available or any(s['io_available'] for s in snapshots)
             combined = max(combined, sum(s['rss'] for s in snapshots))
             peak = [max(old, s['peak']) for old, s in zip(peak, snapshots)]
             for i, s in enumerate(snapshots):
                 pid = processes[i].pid
+                if s['io_available']:
+                    io_observed_pids.add(pid)
                 io_peaks[pid] = {k: max(io_peaks.get(pid, {}).get(k, 0), s[k]) for k in ['read_bytes', 'write_bytes']}
             if elapsed - last_sample >= 5:
                 last_sample = elapsed
@@ -319,6 +320,10 @@ async def run(args):
                 fuzz_task = asyncio.create_task(socket_fuzz())
                 completed_faults.add('socket-fuzz')
             if crash_time is not None and elapsed - crash_time >= 2:
+                if filler:
+                    assert processes[0].poll() is not None and processes[0].returncode != 0, 'full-disk node did not fail closed before restart'
+                    faults.append({'kind': 'ENOSPC-node-failed-closed', 'exit_code': processes[0].returncode,
+                                   'last_finalized_height': states[0]['height']})
                 if processes[0].poll() is None:
                     processes[0].kill()
                 processes[0].wait()
@@ -384,10 +389,13 @@ async def run(args):
         for _, log in logs:
             log.close()
         net_after = network_bytes()
-        result.update(cgroup_memory_peak_bytes=limit('memory.peak'), cgroup_memory_events=limit('memory.events'), cgroup_cpu_stat=limit('cpu.stat'),
+        result.update(in_progress=False, elapsed_seconds=round(time.monotonic() - started, 3),
+                      last_observed_heights={str(i): s['height'] for i, s in states.items()},
+                      cgroup_memory_peak_bytes=limit('memory.peak'), cgroup_memory_events=limit('memory.events'), cgroup_cpu_stat=limit('cpu.stat'),
                       namespace_loopback_bytes_including_proxy_hops_and_TCP_overhead={k: net_after[k] - network_before[k] for k in net_after},
                       faults=faults, sampled_per_validator_peak_rss_bytes=peak, sampled_combined_peak_rss_bytes=combined,
-                      per_process_block_io_counters_available=process_io_available,
+                      per_process_block_io_counters_available=all(pid in io_observed_pids for pid in io_peaks),
+                      sampled_processes=len(io_peaks), processes_with_observed_io_counters=len(io_observed_pids),
                       sampled_block_io_bytes={'read': sum(v['read_bytes'] for v in io_peaks.values()), 'write': sum(v['write_bytes'] for v in io_peaks.values())},
                       per_destination_forwarded_transport_bytes=proxy.forwarded, forwarded_transport_bytes=sum(proxy.forwarded),
                       proxy_connections=proxy.connections, partition_rejected_connections=proxy.rejected,

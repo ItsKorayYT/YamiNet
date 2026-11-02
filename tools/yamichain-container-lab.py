@@ -81,7 +81,7 @@ def main():
         raise SystemExit(process.returncode)
     except subprocess.TimeoutExpired:
         evidence = json.loads(report.read_text()) if report.exists() else {}
-        evidence.update(result='FAIL', case=args.case,
+        evidence.update(result='FAIL', in_progress=False, case=args.case,
             failure='container campaign deadline; no successful measurement claimed')
         report.write_text(json.dumps(evidence, indent=2) + '\n')
         raise SystemExit(1)

@@ -1,0 +1,95 @@
+{
+  "checked_at": "2026-11-02T15:59:15.113143+00:00",
+  "results": [
+    {
+      "crate": "hickory-proto",
+      "requested_series": "0.25.",
+      "non_yanked_matching_versions": [
+        "0.25.2",
+        "0.25.1",
+        "0.25.0"
+      ],
+      "source": "https://crates.io/api/v1/crates/hickory-proto"
+    },
+    {
+      "crate": "hickory-resolver",
+      "requested_series": "0.25.",
+      "non_yanked_matching_versions": [
+        "0.25.2",
+        "0.25.1",
+        "0.25.0"
+      ],
+      "source": "https://crates.io/api/v1/crates/hickory-resolver"
+    },
+    {
+      "crate": "crypto-bigint",
+      "requested_series": "0.5.",
+      "non_yanked_matching_versions": [
+        "0.5.5",
+        "0.5.4",
+        "0.5.3",
+        "0.5.2",
+        "0.5.1",
+        "0.5.0"
+      ],
+      "source": "https://crates.io/api/v1/crates/crypto-bigint"
+    },
+    {
+      "crate": "libp2p",
+      "requested_series": "0.56.",
+      "non_yanked_matching_versions": [
+        "0.56.0"
+      ],
+      "source": "https://crates.io/api/v1/crates/libp2p"
+    },
+    {
+      "crate": "libp2p-identity",
+      "requested_series": "0.2.",
+      "non_yanked_matching_versions": [
+        "0.2.14",
+        "0.2.13",
+        "0.2.12",
+        "0.2.11",
+        "0.2.10",
+        "0.2.9",
+        "0.2.8",
+        "0.2.7",
+        "0.2.6",
+        "0.2.5",
+        "0.2.4",
+        "0.2.3",
+        "0.2.2",
+        "0.2.1",
+        "0.2.0"
+      ],
+      "source": "https://crates.io/api/v1/crates/libp2p-identity"
+    },
+    {
+      "crate": "libp2p-dns",
+      "requested_series": "0.44.",
+      "non_yanked_matching_versions": [
+        "0.44.0"
+      ],
+      "source": "https://crates.io/api/v1/crates/libp2p-dns"
+    },
+    {
+      "crate": "elliptic-curve",
+      "requested_series": "0.13.",
+      "non_yanked_matching_versions": [
+        "0.13.8",
+        "0.13.7",
+        "0.13.6"
+      ],
+      "source": "https://crates.io/api/v1/crates/elliptic-curve"
+    },
+    {
+      "crate": "arc-malachitebft-app-channel",
+      "requested_series": "0.8.",
+      "non_yanked_matching_versions": [
+        "0.8.2",
+        "0.8.1"
+      ],
+      "source": "https://crates.io/api/v1/crates/arc-malachitebft-app-channel"
+    }
+  ]
+}
