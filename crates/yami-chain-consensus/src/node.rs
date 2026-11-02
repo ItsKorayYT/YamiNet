@@ -360,9 +360,7 @@ async fn app_loop(
                 let mut result = None;
                 if part.sequence == 0 {
                     if let StreamContent::Data(part) = part.content {
-                        if part.round == active_round
-                            && candidates.admit(&state, active_round, &part)?
-                        {
+                        if candidates.admit(&state, active_round, &part)? {
                             result = Some(proposal(&part)?);
                         }
                     }

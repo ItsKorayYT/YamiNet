@@ -1,5 +1,5 @@
 //! Disk-backed payload retention. No global candidate quota can stop consensus.
-//! Only the active round's authenticated proposer may allocate one payload. All
+//! Each authenticated proposer/round in Malachite's bounded lookahead may allocate one payload. All
 //! acknowledged values remain available until finality, including across restart.
 use crate::{signing::proposal_preimage_for, types::*, wire::WireCodec};
 use eyre::{eyre, Result};
@@ -115,7 +115,16 @@ impl Candidates {
         Self::authenticated(state, part) && state.execute(&part.block).is_ok()
     }
     pub fn admit(&mut self, state: &State, active_round: m::Round, part: &Part) -> Result<bool> {
-        if part.round != active_round || part.round.is_nil() || part.height.0 != state.height() + 1
+        let current = active_round.as_u32().unwrap_or(0);
+        let Some(round) = part.round.as_u32() else {
+            return Ok(false);
+        };
+        // A proposal/part may arrive before this node starts its round. Match
+        // Malachite's existing future-round bound; exact-round filtering loses
+        // honest builders after delays/partitions and can prevent recovery.
+        if round < current
+            || round > current.saturating_add(malachite_core::MAX_FUTURE_ROUND_LOOKAHEAD)
+            || part.height.0 != state.height() + 1
         {
             return Ok(false);
         }
@@ -221,7 +230,11 @@ mod tests {
         for n in 0..256 {
             let conflicting = signed(&state, round, &format!("test-flood-{n}"));
             assert!(!c.admit(&state, round, &conflicting).unwrap());
-            let future = signed(&state, m::Round::new(n + 1), "test-future");
+            let future = signed(
+                &state,
+                m::Round::new(n + 1 + malachite_core::MAX_FUTURE_ROUND_LOOKAHEAD),
+                "test-future",
+            );
             assert!(!c.admit(&state, round, &future).unwrap());
         }
         // One accepted payload, its proposal and one complete evidence pair.
@@ -230,7 +243,7 @@ mod tests {
         forged.signature[0] ^= 1;
         assert!(!c.admit(&state, round, &forged).unwrap());
         let honest = signed(&state, m::Round::new(1), "test-honest");
-        assert!(c.admit(&state, honest.round, &honest).unwrap());
+        assert!(c.admit(&state, round, &honest).unwrap()); // arrives before StartedRound(1)
         drop(c);
         let c = Candidates::new(Arc::new(Journal::open(&path).unwrap()));
         assert_eq!(c.recover(&state, round).unwrap(), Some(original.clone()));
@@ -364,6 +377,13 @@ mod compact_storage_tests {
             candidates.recover(&state, current.round).unwrap(),
             Some(current)
         );
+        let edge = make(m::Round::new(malachite_core::MAX_FUTURE_ROUND_LOOKAHEAD));
+        assert!(candidates.admit(&state, m::Round::Nil, &edge).unwrap());
+        assert_eq!(candidates.recover(&state, edge.round).unwrap(), Some(edge));
+        let beyond = make(m::Round::new(
+            malachite_core::MAX_FUTURE_ROUND_LOOKAHEAD + 1,
+        ));
+        assert!(!candidates.admit(&state, m::Round::ZERO, &beyond).unwrap());
         drop(candidates);
         drop(journal);
         std::fs::remove_dir_all(path).unwrap();

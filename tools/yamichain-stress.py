@@ -152,7 +152,8 @@ async def run(args):
     binary = args.binary.resolve()
     plan = args.committee_plan or f'1:{args.validators}'
     proxy = Proxies(args.validators, args.base_port, args.proxy_base_port, args.delay_ms / 1000)
-    await proxy.start()
+    if not args.direct:
+        await proxy.start()
     processes, logs, offsets, states, observed = {}, [], {}, {}, {}
     peak = [0] * args.validators
     io_peaks = {}
@@ -170,16 +171,19 @@ async def run(args):
     reserved = {}
     completed_faults = set()
     fuzz_task = None
+    shutdown_requested = False
+    history_linger = 60 if args.validators >= 25 else 12
 
     def launch(index):
+        states.pop(index, None)
         log_path = root / f'node-{index}-{len(logs)}.log'
         log = open(log_path, 'w', encoding='utf-8')
         logs.append((log_path, log))
         processes[index] = subprocess.Popen([
             str(binary), 'run', '--dir', str(root / f'node-{index}'), '--index', str(index),
             '--committee-plan', plan, '--base-port', str(args.base_port),
-            '--peer-base-port', str(args.proxy_base_port + 100 * proxy.group(index)),
-            '--height', str(args.height), '--timeout', str(args.timeout), '--linger', '12',
+            '--peer-base-port', str(args.base_port if args.direct else args.proxy_base_port + 100 * proxy.group(index)),
+            '--height', str(args.height), '--timeout', str(args.timeout), '--linger', str(history_linger),
             '--test-transactions', str(args.transactions)], stdout=log, stderr=subprocess.STDOUT)
         offsets[log_path] = (index, 0, '')
 
@@ -224,12 +228,13 @@ async def run(args):
         await asyncio.gather(*(attempt(i) for i in range(64)))
         faults.append({'kind': 'malformed-TCP-probes-completed', 'attempts': 64, 'bytes_drained_to_sockets': sent})
 
-    result = {'result': 'FAIL', 'scope': 'real Malachite processes, public development keys, loopback encrypted TCP proxy; non-financial naming workload',
+    result = {'result': 'FAIL', 'scope': 'real Malachite processes, public development keys, loopback encrypted TCP; non-financial naming workload',
               'generated_at': datetime.now(timezone.utc).isoformat(), 'architecture': platform.machine(),
               'binary_sha256': hashlib.sha256(binary.read_bytes()).hexdigest(),
               'driver_sha256': hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
               'visible_host_logical_cpus': os.cpu_count(),
               'cpu_model': next((line.split(':', 1)[1].strip() for line in Path('/proc/cpuinfo').read_text().splitlines() if line.startswith('model name')), 'not reported'),
+              'network_path': 'direct loopback' if args.direct else 'encrypted TCP fault proxy',
               'validators': args.validators, 'committee_plan': plan, 'target_height': args.height,
               'transactions_per_block': args.transactions, 'delay_ms_per_stream_read': args.delay_ms,
               'cgroup': {name: limit(name) for name in ['cpu.max', 'memory.max', 'memory.swap.max']},
@@ -261,8 +266,19 @@ async def run(args):
                                 'sampled_combined_rss_bytes': sum(s['rss'] for s in snapshots),
                                 'forwarded_transport_bytes': sum(proxy.forwarded),
                                 'store_logical_bytes': sum(usage(root / f'node-{i}')['logical_bytes'] for i in range(args.validators))})
+                # A host/container deadline must not erase a stalled campaign's
+                # last measured progress. Only independent final replay sets PASS.
+                result.update(in_progress=True, elapsed_seconds=round(elapsed, 3),
+                              last_observed_heights={str(i): s['height'] for i, s in states.items()},
+                              sampled_combined_peak_rss_bytes=combined,
+                              sampled_per_validator_peak_rss_bytes=peak,
+                              cgroup_memory_peak_bytes=limit('memory.peak'),
+                              cgroup_cpu_stat=limit('cpu.stat'), samples=samples, faults=faults)
+                args.report.parent.mkdir(parents=True, exist_ok=True)
+                args.report.write_text(json.dumps(result, indent=2) + '\n')
             ready = len(states) == args.validators and min(s['height'] for s in states.values()) >= args.trigger_height
             if 'partition' in pending_faults and 'partition' not in completed_faults and ready:
+                assert max(s['height'] for s in states.values()) < args.height, 'partition started after target; no halt claim is valid'
                 proxy.partition()
                 partition_time = elapsed
                 completed_faults.add('partition')
@@ -314,6 +330,17 @@ async def run(args):
                 launch(0)
                 faults.append({'kind': 'restart-preserving-entire-store', 'seconds': round(elapsed, 3)})
                 crash_time = None
+            if (not shutdown_requested and len(states) == args.validators
+                    and all(s['height'] == args.height for s in states.values())
+                    and completed_faults == set(pending_faults)
+                    and (fuzz_task is None or fuzz_task.done())):
+                # All targets were observed only after each node's authenticated
+                # durable finalization. Graceful shutdown keeps history providers
+                # alive for stragglers and never counts a partial height as success.
+                for process in processes.values():
+                    if process.poll() is None:
+                        process.send_signal(signal.SIGINT)
+                shutdown_requested = True
             if all(p.poll() is not None for p in processes.values()):
                 break
             if elapsed > args.timeout + 30:
@@ -331,7 +358,8 @@ async def run(args):
         expected_names = args.height * args.transactions if args.transactions else 1
         assert all(s['test_tlds'] == expected_names for s in replayed)
         own = resource.getrusage(resource.RUSAGE_SELF)
-        result.update(result='PASS', elapsed_seconds_including_12_second_linger=round(elapsed, 3),
+        result.update(result='PASS', in_progress=False, elapsed_seconds_including_serving_and_shutdown=round(elapsed, 3),
+                      maximum_history_linger_seconds=history_linger,
                       validator_cpu_seconds=round((after.ru_utime + after.ru_stime) - (before.ru_utime + before.ru_stime), 3),
                       proxy_and_monitor_cpu_seconds=round((own.ru_utime + own.ru_stime) - (own_before.ru_utime + own_before.ru_stime), 3),
                       sequential_authenticated_replay_seconds=round(time.monotonic() - inspect_started, 3),
@@ -342,6 +370,11 @@ async def run(args):
     except Exception as error:
         result['failure'] = str(error)
         result['bounded_log_tails'] = {str(p.name): p.read_text(encoding='utf-8')[-2000:] for p, _ in logs[:8]}
+        result['last_observed_heights'] = {str(i): s['height'] for i, s in states.items()}
+        result['samples'] = samples
+        result['faults'] = faults
+        args.report.parent.mkdir(parents=True, exist_ok=True)
+        args.report.write_text(json.dumps(result, indent=2) + '\n')
     finally:
         for p in processes.values():
             if p.poll() is None:
@@ -376,6 +409,7 @@ def main():
     parser.add_argument('--timeout', type=int, default=600)
     parser.add_argument('--delay-ms', type=float, default=0)
     parser.add_argument('--faults', default='')
+    parser.add_argument('--direct', action='store_true')
     parser.add_argument('--trigger-height', type=int, default=4)
     parser.add_argument('--committee-plan')
     parser.add_argument('--base-port', type=int, default=20000)
@@ -383,6 +417,8 @@ def main():
     args = parser.parse_args()
     if not 0 <= args.transactions <= 64 or not 1 <= args.height <= 100000 or not 0 <= args.delay_ms <= 1000:
         parser.error('workload bounds exceeded')
+    if args.direct and ('partition' in args.faults or args.delay_ms):
+        parser.error('direct mode cannot claim a proxy partition or delay')
     if set(filter(None, args.faults.split(','))) - {'partition', 'crash', 'disk-full', 'socket-fuzz'}:
         parser.error('unknown fault')
     raise SystemExit(0 if asyncio.run(run(args)) else 1)

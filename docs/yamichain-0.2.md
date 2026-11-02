@@ -7,12 +7,12 @@ Browser, hosting, identity, DHT, games and YNS remain chain-independent.
 
 | Milestone | Implemented | Unfinished / next gate |
 | --- | --- | --- |
-| 1. Security | Authenticated proposal parts; one durable payload per active round; bounded equivocation-pair retention; on-demand payload reads; no 64-value fatal quota; exact round recovery; signer reservations retained; regular-file/dangling-symlink/name checks; streaming history replay. | Public-network flood/soak review, disk pressure during prolonged stalls, Malachite audit and dependency remediation. |
+| 1. Security | Authenticated proposal parts; one durable payload per authenticated proposer/round within Malachite’s existing lookahead; bounded equivocation-pair retention; on-demand payload reads; no 64-value fatal quota; exact round recovery; signer reservations retained; regular-file/dangling-symlink/name checks; streaming history replay. | Public-network flood/soak review, disk pressure during prolonged stalls, Malachite audit and dependency remediation. |
 | 2. Committees | Genesis-authenticated activation schedule; 1–100 members/set, up to 64 scheduled epochs; explicit positive powers with bounded total; height-specific Malachite sets, signing domains, certificate thresholds, sync and replay; transport-key binding; crash injection at epoch boundary. | Stake-selected membership, unbiased randomness, elections, live transition authorization/governance and independent transition review. |
 | 3. PoS foundations | `staking_sim.rs`, compiled only under `cfg(test)`: signed registration with separate-key possession, nonce authorization, fixture backing, self-stake eligibility, delegation, bounded commissions/reward reserve, unbonding, jail/slash from genuine historical double-vote signatures, evidence replay protection, exact accounting. | No production accounting or economic parameters are approved. Review share/rounding/dust economics, evidence policy, real unbond horizon, elections and shielded backing. |
 | 4. Privacy | [Pinned source/licensing comparison](specs/yamichain/v0.2/privacy-review.md) of current FCMP++/CARROT, Spark V2 and Orchard; no backend selected. | Full construction/dependency/audit review and measured end-to-end workloads; explicit backend/design approval. |
 | 5. Payments | Isolated existing intents; release/debug rejection of every proof version; all unknown financial action tags refused; fee/burn conservation only in hermetic models. | Real proofs, wallets/keys/recovery and shielded staking/withdrawals require approved design, separate authorization and independent review. |
-| 6. Resources/pruning | Locally authenticated checkpoints with replay budget and committed next committee; bounded per-record/per-request reads; prune only reproducible finalized candidate payloads; resource measurement driver. | Snapshot bootstrap and finalized-history/evidence/spent-tag pruning remain disabled. Native ARM64, 2-GB pressure and large-state/approximately-5-GB pruned-state validation remain open. |
+| 6. Resources/pruning | Locally authenticated checkpoints with replay budget and committed next committee; bounded per-record/per-request reads; prune only reproducible finalized candidate payloads; resource measurement driver. | Snapshot bootstrap and finalized-history/evidence/spent-tag pruning remain disabled. Native ARM64 and x86_64 sustained small-state workloads passed with enforced two-CPU/2-GiB limits; large-state/approximately-5-GB pruned-state validation remains open. |
 
 ## Run the non-financial rehearsal
 
@@ -54,8 +54,9 @@ further blocks; its bounded deadline is separate from the consensus deadline.
 ## Candidate admission and storage limits
 
 Parts bind the complete block ID, height, round, valid round, proposer, genesis
-and height-specific committee using an Ed25519 proposal signature. Only the active
-round may allocate. A second authenticated conflicting proposal is preserved as
+and height-specific committee using an Ed25519 proposal signature. Admission accepts
+the current round through Malachite’s existing ten-round lookahead, including before
+`StartedRound`; older/out-of-window/undefined rounds cannot allocate. A second authenticated conflicting proposal is preserved as
 one evidence pair, then further distinct payloads for that round are rejected
 without repeated execution or signature checks. Exact duplicates reuse previously
 authenticated data. Admission failure replies `None`; storage corruption/I/O failure
@@ -78,5 +79,6 @@ snapshot/pruner must retain exact spent-tag uniqueness and required history.
 Windows directory-fsync/power-loss durability remains unverified; the filesystem
 and safety records must not be modified concurrently by an attacker or rolled back.
 
-See [validation evidence](validation-yamichain-0.2.md) for actual checks, failures,
+See [stress and hardware evidence](validation-yamichain-stress.md) and
+[earlier validation evidence](validation-yamichain-0.2.md) for actual checks, failures,
 measurements and unresolved advisories. No production-readiness claim is made.

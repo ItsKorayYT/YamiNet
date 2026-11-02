@@ -11,7 +11,8 @@ CASES = {
     'sustain4': dict(nodes=4, height=256, tx=16, timeout=600, memory='2g'),
     'fault4': dict(nodes=4, height=48, tx=8, timeout=240, memory='2g', faults='partition,crash,socket-fuzz', delay=25),
     'stress25': dict(nodes=25, height=24, tx=4, timeout=300, memory='2g', faults='partition,crash', delay=25),
-    'stress100': dict(nodes=100, height=8, tx=2, timeout=300, memory='6g'),
+    'stress100': dict(nodes=100, height=8, tx=2, timeout=300, memory='6g', direct=True),
+    'stress100-fault': dict(nodes=100, height=16, tx=2, timeout=300, memory='6g', faults='crash', direct=True),
     'transitions': dict(nodes=25, height=64, tx=4, timeout=600, memory='2g', plan=','.join(f'{h}:{25 if n % 2 == 0 else 19}' for n, h in enumerate(range(1, 65, 4)))),
     'disk-full': dict(nodes=4, height=48, tx=8, timeout=240, memory='2g', faults='disk-full'),
 }
@@ -56,6 +57,8 @@ def main():
                 '--directory', f'/results/{args.case}', '--report', f'/results/{args.case}.json',
                 '--validators', str(case['nodes']), '--height', str(case['height']),
                 '--transactions', str(case['tx']), '--timeout', str(case['timeout'])]
+    if case.get('direct'):
+        command += ['--direct']
     if case.get('faults'):
         command += ['--faults', case['faults']]
     if case.get('delay'):
@@ -77,8 +80,10 @@ def main():
                 'container_limits_requested': {'cpus': 2, 'memory': case['memory'], 'swap': False}}, indent=2) + '\n')
         raise SystemExit(process.returncode)
     except subprocess.TimeoutExpired:
-        report.write_text(json.dumps({'result': 'FAIL', 'case': args.case,
-            'failure': 'container campaign deadline; no successful measurement claimed'}, indent=2) + '\n')
+        evidence = json.loads(report.read_text()) if report.exists() else {}
+        evidence.update(result='FAIL', case=args.case,
+            failure='container campaign deadline; no successful measurement claimed')
+        report.write_text(json.dumps(evidence, indent=2) + '\n')
         raise SystemExit(1)
     finally:
         subprocess.run(cli + ['rm', '--force', name], env=environment, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)
