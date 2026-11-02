@@ -12,3 +12,5 @@ pub use wire::{decode_certificate, encode_certificate, verify_record};
 #[cfg(test)]
 mod tests;
 
+#[cfg(test)]
+mod staking_sim;

@@ -87,20 +87,22 @@ mod tests {
     use std::collections::BTreeSet;
 
     // Independent transparent mathematical model; never a consensus verifier.
-    fn conserve(inputs: &[u128], outputs: &[u128], fee: u128) -> bool {
+    fn conserve(inputs: &[u128], outputs: &[u128], fee: u128, burn: u128) -> bool {
         let input = inputs.iter().try_fold(0_u128, |a, b| a.checked_add(*b));
-        let output = outputs.iter().try_fold(fee, |a, b| a.checked_add(*b));
+        let output = fee
+            .checked_add(burn)
+            .and_then(|total| outputs.iter().try_fold(total, |a, b| a.checked_add(*b)));
         input.is_some() && input == output
     }
 
     #[test]
     fn bounded_conservation_and_unique_consumption_model() {
         for value in 0..1024_u128 {
-            assert!(conserve(&[value, 7], &[value, 5], 2));
-            assert!(!conserve(&[value, 7], &[value, 6], 2));
+            assert!(conserve(&[value, 7], &[value, 4], 2, 1));
+            assert!(!conserve(&[value, 7], &[value, 5], 2, 1));
         }
-        assert!(!conserve(&[u128::MAX, 1], &[0], 0));
-        assert!(!conserve(&[0], &[u128::MAX], 1));
+        assert!(!conserve(&[u128::MAX, 1], &[0], 0, 0));
+        assert!(!conserve(&[0], &[u128::MAX], 1, 0));
         let mut spent = BTreeSet::new();
         assert!(spent.insert([1_u8; 32]));
         assert!(!spent.insert([1_u8; 32]));

@@ -4,8 +4,8 @@ use yami_chain_privacy::*;
 fn every_proof_version_and_public_value_action_fails_closed() {
     let mut intent = ConfidentialTransfer {
         binding: BindingContext {
-            chain_id: "yamichain-local-0.1".into(),
-            protocol_version: 1,
+            chain_id: "yamichain-local-0.2".into(),
+            protocol_version: 2,
             intent_hash: [0; 32],
             finalized_anchor: [0; 32],
             expiry_height: 1,
@@ -30,5 +30,9 @@ fn every_proof_version_and_public_value_action_fails_closed() {
         module: 1,
         public_effect: vec![0; 32],
     };
-    assert!(PrivacyVerifier.verify_protocol_action(&action).is_err());
+    let mut action = action;
+    for version in 0..=u16::MAX {
+        action.transfer.proof.version = version;
+        assert!(PrivacyVerifier.verify_protocol_action(&action).is_err());
+    }
 }
