@@ -1,0 +1,63 @@
+{
+  "trace_sha256": "7b0c4591c6b9930bc728c6ffe1de871b1091e45def81ef4a82d61db059b2ba9b",
+  "trace_bytes": 100114,
+  "scope": "Diagnostic with concurrent workspace checks; not an isolated resource measurement.",
+  "trace_excerpt": [
+    "2026-11-02T17:36:51.551036Z  INFO consensus{height=0 round=-1}: arc_malachitebft_engine::consensus: Consensus has started",
+    "2026-11-02T17:36:51.768844Z DEBUG consensus{height=1 round=0}: arc_malachitebft_engine::consensus: Valid validator proof received peer_id=12D3KooWBcdJK5S5nqURtbqwDu4Yx2vgT9AkieBBXbXaFxBTT1JD public_key=4245d659b40e661c9b7eda2244eb34df82a108586d7b33600f9b53a5a1c2ac0d",
+    "2026-11-02T17:36:52.418556Z DEBUG consensus{height=1 round=0}: arc_malachitebft_engine::consensus: Valid validator proof received peer_id=12D3KooWCAFjiSf7Fe13eifmKrSpNbPsfD4V9mW4cKQRu8H2trBu public_key=751d8180b20facc1eaa549c01c2c1160773824eeee51498657e0ee18a72835b1",
+    "2026-11-02T17:36:54.257573Z  INFO consensus{height=1 round=0}: arc_malachitebft_engine::consensus: Timeout elapsed step=Rebroadcast",
+    "2026-11-02T17:36:56.374582Z  INFO consensus{height=1 round=0}: arc_malachitebft_engine::consensus: Timeout elapsed step=Rebroadcast",
+    "2026-11-02T17:36:58.414649Z  INFO consensus{height=1 round=0}: arc_malachitebft_engine::consensus: Timeout elapsed step=Rebroadcast",
+    "2026-11-02T17:36:59.342179Z DEBUG consensus{height=1 round=0}: arc_malachitebft_engine::consensus: Valid validator proof received peer_id=12D3KooWA52FTvoSR5vtqsvHSDDwdP54CKtcLe3V6NnoMAem8wBz public_key=d3d3c08e28f47d4da8be6a063194c69b0312bac66068df665472023bffacff4a",
+    "2026-11-02T17:37:00.910118Z  INFO consensus{height=1 round=0}: arc_malachitebft_engine::consensus: Timeout elapsed step=Prevote",
+    "2026-11-02T17:37:04.667400Z  INFO consensus{height=1 round=0}: arc_malachitebft_engine::consensus: Timeout elapsed step=Rebroadcast",
+    "2026-11-02T17:37:05.943042Z DEBUG consensus{height=1 round=0}: arc_malachitebft_engine::consensus: Valid validator proof received peer_id=12D3KooWA358UV4i4V3xYzD9QTqwi7zpS6yQqLBgPzKTwEH6RSQg public_key=faa5573d2da619e40b1bcebff127caf2021076bf333379e3e9dd534cb4ad7c27",
+    "2026-11-02T17:37:06.838278Z  INFO consensus{height=1 round=0}: arc_malachitebft_engine::consensus: Timeout elapsed step=Rebroadcast",
+    "2026-11-02T17:37:06.838350Z  INFO consensus{height=1 round=0}: arc_malachitebft_engine::consensus: Timeout elapsed step=Precommit",
+    "2026-11-02T17:37:12.950987Z  INFO consensus{height=1 round=1}: arc_malachitebft_engine::consensus: Timeout elapsed step=Rebroadcast",
+    "2026-11-02T17:37:16.111349Z  INFO consensus{height=1 round=1}: arc_malachitebft_engine::consensus: Timeout elapsed step=Rebroadcast",
+    "2026-11-02T17:37:19.364987Z  INFO consensus{height=1 round=1}: arc_malachitebft_engine::consensus: Timeout elapsed step=Rebroadcast",
+    "2026-11-02T17:37:19.365166Z  INFO consensus{height=1 round=1}: arc_malachitebft_engine::consensus: Timeout elapsed step=Prevote",
+    "2026-11-02T17:37:23.965572Z  INFO consensus{height=1 round=1}: arc_malachitebft_engine::consensus: Timeout elapsed step=Rebroadcast",
+    "2026-11-02T17:37:27.126667Z  INFO consensus{height=1 round=1}: arc_malachitebft_engine::consensus: Timeout elapsed step=Rebroadcast",
+    "2026-11-02T17:37:30.457520Z  INFO consensus{height=1 round=1}: arc_malachitebft_engine::consensus: Timeout elapsed step=Rebroadcast",
+    "2026-11-02T17:37:30.646677Z  INFO consensus{height=1 round=1}: arc_malachitebft_engine::consensus: Timeout elapsed step=Precommit"
+  ],
+  "oom_events": [
+    {
+      "status": "oom",
+      "id": "0b88a9c0d27fd32c0fb62663d07adae1007513f9d84dc50a0cd947fa0d992e81",
+      "from": "python:3.13-slim-trixie@sha256:ae14d4ce8771606477a81446e7ef429edd6762305fc50c84507c1041fa8285d1",
+      "Type": "container",
+      "Action": "oom",
+      "Actor": {
+        "ID": "0b88a9c0d27fd32c0fb62663d07adae1007513f9d84dc50a0cd947fa0d992e81",
+        "Attributes": {
+          "image": "python:3.13-slim-trixie@sha256:ae14d4ce8771606477a81446e7ef429edd6762305fc50c84507c1041fa8285d1",
+          "name": "yamichain-sparse100-67747"
+        }
+      },
+      "scope": "local",
+      "time": 1793640402,
+      "timeNano": 1793640402532940398
+    },
+    {
+      "status": "oom",
+      "id": "9f521e662d03eed5ccb7928912d6f22b8839d2d79849bacfbe8d84b938ec528b",
+      "from": "python:3.13-slim-trixie@sha256:ae14d4ce8771606477a81446e7ef429edd6762305fc50c84507c1041fa8285d1",
+      "Type": "container",
+      "Action": "oom",
+      "Actor": {
+        "ID": "9f521e662d03eed5ccb7928912d6f22b8839d2d79849bacfbe8d84b938ec528b",
+        "Attributes": {
+          "image": "python:3.13-slim-trixie@sha256:ae14d4ce8771606477a81446e7ef429edd6762305fc50c84507c1041fa8285d1",
+          "name": "yamichain-distinct100-78794"
+        }
+      },
+      "scope": "local",
+      "time": 1793641953,
+      "timeNano": 1793641953248661625
+    }
+  ]
+}

@@ -60,10 +60,12 @@ def usage(path):
 
 
 class Proxies:
-    def __init__(self, count, base, proxy_base, delay):
+    def __init__(self, count, base, proxy_base, delay, distinct=False):
         self.count, self.base, self.proxy_base, self.delay = count, base, proxy_base, delay
+        self.distinct = distinct
         self.partitioned = False
         self.forwarded = [0] * count
+        self.observed_source_ips = set()
         self.connections = 0
         self.rejected = 0
         self.servers = []
@@ -74,8 +76,10 @@ class Proxies:
         return int(index >= self.count // 2)
 
     async def start(self):
-        for group in (0, 1):
-            for destination in range(self.count):
+        for group in (range(self.count) if self.distinct else (0, 1)):
+            stride = int(self.count ** 0.5)
+            destinations = {(group+d)%self.count for d in [1,-1,stride,-stride]} if self.distinct else range(self.count)
+            for destination in destinations:
                 server = await asyncio.start_server(
                     lambda r, w, g=group, d=destination: self.accept(r, w, g, d),
                     '127.0.0.1', self.proxy_base + 100 * group + destination, limit=65536)
@@ -84,14 +88,15 @@ class Proxies:
     async def accept(self, reader, writer, group, destination):
         task = asyncio.current_task()
         self.tasks.add(task)
-        cross = group != self.group(destination)
+        cross = (self.group(group) if self.distinct else group) != self.group(destination)
         target_writer = None
         entry = None
         try:
             if (self.partitioned and cross) or len(self.links) >= self.count * self.count * 2:
                 self.rejected += 1
                 return
-            target_reader, target_writer = await asyncio.open_connection('127.0.0.1', self.base + destination, limit=65536)
+            target_reader, target_writer = await asyncio.open_connection('127.0.0.1', self.base + destination, limit=65536, local_addr=(f'127.1.0.{group+1}',0) if self.distinct else None)
+            self.observed_source_ips.add(target_writer.get_extra_info("sockname")[0])
             entry = (writer, target_writer, cross)
             self.links.add(entry)
             self.connections += 1
@@ -151,7 +156,7 @@ async def run(args):
     root.mkdir(parents=True, exist_ok=True)
     binary = args.binary.resolve()
     plan = args.committee_plan or f'1:{args.validators}'
-    proxy = Proxies(args.validators, args.base_port, args.proxy_base_port, args.delay_ms / 1000)
+    proxy = Proxies(args.validators, args.base_port, args.proxy_base_port, args.delay_ms / 1000, args.distinct_source_ips)
     if not args.direct:
         await proxy.start()
     processes, logs, offsets, states, observed = {}, [], {}, {}, {}
@@ -174,6 +179,8 @@ async def run(args):
     shutdown_requested = False
     history_linger = 60 if args.validators >= 25 else 12
 
+    barrier_ms = int((time.time() + args.startup_barrier) * 1000)
+
     def launch(index):
         states.pop(index, None)
         log_path = root / f'node-{index}-{len(logs)}.log'
@@ -182,9 +189,9 @@ async def run(args):
         processes[index] = subprocess.Popen([
             str(binary), 'run', '--dir', str(root / f'node-{index}'), '--index', str(index),
             '--committee-plan', plan, '--base-port', str(args.base_port),
-            '--peer-base-port', str(args.base_port if args.direct else args.proxy_base_port + 100 * proxy.group(index)),
+            '--peer-base-port', str(args.base_port if args.direct else args.proxy_base_port + 100 * (index if args.distinct_source_ips else proxy.group(index))),
             '--height', str(args.height), '--timeout', str(args.timeout), '--linger', str(history_linger),
-            '--test-transactions', str(args.transactions)], stdout=log, stderr=subprocess.STDOUT)
+            '--round-timeout-ms',str(args.round_timeout_ms), '--start-at-ms', str(barrier_ms), '--test-transactions', str(args.transactions), '--sparse-peers', str(args.sparse).lower()], env=(dict(os.environ, YAMI_VALIDATOR_LOG='arc_malachitebft_network=debug,arc_malachitebft_engine=debug,arc_malachitebft_discovery=debug') if args.trace_one and index == 0 else None), stdout=log, stderr=subprocess.STDOUT)
         offsets[log_path] = (index, 0, '')
 
     def progress():
@@ -235,7 +242,7 @@ async def run(args):
               'visible_host_logical_cpus': os.cpu_count(),
               'cpu_model': next((line.split(':', 1)[1].strip() for line in Path('/proc/cpuinfo').read_text().splitlines() if line.startswith('model name')), 'not reported'),
               'network_path': 'direct loopback' if args.direct else 'encrypted TCP fault proxy',
-              'validators': args.validators, 'committee_plan': plan, 'target_height': args.height,
+              'round_timeout_ms':args.round_timeout_ms, 'startup_barrier_seconds': args.startup_barrier, 'distinct_loopback_source_ips': args.distinct_source_ips, 'sparse_authenticated_neighbors': args.sparse, 'validators': args.validators, 'committee_plan': plan, 'target_height': args.height,
               'transactions_per_block': args.transactions, 'delay_ms_per_stream_read': args.delay_ms,
               'cgroup': {name: limit(name) for name in ['cpu.max', 'memory.max', 'memory.swap.max']},
               'unverified_targets': ['20 GB SSD capacity and physical SSD performance', 'large/pruned state', 'native ARM64 unless architecture reports aarch64', 'shielded payment/proof workload']}
@@ -398,7 +405,7 @@ async def run(args):
                       sampled_processes=len(io_peaks), processes_with_observed_io_counters=len(io_observed_pids),
                       sampled_block_io_bytes={'read': sum(v['read_bytes'] for v in io_peaks.values()), 'write': sum(v['write_bytes'] for v in io_peaks.values())},
                       per_destination_forwarded_transport_bytes=proxy.forwarded, forwarded_transport_bytes=sum(proxy.forwarded),
-                      proxy_connections=proxy.connections, partition_rejected_connections=proxy.rejected,
+                      observed_proxy_source_ips=sorted(proxy.observed_source_ips), proxy_connections=proxy.connections, partition_rejected_connections=proxy.rejected,
                       stores=[usage(root / f'node-{i}') for i in range(args.validators)], samples=samples)
         args.report.parent.mkdir(parents=True, exist_ok=True)
         args.report.write_text(json.dumps(result, indent=2) + '\n')
@@ -411,12 +418,17 @@ def main():
     parser.add_argument('--binary', type=Path, default=Path('target/release/yami-validator'))
     parser.add_argument('--directory', type=Path, required=True)
     parser.add_argument('--report', type=Path, required=True)
-    parser.add_argument('--validators', type=int, choices=[4, 25, 100], default=4)
+    parser.add_argument('--validators', type=int, choices=[4, 25, 50, 100], default=4)
     parser.add_argument('--height', type=int, default=256)
     parser.add_argument('--transactions', type=int, default=16)
     parser.add_argument('--timeout', type=int, default=600)
     parser.add_argument('--delay-ms', type=float, default=0)
     parser.add_argument('--faults', default='')
+    parser.add_argument('--distinct-source-ips', action='store_true')
+    parser.add_argument('--round-timeout-ms', type=int, default=800)
+    parser.add_argument('--startup-barrier', type=int, choices=range(0,61), default=0)
+    parser.add_argument('--trace-one', action='store_true')
+    parser.add_argument('--sparse', action='store_true')
     parser.add_argument('--direct', action='store_true')
     parser.add_argument('--trigger-height', type=int, default=4)
     parser.add_argument('--committee-plan')
@@ -425,6 +437,8 @@ def main():
     args = parser.parse_args()
     if not 0 <= args.transactions <= 64 or not 1 <= args.height <= 100000 or not 0 <= args.delay_ms <= 1000:
         parser.error('workload bounds exceeded')
+    if args.distinct_source_ips and (args.direct or not args.sparse):
+        parser.error('distinct source IPs require the sparse proxy topology')
     if args.direct and ('partition' in args.faults or args.delay_ms):
         parser.error('direct mode cannot claim a proxy partition or delay')
     if set(filter(None, args.faults.split(','))) - {'partition', 'crash', 'disk-full', 'socket-fuzz'}:

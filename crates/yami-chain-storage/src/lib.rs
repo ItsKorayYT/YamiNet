@@ -547,3 +547,94 @@ mod io_boundaries {
         fs::remove_dir_all(path).unwrap();
     }
 }
+
+/// Bounded, read-only pressure diagnostics. Candidates remain safety-relevant
+/// until finality. This sample is not an atomic snapshot or a deletion policy.
+#[derive(Debug, Default)]
+pub struct StorageFootprint {
+    pub entries: u64,
+    pub bytes: u64,
+    pub signing_bytes: u64,
+    pub evidence_bytes: u64,
+    pub wal_bytes: u64,
+    pub retained_candidate_bytes: u64,
+}
+impl Journal {
+    pub fn storage_footprint(&self, max_entries: u64) -> io::Result<StorageFootprint> {
+        let mut report = StorageFootprint::default();
+        let mut directories = vec![self.path.clone()];
+        while let Some(directory) = directories.pop() {
+            for entry in fs::read_dir(directory)? {
+                let entry = entry?;
+                report.entries = report
+                    .entries
+                    .checked_add(1)
+                    .ok_or_else(|| invalid("entry overflow"))?;
+                if report.entries > max_entries {
+                    return Err(invalid("storage inspection budget exceeded"));
+                }
+                let metadata = match fs::symlink_metadata(entry.path()) {
+                    Ok(m) => m,
+                    Err(e) if e.kind() == io::ErrorKind::NotFound => continue,
+                    Err(e) => return Err(e),
+                };
+                if metadata.is_dir() && entry.path() == self.path.join("wal") {
+                    directories.push(entry.path());
+                    continue;
+                }
+                if !metadata.file_type().is_file() {
+                    return Err(invalid("unexpected storage entry type"));
+                }
+                let size = metadata.len();
+                report.bytes = report
+                    .bytes
+                    .checked_add(size)
+                    .ok_or_else(|| invalid("storage size overflow"))?;
+                let name = entry.file_name();
+                let name = name.to_string_lossy();
+                if entry.path().parent() == Some(self.path.join("wal").as_path()) {
+                    report.wal_bytes += size;
+                } else if name.starts_with("signed-") {
+                    report.signing_bytes += size;
+                } else if name.starts_with("equivocation-") {
+                    report.evidence_bytes += size;
+                } else if name.starts_with("candidate-") || name.starts_with("proposal-") {
+                    report.retained_candidate_bytes += size;
+                }
+            }
+        }
+        Ok(report)
+    }
+}
+#[cfg(test)]
+mod pressure_tests {
+    use super::*;
+    #[test]
+    fn bounded_pressure_sampling_keeps_all_safety_records() {
+        let path = std::env::temp_dir().join(format!("yami-pressure-{}", std::process::id()));
+        let journal = Journal::open(&path).unwrap();
+        for name in [
+            "signed-fixture.bin",
+            "equivocation-fixture.bin",
+            "candidate-fixture.bin",
+        ] {
+            journal.write_once(name, &[1; 8]).unwrap();
+        }
+        fs::create_dir(path.join("wal")).unwrap();
+        fs::write(path.join("wal/consensus.wal"), [2; 16]).unwrap();
+        assert!(journal.storage_footprint(1).is_err());
+        let report = journal.storage_footprint(20).unwrap();
+        assert_eq!(
+            (
+                report.signing_bytes,
+                report.evidence_bytes,
+                report.retained_candidate_bytes,
+                report.wal_bytes
+            ),
+            (8, 8, 8, 16)
+        );
+        assert_eq!(fs::read(path.join("signed-fixture.bin")).unwrap(), [1; 8]);
+        drop(journal);
+        fs::remove_dir_all(path).unwrap();
+    }
+}

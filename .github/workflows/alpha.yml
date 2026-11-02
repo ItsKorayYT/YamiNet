@@ -117,7 +117,7 @@ jobs:
       - uses: actions/setup-python@v6
         with:
           python-version: '3.12'
-      - name: Release chain checks and authenticated 4/25/100-core schedules
+      - name: Release chain checks and authenticated 4/25/50/100-core schedules
         shell: bash
         run: |
           set -euo pipefail

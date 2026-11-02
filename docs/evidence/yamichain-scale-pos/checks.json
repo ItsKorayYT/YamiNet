@@ -1,0 +1,57 @@
+{
+  "base_commit": "d5c609b6a46773b8d06186159de8a8d111fde255",
+  "rust_counts": {
+    "passed": 482,
+    "failed": 0,
+    "ignored": 10
+  },
+  "checks": [
+    {
+      "check": "fmt",
+      "exit": 0,
+      "log_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "check": "clippy",
+      "exit": 0,
+      "log_sha256": "f79965a832e2e1ae44d45a954bea61233797275474fbc93a7a1abf7aa1da6e49"
+    },
+    {
+      "check": "test",
+      "exit": 0,
+      "log_sha256": "a5b5cdb06ac7322ccebad71844674d81e536dae3848c2946e3306e1fec396825"
+    },
+    {
+      "check": "build",
+      "exit": 0,
+      "log_sha256": "1f5d1f30ac99bafc6ae4f3a6e3926d41bd64248d449ee315ab1b0c220f655234"
+    },
+    {
+      "check": "privacy",
+      "exit": 0,
+      "log_sha256": "8c5c630c6acacd625072beec2c33e4262d34cad31f037ebf1718f8f3643cbd18"
+    },
+    {
+      "check": "independence",
+      "exit": 0,
+      "log_sha256": "36fdebd7e2c5488140386859a531c90ce575f097e3c5ee16faa33c74ef7b46bc"
+    },
+    {
+      "check": "original-processes",
+      "exit": 0,
+      "log_sha256": "79c741d171a86329654f1a3e332a3c288d57aaec92b332bd37c8c1132c1afa2e"
+    }
+  ],
+  "python_benchmark_false_success_regression": {
+    "result": "PASS",
+    "log_sha256": "02efc40f18ed11282aeb1d7a233af40fc306d02d36578ed7b600b560d99d9d1b"
+  },
+  "source_sha256": {
+    "Cargo.lock": "876314641cbcf5d6afa5be53bebf1c68f4f39157477650c1c42875c16631ac06",
+    "apps/yami-validator/src/main.rs": "5f820649d944d7971ac267dfa20d5061011d2a4530b708abcc42892ca3f63fbd",
+    "crates/yami-chain-consensus/src/node.rs": "b9652518a5809870bc925ff5326aba8b4deb476fdd70532651942d82ed04ea85",
+    "crates/yami-chain-consensus/src/checkpoint.rs": "3358bbaf787ea41251426bf5776ffec6ae537b9dcc60f22adfbfeaaeab16b641",
+    "crates/yami-chain-storage/src/lib.rs": "6c88bef04a9674c8b5ffcc1b2e532c4d2d52e68aae9729a58d2a8c2e1d572132",
+    "crates/yami-chain/src/selection.rs": "25ab9594076f3c7f69116abec2558716ca1b8423b198c43de90525715d60665b"
+  }
+}

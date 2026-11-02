@@ -1,0 +1,78 @@
+{
+  "result": "PASS",
+  "log_sha256": "a77fbcfa6adfc70fbfac3e199f70934ed613796bfe5f1aff2badc7eed1b06c11",
+  "cases": [
+    {
+      "validators": 4,
+      "case": "reordered",
+      "elapsed_ms": 4,
+      "authenticated_decisions": 4
+    },
+    {
+      "validators": 4,
+      "case": "malicious",
+      "elapsed_ms": 4,
+      "authenticated_decisions": 3
+    },
+    {
+      "validators": 4,
+      "case": "partition-recovery",
+      "elapsed_ms": 7,
+      "authenticated_decisions": 4
+    },
+    {
+      "validators": 25,
+      "case": "reordered",
+      "elapsed_ms": 135,
+      "authenticated_decisions": 25
+    },
+    {
+      "validators": 25,
+      "case": "malicious",
+      "elapsed_ms": 138,
+      "authenticated_decisions": 24
+    },
+    {
+      "validators": 25,
+      "case": "partition-recovery",
+      "elapsed_ms": 227,
+      "authenticated_decisions": 25
+    },
+    {
+      "validators": 50,
+      "case": "reordered",
+      "elapsed_ms": 577,
+      "authenticated_decisions": 50
+    },
+    {
+      "validators": 50,
+      "case": "malicious",
+      "elapsed_ms": 578,
+      "authenticated_decisions": 49
+    },
+    {
+      "validators": 50,
+      "case": "partition-recovery",
+      "elapsed_ms": 965,
+      "authenticated_decisions": 50
+    },
+    {
+      "validators": 100,
+      "case": "reordered",
+      "elapsed_ms": 2685,
+      "authenticated_decisions": 100
+    },
+    {
+      "validators": 100,
+      "case": "malicious",
+      "elapsed_ms": 2677,
+      "authenticated_decisions": 99
+    },
+    {
+      "validators": 100,
+      "case": "partition-recovery",
+      "elapsed_ms": 4227,
+      "authenticated_decisions": 100
+    }
+  ]
+}

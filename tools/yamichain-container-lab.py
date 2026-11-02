@@ -1,12 +1,19 @@
 #!/usr/bin/env python3
 """Run owned, network-isolated YamiChain process campaigns with explicit limits."""
 import argparse
+import fcntl
 import json
 import os
 from pathlib import Path
 import subprocess
 
 CASES = {
+    'tuned-rotate100': dict(nodes=100,height=12,tx=4,timeout=300,memory='2g',sparse=True,distinct=True,barrier=45,round_ms=5000,faults='crash',plan='1:100,4:97,7:100,10:99'),
+    'barrier100': dict(nodes=100,height=8,tx=4,timeout=240,memory='2g',sparse=True,distinct=True,barrier=45,round_ms=5000,faults='partition,crash',delay=10),
+    'diagnose100':dict(nodes=100,height=4,tx=4,timeout=45,memory='6g',sparse=True,direct=True,trace=True),
+    **{f'distinct{n}': dict(nodes=n,height=16,tx=4,timeout=240,memory='2g',sparse=True,distinct=True,faults='partition,crash',delay=10) for n in [25,50,100]},
+    **{f'sparse{n}': dict(nodes=n,height=16,tx=4,timeout=240,memory='2g',sparse=True,faults='partition,crash',delay=10) for n in [25,50,100]},
+    **{f'rotate{n}': dict(nodes=n,height=16,tx=4,timeout=240,memory='2g',sparse=True,distinct=True,faults='crash',plan=f'1:{n},5:{n-3},9:{n},13:{n-1}') for n in [25,50,100]},
     'smoke4': dict(nodes=4, height=16, tx=8, timeout=90, memory='2g'),
     'sustain4': dict(nodes=4, height=256, tx=16, timeout=600, memory='2g'),
     'fault4': dict(nodes=4, height=48, tx=8, timeout=240, memory='2g', faults='partition,crash,socket-fuzz', delay=25),
@@ -26,6 +33,12 @@ def main():
     parser.add_argument('--image', default='python:3.13-slim-trixie@sha256:ae14d4ce8771606477a81446e7ef429edd6762305fc50c84507c1041fa8285d1')
     args = parser.parse_args()
     repo = Path(__file__).resolve().parent.parent
+    # Serialize owned labs across invocations so resource measurements do not
+    # accidentally run competing clusters on the same constrained parent.
+    lock_path = repo / 'work' / '.chain-lab.lock'
+    lock_path.parent.mkdir(exist_ok=True)
+    lab_lock = lock_path.open('a')
+    fcntl.flock(lab_lock, fcntl.LOCK_EX)
     output = args.output.resolve()
     output.mkdir(parents=True, exist_ok=True)
     case = CASES[args.case]
@@ -57,6 +70,16 @@ def main():
                 '--directory', f'/results/{args.case}', '--report', f'/results/{args.case}.json',
                 '--validators', str(case['nodes']), '--height', str(case['height']),
                 '--transactions', str(case['tx']), '--timeout', str(case['timeout'])]
+    if case.get('round_ms'):
+        command += ['--round-timeout-ms',str(case['round_ms'])]
+    if case.get('barrier'):
+        command += ['--startup-barrier',str(case['barrier'])]
+    if case.get('trace'):
+        command += ['--trace-one']
+    if case.get('distinct'):
+        command += ['--distinct-source-ips']
+    if case.get('sparse'):
+        command += ['--sparse']
     if case.get('direct'):
         command += ['--direct']
     if case.get('faults'):
@@ -72,13 +95,17 @@ def main():
             evidence['container_image'] = args.image
             evidence['container_limits_requested'] = dict(cpus=2, memory=case['memory'], swap=False, network='none')
             evidence['container_exit_code'] = process.returncode
+            if process.returncode:
+                evidence.update(result='FAIL', in_progress=False)
+                evidence.setdefault('failure', f'container exited {process.returncode} before successful validation')
             report.write_text(json.dumps(evidence, indent=2) + '\n')
         else:
             report.write_text(json.dumps({'result': 'FAIL', 'case': args.case,
                 'container_exit_code': process.returncode,
                 'failure': 'container exited before producing measurements; no resource claim',
                 'container_limits_requested': {'cpus': 2, 'memory': case['memory'], 'swap': False}}, indent=2) + '\n')
-        raise SystemExit(process.returncode)
+        completed = json.loads(report.read_text()).get('result') == 'PASS'
+        raise SystemExit(process.returncode or (0 if completed else 1))
     except subprocess.TimeoutExpired:
         evidence = json.loads(report.read_text()) if report.exists() else {}
         evidence.update(result='FAIL', in_progress=False, case=args.case,

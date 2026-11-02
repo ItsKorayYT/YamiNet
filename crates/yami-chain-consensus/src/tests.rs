@@ -663,6 +663,37 @@ fn committees_certificates_cover_sizes_weights_history_and_recovery() {
         assert!(crate::verify_checkpoint(&journal, &genesis, 3, 7, &forged).is_err());
     }
     assert!(crate::authenticate_checkpoint(&journal, &genesis, 3, 2).is_err());
+    let inventory = crate::history_snapshot_inventory(&journal, &genesis, 3, 1_000_000).unwrap();
+    assert_eq!(
+        inventory.commitment().unwrap(),
+        crate::history_snapshot_inventory(&journal, &genesis, 3, 1_000_000)
+            .unwrap()
+            .commitment()
+            .unwrap()
+    );
+    assert!(crate::history_snapshot_inventory(&journal, &genesis, 3, 0).is_err());
+    assert!(crate::history_snapshot_inventory(&journal, &genesis, 1025, u64::MAX).is_err());
+    assert!(crate::history_snapshot_inventory(&journal, &Genesis::local(), 3, 1_000_000).is_err());
+    assert_ne!(
+        inventory.commitment().unwrap(),
+        crate::history_snapshot_inventory(&journal, &genesis, 2, 1_000_000)
+            .unwrap()
+            .commitment()
+            .unwrap()
+    );
+    let inventory_bytes = inventory.canonical().unwrap();
+    crate::verify_history_inventory(&journal, &genesis, 3, 1_000_000, &inventory_bytes).unwrap();
+    let mut tampered = inventory_bytes.clone();
+    tampered[20] ^= 1;
+    assert!(crate::verify_history_inventory(&journal, &genesis, 3, 1_000_000, &tampered).is_err());
+    assert!(crate::verify_history_inventory(
+        &journal,
+        &genesis,
+        3,
+        1_000_000,
+        &inventory_bytes[..20]
+    )
+    .is_err());
     checkpoint.prune_candidates(&journal).unwrap();
     assert!(journal.record(1).unwrap().is_some());
     let record = journal.record(3).unwrap().unwrap();
@@ -782,7 +813,7 @@ async fn transport_binding_malformed_votes_and_proposal_reservations_fail_closed
 #[tokio::test]
 #[ignore = "manual 4/25/100-validator authenticated Malachite schedules; run in release as documented"]
 async fn scale_stress_authenticated_core() {
-    for size in [4, 25, 100] {
+    for size in [4, 25, 50, 100] {
         let genesis = Genesis::development_schedule(&[(1, size)]).unwrap();
         for (name, active, malicious, partitioned) in [
             ("reordered", size, false, false),

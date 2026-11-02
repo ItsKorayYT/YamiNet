@@ -103,3 +103,83 @@ pub fn verify_checkpoint(
     }
     Ok(authenticated)
 }
+
+/// Transport inventory for verified historical records, not a compact state
+/// snapshot or an import capability. All history/evidence remains in place.
+/// Private construction requires authenticated sequential replay. Restoring from
+/// an inventory still requires every record and normal certificate execution.
+#[derive(Debug)]
+pub struct HistorySnapshotInventory {
+    checkpoint: AuthenticatedCheckpoint,
+    records: Vec<yami_chain::Digest>,
+    bytes: u64,
+}
+impl HistorySnapshotInventory {
+    pub fn canonical(&self) -> yami_chain::Result<Vec<u8>> {
+        let mut w = Writer::default();
+        w.raw(b"YC-HISTORY-INVENTORY-1");
+        w.bytes(&self.checkpoint.canonical()?)?;
+        w.u64(self.bytes);
+        w.u64(self.records.len() as u64);
+        for digest in &self.records {
+            w.raw(&digest.0);
+        }
+        Ok(w.0)
+    }
+    pub fn commitment(&self) -> yami_chain::Result<Digest> {
+        Ok(yami_chain::hash(
+            b"YC-HISTORY-INVENTORY-HASH-1",
+            &self.canonical()?,
+        ))
+    }
+}
+/// Refuses excess work before replay; authenticates each included record and
+/// checks byte budget incrementally. Never deletes evidence, WAL or history.
+pub fn history_snapshot_inventory(
+    journal: &Journal,
+    genesis: &Genesis,
+    height: u64,
+    max_bytes: u64,
+) -> Result<HistorySnapshotInventory> {
+    if height == 0 || height > 1024 {
+        return Err(eyre!("inventory record budget"));
+    }
+    let mut remaining = max_bytes;
+    let mut records = Vec::new();
+    for h in 1..=height {
+        let record = journal
+            .record(h)?
+            .ok_or_else(|| eyre!("inventory history gap"))?;
+        let bytes = record.canonical()?;
+        remaining = remaining
+            .checked_sub(bytes.len() as u64)
+            .ok_or_else(|| eyre!("inventory byte budget"))?;
+        verify_record(genesis, &record)?;
+        records.push(yami_chain::hash(b"YC-HISTORY-RECORD-1", &bytes));
+    }
+    let checkpoint = authenticate_checkpoint(journal, genesis, height, 1024)?;
+    Ok(HistorySnapshotInventory {
+        checkpoint,
+        records,
+        bytes: max_bytes - remaining,
+    })
+}
+
+/// Verify transported inventory bytes by recomputation against local authenticated
+/// history. This deliberately grants no state import or history deletion ability.
+pub fn verify_history_inventory(
+    journal: &Journal,
+    genesis: &Genesis,
+    height: u64,
+    max_bytes: u64,
+    bytes: &[u8],
+) -> Result<HistorySnapshotInventory> {
+    if bytes.len() > 65_536 {
+        return Err(eyre!("inventory encoding cap"));
+    }
+    let inventory = history_snapshot_inventory(journal, genesis, height, max_bytes)?;
+    if inventory.canonical()? != bytes {
+        return Err(eyre!("inventory commitment mismatch"));
+    }
+    Ok(inventory)
+}

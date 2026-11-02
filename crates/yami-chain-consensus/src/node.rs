@@ -60,13 +60,20 @@ fn transport(index: u8) -> Result<Keypair> {
         development_key("transport", index).to_bytes(),
     )?)
 }
-fn config(index: u8, base: u16, peer_base: u16, genesis: &Genesis) -> Result<Config> {
+fn config(index: u8, base: u16, peer_base: u16, genesis: &Genesis, sparse: bool) -> Result<Config> {
     let mut consensus = config::ConsensusConfig::default();
     consensus.p2p.listen_addr =
         format!("/ip4/127.0.0.1/tcp/{}", base + u16::from(index)).parse()?;
+    let scheduled: Vec<_> = (0..100u8)
+        .filter(|i| {
+            genesis.has_consensus_key(&development_key("consensus", *i).verifying_key().to_bytes())
+        })
+        .collect();
+    let neighbors = sparse_neighbors(&scheduled, index);
     consensus.p2p.persistent_peers = (0..yami_chain::committee::MAX_VALIDATORS as u8)
         .filter(|i| {
             *i != index
+                && (!sparse || neighbors.contains(i))
                 && genesis
                     .has_consensus_key(&development_key("consensus", *i).verifying_key().to_bytes())
         })
@@ -97,14 +104,14 @@ fn config(index: u8, base: u16, peer_base: u16, genesis: &Genesis) -> Result<Con
         sync,
     })
 }
-fn params(genesis: &Genesis, height: u64) -> Result<m::HeightParams<Context>> {
+fn params(genesis: &Genesis, height: u64, timing: Duration) -> Result<m::HeightParams<Context>> {
     Ok(m::HeightParams::new(
         Committee::at(genesis, height)?,
         m::LinearTimeouts {
-            propose: Duration::from_millis(800),
-            prevote: Duration::from_millis(400),
-            precommit: Duration::from_millis(400),
-            rebroadcast: Duration::from_millis(1600),
+            propose: timing,
+            prevote: timing / 2,
+            precommit: timing / 2,
+            rebroadcast: timing * 2,
             ..Default::default()
         },
         Some(Duration::from_millis(400)),
@@ -119,6 +126,9 @@ pub struct NodeOptions {
     pub base_port: u16,
     pub peer_base_port: u16,
     pub test_transactions: usize,
+    pub sparse_peers: bool,
+    pub start_at: Option<std::time::SystemTime>,
+    pub round_timeout: Duration,
     pub target_height: u64,
     pub timeout: Duration,
     pub linger: Duration,
@@ -162,6 +172,8 @@ pub async fn run_node(options: NodeOptions) -> Result<State> {
                 .verifying_key()
                 .to_bytes(),
         )
+        || options.round_timeout < Duration::from_millis(800)
+        || options.round_timeout > Duration::from_secs(60)
         || options.test_transactions > yami_chain::MAX_TXS
         || options.peer_base_port < 1024
         || options.peer_base_port > 65436
@@ -221,6 +233,7 @@ pub async fn run_node(options: NodeOptions) -> Result<State> {
             options.base_port,
             options.peer_base_port,
             &options.genesis,
+            options.sparse_peers,
         )?,
     )
     .with_default_wal(WalContext::new(
@@ -240,6 +253,15 @@ pub async fn run_node(options: NodeOptions) -> Result<State> {
     .with_default_request(RequestContext::new(16))
     .build()
     .await?;
+    // Local lab coordination only: never a block timestamp or election input.
+    if let Some(start) = options.start_at {
+        if let Ok(delay) = start.duration_since(std::time::SystemTime::now()) {
+            if delay > Duration::from_secs(60) {
+                return Err(eyre!("startup barrier exceeds 60 seconds"));
+            }
+            tokio::time::sleep(delay).await;
+        }
+    }
     let result = tokio::select! {
         result=app_loop(state,journal.clone(),&mut channels,&options,signer.clone())=>result,
         signal=tokio::signal::ctrl_c()=>{signal.map_err(eyre::Report::from).and_then(|()|journal.replay(options.genesis.clone(),|record| verify_record(&options.genesis,record)).map_err(Into::into))},
@@ -305,7 +327,7 @@ async fn app_loop(
             AppMsg::ConsensusReady { reply } => {
                 let _ = reply.send((
                     Height(state.height() + 1),
-                    params(state.genesis(), state.height() + 1)?,
+                    params(state.genesis(), state.height() + 1, options.round_timeout)?,
                 ));
             }
             AppMsg::StartedRound {
@@ -463,7 +485,7 @@ async fn app_loop(
                 active_round = m::Round::Nil;
                 let _ = reply.send(Next::Start(
                     Height(state.height() + 1),
-                    params(state.genesis(), state.height() + 1)?,
+                    params(state.genesis(), state.height() + 1, options.round_timeout)?,
                 ));
             }
             AppMsg::GetHistoryMinHeight { reply } => {
@@ -534,4 +556,52 @@ async fn app_loop(
 }
 pub fn status_json(state: &State) -> String {
     format!("{{\"chain_id\":\"{}\",\"height\":{},\"block\":\"{}\",\"state_root\":\"{}\",\"test_tlds\":{},\"payments_enabled\":false,\"production_ready\":false}}",yami_chain::CHAIN_ID,state.height(),state.tip(),state.root(),state.names().entries().count())
+}
+
+// A local rehearsal topology, not validator selection. All scheduled identities
+// remain authenticated by the pinned genesis and all consensus rules are unchanged.
+fn sparse_neighbors(scheduled: &[u8], index: u8) -> Vec<u8> {
+    let Some(position) = scheduled.iter().position(|i| *i == index) else {
+        return vec![];
+    };
+    let n = scheduled.len();
+    let mut stride = 1;
+    while (stride + 1) * (stride + 1) <= n {
+        stride += 1;
+    }
+    let mut peers = std::collections::BTreeSet::new();
+    for distance in [1, stride] {
+        for target in [(position + distance) % n, (position + n - distance) % n] {
+            if target != position {
+                peers.insert(scheduled[target]);
+            }
+        }
+    }
+    peers.into_iter().collect()
+}
+#[cfg(test)]
+mod topology_tests {
+    use super::*;
+    #[test]
+    fn sparse_graph_is_symmetric_bounded_and_survives_one_crash() {
+        for n in [4, 25, 50, 100] {
+            let members: Vec<_> = (0..n).collect();
+            for missing in 0..n {
+                let start = if missing == 0 { 1 } else { 0 };
+                let mut seen = std::collections::BTreeSet::from([start]);
+                let mut todo = vec![start];
+                while let Some(i) = todo.pop() {
+                    let peers = sparse_neighbors(&members, i);
+                    assert!(peers.len() <= 4);
+                    for j in peers {
+                        assert!(sparse_neighbors(&members, j).contains(&i));
+                        if j != missing && seen.insert(j) {
+                            todo.push(j);
+                        }
+                    }
+                }
+                assert_eq!(seen.len(), usize::from(n - 1));
+            }
+        }
+    }
 }

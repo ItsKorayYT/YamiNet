@@ -79,6 +79,7 @@ snapshot/pruner must retain exact spent-tag uniqueness and required history.
 Windows directory-fsync/power-loss durability remains unverified; the filesystem
 and safety records must not be modified concurrently by an attacker or rolled back.
 
-See [stress and hardware evidence](validation-yamichain-stress.md) and
+See [subsequent scale/PoS-interface work](validation-yamichain-scale-pos.md),
+[stress and hardware evidence](validation-yamichain-stress.md) and
 [earlier validation evidence](validation-yamichain-0.2.md) for actual checks, failures,
 measurements and unresolved advisories. No production-readiness claim is made.

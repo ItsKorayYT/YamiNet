@@ -14,3 +14,5 @@ yami-chain-storage = { path = "../../crates/yami-chain-storage" }
 yami-chain-consensus = { path = "../../crates/yami-chain-consensus" }
 eyre = "0.6"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "signal"] }
+
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }

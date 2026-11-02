@@ -1,6 +1,7 @@
 //! Deterministic, non-financial chain foundation. No wallet or monetary state.
 pub mod codec;
 pub mod committee;
+pub mod selection;
 use codec::{Reader, Writer};
 pub use committee::{Epoch, Member, ValidatorSet};
 pub use ed25519_dalek::{Signer, SigningKey, VerifyingKey};
