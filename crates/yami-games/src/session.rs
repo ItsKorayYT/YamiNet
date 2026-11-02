@@ -41,6 +41,9 @@ struct Shared {
     changed: Condvar,
     desired: AtomicU8,
     held: AtomicU32,
+    /// Controller bits are a separate source so releasing a keyboard key cannot
+    /// release a direction still held on a pad.
+    pad_held: AtomicU32,
     pressed: AtomicU32,
     released: AtomicU32,
     pointer: Mutex<(i32, i32)>,
@@ -90,6 +93,7 @@ impl Session {
             changed: Condvar::new(),
             desired: AtomicU8::new(RUN),
             held: AtomicU32::new(0),
+            pad_held: AtomicU32::new(0),
             pressed: AtomicU32::new(0),
             released: AtomicU32::new(0),
             pointer: Mutex::new((-1, -1)),
@@ -138,13 +142,20 @@ impl Session {
     }
     pub fn key(&self, bit: u32, down: bool) {
         let bit = bit & INPUT_MASK;
+        let old =
+            self.shared.held.load(Ordering::Acquire) | self.shared.pad_held.load(Ordering::Acquire);
         if down && self.shared.desired.load(Ordering::Acquire) == RUN {
-            let old = self.shared.held.fetch_or(bit, Ordering::AcqRel);
-            self.shared.pressed.fetch_or(bit & !old, Ordering::AcqRel);
+            self.shared.held.fetch_or(bit, Ordering::AcqRel);
         } else {
-            let old = self.shared.held.fetch_and(!bit, Ordering::AcqRel);
-            self.shared.released.fetch_or(old & bit, Ordering::AcqRel);
+            self.shared.held.fetch_and(!bit, Ordering::AcqRel);
         }
+        // Edges are relative to the combined keyboard + controller state, so
+        // releasing one source while another still holds the same bit does not
+        // generate a spurious release for the game.
+        let new =
+            self.shared.held.load(Ordering::Acquire) | self.shared.pad_held.load(Ordering::Acquire);
+        self.shared.pressed.fetch_or(new & !old, Ordering::AcqRel);
+        self.shared.released.fetch_or(old & !new, Ordering::AcqRel);
     }
     pub fn pointer(&self, x: i32, y: i32) {
         *self.shared.pointer.lock().unwrap() = if self.shared.desired.load(Ordering::Acquire) == RUN
@@ -156,11 +167,39 @@ impl Session {
             (-1, -1)
         };
     }
+    /// Publish the currently held controller bits. Controller bits are ORed with
+    /// keyboard/mouse bits, so either source can keep a direction down. Paused,
+    /// stopped and suspended sessions never accept new controller state.
+    pub fn gamepad(&self, held: u32) {
+        let held = held & INPUT_MASK;
+        let old =
+            self.shared.held.load(Ordering::Acquire) | self.shared.pad_held.load(Ordering::Acquire);
+        if self.shared.desired.load(Ordering::Acquire) != RUN {
+            self.shared.pad_held.swap(0, Ordering::AcqRel);
+        } else {
+            self.shared.pad_held.swap(held, Ordering::AcqRel);
+        }
+        let new =
+            self.shared.held.load(Ordering::Acquire) | self.shared.pad_held.load(Ordering::Acquire);
+        self.shared.pressed.fetch_or(new & !old, Ordering::AcqRel);
+        self.shared.released.fetch_or(old & !new, Ordering::AcqRel);
+    }
     pub fn clear_input(&self) {
-        let old = self.shared.held.swap(0, Ordering::AcqRel);
+        let old =
+            self.shared.held.load(Ordering::Acquire) | self.shared.pad_held.load(Ordering::Acquire);
+        self.shared.held.store(0, Ordering::Release);
+        self.shared.pad_held.store(0, Ordering::Release);
         self.shared.released.fetch_or(old, Ordering::AcqRel);
         *self.shared.pointer.lock().unwrap() = (-1, -1);
         self.shared.pressed.store(0, Ordering::Release);
+    }
+    /// Current combined held mask. Intended for local diagnostics and tests.
+    pub fn held(&self) -> u32 {
+        self.shared.held.load(Ordering::Acquire) | self.shared.pad_held.load(Ordering::Acquire)
+    }
+    /// Current controller-only held mask. Keyboard/mouse state is independent.
+    pub fn gamepad_held(&self) -> u32 {
+        self.shared.pad_held.load(Ordering::Acquire)
     }
     fn control(&self, value: u8) {
         let _guard = self.shared.signal.lock().unwrap();
@@ -293,7 +332,7 @@ impl Shared {
             }
             let (x, y) = *self.pointer.lock().unwrap();
             let frame = runtime.frame_input(Input {
-                held: self.held.load(Ordering::Acquire),
+                held: self.held.load(Ordering::Acquire) | self.pad_held.load(Ordering::Acquire),
                 pressed: self.pressed.swap(0, Ordering::AcqRel),
                 released: self.released.swap(0, Ordering::AcqRel),
                 x,
@@ -329,6 +368,10 @@ impl Shared {
 #[cfg(test)]
 mod tests {
     use super::*;
+    /// Session admission is process-global; keep the capacity and input tests
+    /// from racing each other in Cargo's parallel test harness.
+    static TEST_LOCK: Mutex<()> = Mutex::new(());
+
     fn wait(shared: &Shared, check: impl Fn(&Snapshot) -> bool) {
         let start = Instant::now();
         while !check(&shared.snapshot.lock().unwrap()) {
@@ -336,8 +379,103 @@ mod tests {
             thread::sleep(Duration::from_millis(2));
         }
     }
+    fn idle_session() -> Session {
+        Session {
+            shared: Arc::new(Shared {
+                snapshot: Mutex::new(Snapshot {
+                    title: "test".into(),
+                    description: String::new(),
+                    status: Status::Running,
+                    frame: None,
+                    frames: 0,
+                    total_update_us: 0,
+                    max_update_us: 0,
+                    late_frames: 0,
+                    load_us: 0,
+                }),
+                signal: Mutex::new(()),
+                changed: Condvar::new(),
+                desired: AtomicU8::new(RUN),
+                held: AtomicU32::new(0),
+                pad_held: AtomicU32::new(0),
+                pressed: AtomicU32::new(0),
+                released: AtomicU32::new(0),
+                pointer: Mutex::new((-1, -1)),
+                reset: AtomicBool::new(false),
+                notified: AtomicBool::new(false),
+                cancelled: AtomicBool::new(false),
+            }),
+        }
+    }
+
+    #[test]
+    fn combined_keyboard_and_controller_edges_do_not_release_each_other() {
+        let game = idle_session();
+        game.key(LEFT, true);
+        game.gamepad(LEFT);
+        assert_eq!(game.held(), LEFT);
+        assert!(game.shared.pressed.load(Ordering::Acquire) & LEFT != 0);
+        game.shared.pressed.store(0, Ordering::Release);
+        game.shared.released.store(0, Ordering::Release);
+        // Releasing the controller source alone must not produce a release edge
+        // while the keyboard still holds the same action.
+        game.gamepad(0);
+        assert_eq!(game.held(), LEFT);
+        assert_eq!(game.shared.released.load(Ordering::Acquire) & LEFT, 0);
+        // Releasing the keyboard source now produces the single real release.
+        game.key(LEFT, false);
+        assert_eq!(game.held(), 0);
+        assert!(game.shared.released.load(Ordering::Acquire) & LEFT != 0);
+        // Unknown bits are masked and controller-only state is separable.
+        game.gamepad(u32::MAX);
+        assert_eq!(game.gamepad_held(), INPUT_MASK);
+        assert_eq!(game.held(), INPUT_MASK);
+        game.clear_input();
+        assert_eq!(game.held(), 0);
+        assert_eq!(game.shared.pressed.load(Ordering::Acquire), 0);
+    }
+
+    #[test]
+    fn controller_input_is_separate_from_keyboard_and_pause_releases() {
+        let _guard = TEST_LOCK.lock().unwrap();
+        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../games/breakout/game.yami-game.json");
+        let game = Session::launch(path, Arc::new(|| {})).unwrap();
+        wait(&game.shared, |s| s.frames > 1);
+        game.pause();
+        wait(&game.shared, |s| s.status == Status::Paused);
+        // Paused sessions ignore controller state even if a caller forgets to
+        // suspend the native adapter.
+        game.gamepad(RIGHT | UP | 0xffff_0000);
+        assert_eq!(game.shared.pad_held.load(Ordering::Acquire), 0);
+        game.resume();
+        game.gamepad(RIGHT | UP | 0xffff_0000);
+        assert_eq!(
+            game.shared.pad_held.load(Ordering::Acquire),
+            RIGHT | UP,
+            "unknown controller bits are masked"
+        );
+        game.gamepad(RIGHT);
+        assert_eq!(game.shared.pad_held.load(Ordering::Acquire), RIGHT);
+        game.pause();
+        assert_eq!(game.shared.pad_held.load(Ordering::Acquire), 0);
+        assert!(game.shared.released.load(Ordering::Acquire) & RIGHT != 0);
+        // Keyboard and controller sources are ORed; releasing one never steals
+        // the other source's held bit.
+        game.resume();
+        game.key(LEFT, true);
+        game.gamepad(RIGHT);
+        assert_eq!(game.shared.held.load(Ordering::Acquire), LEFT);
+        assert_eq!(game.shared.pad_held.load(Ordering::Acquire), RIGHT);
+        game.stop();
+        assert_eq!(game.shared.pad_held.load(Ordering::Acquire), 0);
+        assert_eq!(game.shared.held.load(Ordering::Acquire), 0);
+        wait(&game.shared, |s| s.status == Status::Stopped);
+    }
+
     #[test]
     fn closed_games_release_workers_including_during_load_and_enforce_global_cap() {
+        let _guard = TEST_LOCK.lock().unwrap();
         let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("../../games/breakout/game.yami-game.json");
         // These sessions remain active while testing the shared admission cap.

@@ -196,6 +196,10 @@ struct Desktop {
     game_error: Option<String>,
     game_keys: std::collections::HashSet<winit::keyboard::KeyCode>,
     game_presentation: super::game_view::Presentation,
+    gamepads: yami_gamepad::Gamepads,
+    gamepad_connected: bool,
+    last_title: String,
+    last_surface_size: Option<(u32, u32)>,
     smoke: Option<smoke::Smoke>,
     frames: u64,
     log: Option<yami_browser::diagnostics::Log>,
@@ -244,6 +248,10 @@ impl Desktop {
             game_error: None,
             game_keys: std::collections::HashSet::new(),
             game_presentation: super::game_view::Presentation::default(),
+            gamepads: yami_gamepad::Gamepads::platform(),
+            gamepad_connected: false,
+            last_title: String::new(),
+            last_surface_size: None,
             smoke: None,
             frames: 0,
             log: None,
@@ -396,6 +404,7 @@ impl Desktop {
     }
     fn act(&mut self, action: Action) {
         self.game_keys.clear();
+        let _ = self.gamepads.suspend();
         if !matches!(
             action,
             Action::LaunchGame | Action::GamePath | Action::DiscoveryPanel
@@ -404,6 +413,7 @@ impl Desktop {
         }
         // Any browser action releases held game keys. Modal controls also pause it.
         if let PageState::Game(game) = &self.browser.active().state {
+            game.session.gamepad(0);
             game.session.clear_input();
             if matches!(
                 action,
@@ -1032,23 +1042,29 @@ impl Desktop {
         let paint_start = Instant::now();
         self.compose(&mut pix);
         let surface = self.surface.as_mut().unwrap();
-        surface.resize(
-            NonZeroU32::new(size.width).unwrap(),
-            NonZeroU32::new(size.height).unwrap(),
-        )?;
+        if self.last_surface_size != Some((size.width, size.height)) {
+            surface.resize(
+                NonZeroU32::new(size.width).unwrap(),
+                NonZeroU32::new(size.height).unwrap(),
+            )?;
+            self.last_surface_size = Some((size.width, size.height));
+        }
         let mut buffer = surface.buffer_mut()?;
-        for (out, pixel) in buffer.iter_mut().zip(pix.pixels()) {
-            *out = (u32::from(pixel.red()) << 16)
-                | (u32::from(pixel.green()) << 8)
-                | u32::from(pixel.blue());
+        for (out, pixel) in buffer.iter_mut().zip(pix.data().chunks_exact(4)) {
+            *out = (u32::from(pixel[0]) << 16) | (u32::from(pixel[1]) << 8) | u32::from(pixel[2]);
         }
         buffer.present()?;
         let tab = self.browser.active();
         self.game_presentation.record(tab.id, matches!(&tab.state, PageState::Game(g) if g.snapshot.status == yami_games::Status::Running), if let PageState::Game(g)=&tab.state {g.snapshot.frames}else{0}, paint_start.elapsed());
         self.frames += 1;
         self.frame = Some(pix);
-        if let Some(window) = &self.window {
-            window.set_title(&format!("{} — Yami Browser", self.browser.active().title()));
+        let title = self.browser.active().title();
+        if self.last_title != title {
+            if let Some(window) = &self.window {
+                window.set_title(&format!("{title} — Yami Browser"));
+            }
+            self.last_title.clear();
+            self.last_title.push_str(title);
         }
         Ok(())
     }
@@ -1152,6 +1168,7 @@ impl Desktop {
                 &game.snapshot,
                 &mut self.game_presentation,
                 immersive,
+                self.gamepad_connected,
             ),
             PageState::Home => chrome::home(&mut c, &mut scene, &ui, &self.browser),
             PageState::Loading => {
@@ -1331,6 +1348,7 @@ impl Desktop {
     }
     fn activate_link(&mut self, target: &str) {
         if let Some(key) = target.strip_prefix("game:") {
+            self.suspend_gamepad();
             match self.browser.play_hosted(key, Arc::clone(&self.game_wake)) {
                 Ok(()) => {
                     self.game_immersive = true;
@@ -1344,6 +1362,56 @@ impl Desktop {
             let _ = self.browser.follow(target, &self.loader);
         }
     }
+    /// Controllers follow the same ownership rules as game keys: no modal,
+    /// editor or browser panel may receive movement while a game is paused.
+    fn gamepad_owned(&self) -> bool {
+        matches!(
+            &self.browser.active().state,
+            PageState::Game(game) if game.snapshot.status == yami_games::Status::Running
+        ) && self.editor.focus.is_none()
+            && self.keyboard_focus.is_none()
+            && !self.game_open
+            && !self.settings_open
+            && !self.library_open
+            && !self.discover.open
+            && !self.discovery.open
+            && !self.find_open
+    }
+
+    fn suspend_gamepad(&mut self) {
+        self.gamepads.suspend();
+        if let PageState::Game(game) = &self.browser.active().state {
+            game.session.gamepad(0);
+        }
+    }
+
+    /// Poll native pads at the same cadence as game frames. The frame wake also
+    /// handles connection changes, so no dedicated input thread is needed.
+    fn poll_gamepad(&mut self) -> bool {
+        if !matches!(self.browser.active().state, PageState::Game(_)) {
+            if self.gamepad_connected {
+                let _ = self.gamepads.suspend();
+                self.gamepad_connected = false;
+                return true;
+            }
+            return false;
+        }
+        if !self.gamepad_owned() {
+            self.suspend_gamepad();
+            let connected = self.gamepads.connected();
+            let changed = self.gamepad_connected != connected;
+            self.gamepad_connected = connected;
+            return changed;
+        }
+        let frame = self.gamepads.poll();
+        if let PageState::Game(game) = &self.browser.active().state {
+            game.session.gamepad(frame.held);
+        }
+        let changed = self.gamepad_connected != frame.connected;
+        self.gamepad_connected = frame.connected;
+        changed
+    }
+
     /// Pointer coordinates use the same logical surface as painting, after DPI conversion.
     fn game_pointer(&self, button: Option<(MouseButton, bool)>) -> bool {
         let PageState::Game(game) = &self.browser.active().state else {
@@ -1746,6 +1814,7 @@ impl ApplicationHandler<()> for Desktop {
         }
     }
     fn exiting(&mut self, _: &ActiveEventLoop) {
+        let _ = self.gamepads.suspend();
         for tab in &self.browser.tabs {
             if let PageState::Game(game) = &tab.state {
                 game.session.stop();
@@ -1754,10 +1823,11 @@ impl ApplicationHandler<()> for Desktop {
         self.record("shutdown");
     }
     fn user_event(&mut self, _: &ActiveEventLoop, _: ()) {
+        let gamepad_changed = self.poll_gamepad();
         let directories_changed = self.discover.poll();
         let discovery_changed = self.discovery.poll();
         let games_changed = self.browser.poll_games();
-        if games_changed {
+        if games_changed || gamepad_changed {
             self.redraw();
         }
         if self.browser.poll(&self.loader) || discovery_changed || directories_changed {
@@ -1802,6 +1872,7 @@ impl ApplicationHandler<()> for Desktop {
             }
             WindowEvent::Occluded(true) => {
                 self.game_keys.clear();
+                self.suspend_gamepad();
                 self.browser.pause_active_game();
                 self.animation = false;
             }
@@ -1902,6 +1973,7 @@ impl ApplicationHandler<()> for Desktop {
             }
             WindowEvent::Focused(false) => {
                 self.game_keys.clear();
+                self.suspend_gamepad();
                 self.browser.pause_active_game();
                 self.modifiers = ModifiersState::empty();
                 self.scroll_drag = false;
@@ -2232,6 +2304,20 @@ mod tests {
     #[test]
     #[ignore = "manual software rendering benchmark"]
     fn measure_native_game_rendering() {
+        fn pass(app: &mut Desktop, frames: &[Arc<yami_games::Frame>], cached: bool) -> Vec<f64> {
+            app.game_presentation.set_cache_enabled(cached);
+            let mut pix = Pixmap::new(1440, 900).unwrap();
+            let mut times = Vec::with_capacity(frames.len());
+            for frame in frames {
+                if let PageState::Game(game) = &mut app.browser.active_mut().state {
+                    game.snapshot.frame = Some(Arc::clone(frame));
+                }
+                let now = Instant::now();
+                app.compose(&mut pix);
+                times.push(now.elapsed().as_secs_f64() * 1000.);
+            }
+            times
+        }
         let mut app = headless(1440., 900.);
         app.settings_open = false;
         app.browser
@@ -2245,18 +2331,26 @@ mod tests {
         let mut vm = yami_games::Runtime::new(&bytes).unwrap();
         vm.frame(0, yami_games::START).unwrap();
         vm.frame(0, yami_games::START).unwrap();
-        let mut pix = Pixmap::new(1440, 900).unwrap();
-        let mut times = Vec::new();
-        for _ in 0..180 {
-            if let PageState::Game(game) = &mut app.browser.active_mut().state {
-                game.snapshot.frame = Some(vm.frame(0, 0).unwrap());
-            }
-            let now = Instant::now();
-            app.compose(&mut pix);
-            times.push(now.elapsed().as_secs_f64() * 1000.);
-        }
-        times.sort_by(f64::total_cmp);
-        println!("native compose 1440x900: avg={:.3}ms p50={:.3}ms p95={:.3}ms max={:.3}ms (180 gameplay frames)",times.iter().sum::<f64>()/times.len() as f64,times[90],times[171],times[179]);
+        let frames: Vec<_> = (0..180).map(|_| vm.frame(0, 0).unwrap()).collect();
+        let mut full = pass(&mut app, &frames, false);
+        full.sort_by(f64::total_cmp);
+        // Warm the prefix cache before the measured cached pass.
+        let _ = pass(&mut app, &frames, true);
+        let mut cached = pass(&mut app, &frames, true);
+        cached.sort_by(f64::total_cmp);
+        println!(
+            "native compose 1440x900: full avg={:.3}ms p50={:.3}ms p95={:.3}ms max={:.3}ms; \
+             cached avg={:.3}ms p50={:.3}ms p95={:.3}ms max={:.3}ms ({} gameplay frames)",
+            full.iter().sum::<f64>() / full.len() as f64,
+            full[90],
+            full[171],
+            full[179],
+            cached.iter().sum::<f64>() / cached.len() as f64,
+            cached[90],
+            cached[171],
+            cached[179],
+            frames.len()
+        );
     }
 
     #[test]
@@ -3347,5 +3441,40 @@ mod tests {
         assert!(app.browser.back(&app.loader));
         settle(&mut app);
         assert_eq!(app.browser.active().title(), "Bob's Garden Log");
+    }
+
+    #[test]
+    fn controller_bits_are_released_by_browser_actions_and_pause_paths() {
+        let mut app = headless(1440., 900.);
+        app.settings_open = false;
+        app.browser
+            .open_game(game_path(), Arc::clone(&app.game_wake))
+            .unwrap();
+        game_wait(&mut app, |s| s.status == yami_games::Status::Running);
+        if let PageState::Game(game) = &app.browser.active().state {
+            game.session.gamepad(yami_games::LEFT | yami_games::UP);
+            assert_eq!(
+                game.session.gamepad_held(),
+                yami_games::LEFT | yami_games::UP
+            );
+            assert!(game.session.held() & (yami_games::LEFT | yami_games::UP) != 0);
+        }
+        // Any browser action owns input and releases controller bits too.
+        app.act(Action::Address);
+        if let PageState::Game(game) = &app.browser.active().state {
+            assert_eq!(game.session.gamepad_held(), 0);
+            assert_eq!(game.session.held(), 0);
+        }
+        game_wait(&mut app, |s| s.status == yami_games::Status::Paused);
+        app.act(Action::GamePause);
+        game_wait(&mut app, |s| s.status == yami_games::Status::Running);
+        if let PageState::Game(game) = &app.browser.active().state {
+            game.session.gamepad(yami_games::RIGHT);
+            assert_eq!(game.session.gamepad_held(), yami_games::RIGHT);
+        }
+        app.suspend_gamepad();
+        if let PageState::Game(game) = &app.browser.active().state {
+            assert_eq!(game.session.gamepad_held(), 0);
+        }
     }
 }

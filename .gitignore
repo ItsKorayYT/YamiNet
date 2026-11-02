@@ -19,6 +19,12 @@ dht-*-maintenance.status
 /work/
 /dist/
 
+# Local offline Cargo registry/vendor mirrors and benchmark logs.
+/.cargo-home/
+/.cargo-vendor/
+/baseline-measure.log
+/browser-tests.log
+
 __pycache__/
 
 # Independent Wasm guest build output; only the reviewed module is checked in.

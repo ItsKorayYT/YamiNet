@@ -202,6 +202,8 @@ cargo build --workspace --locked
 - [Discover and website directory format](docs/discover.md)
 - [Full-text search guide](docs/fulltext-search.md) and [validation](docs/fulltext-validation.md)
 - [Native game ABI and sandbox limits](docs/games-0.1.md)
+- [Games 0.3 sprites, audio and hosted play](docs/games-0.3.md)
+- [Games 0.4 milestone 1 SDK, controllers and measurements](docs/games-0.4-milestone-1.md)
 - [Node, network and relay configuration](docs/configuration.md)
 - [Release engineering and packaging](docs/releases.md)
 - [0.3.1 validation and remaining manual tests](docs/validation-0.3.1.md)

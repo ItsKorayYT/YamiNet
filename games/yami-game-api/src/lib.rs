@@ -1,5 +1,30 @@
 //! Small Rust guest SDK for Yami Games ABI 1 and 2. Target wasm32-unknown-unknown.
+//!
+//! The root module contains the version 1 drawing and input helpers. `v2`
+//! contains the opt-in sprites, pointer input and audio API. The remaining
+//! modules are pure, allocation-free helpers shared by games:
+//!
+//! - [`anim`]: fixed-step clips and animation-state selection
+//! - [`sheet`]: sprite-sheet geometry and drawing
+//! - [`tilemap`]: bounded tile queries, culling and tile drawing
+//! - [`collision`]: AABB/circle overlap and movement primitives
+//! - [`motion`]: kinematic bodies with axis-separated tile collision
+//! - [`ui`]: measured text alignment, HUD panels, bars, pips and counters
+//! - [`pad`]: digital controller/keyboard views over the shared input mask
 #![no_std]
+#[cfg(test)]
+extern crate std;
+pub mod anim;
+pub mod collision;
+pub mod motion;
+pub mod pad;
+pub mod sheet;
+pub mod tilemap;
+pub mod ui;
+pub const WIDTH: i32 = 640;
+pub const HEIGHT: i32 = 480;
+pub const MAX_COMMANDS: usize = 512;
+pub use v2::{ACTION, DOWN, MOUSE_LEFT, MOUSE_RIGHT, SECONDARY, UP};
 pub const LEFT: u32 = 1;
 pub const RIGHT: u32 = 2;
 pub const START: u32 = 4;
