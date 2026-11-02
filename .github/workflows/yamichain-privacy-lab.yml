@@ -1,0 +1,39 @@
+name: Isolated YamiChain privacy experiment
+on:
+  push:
+    branches: [development/yamichain]
+    paths:
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'experiments/yamichain-privacy-lab/**'
+      - 'crates/yami-chain*/**'
+      - 'tools/check-chain-independence.py'
+      - '.github/workflows/yamichain-privacy-lab.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  offline:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@1.90.0
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            . -> target
+            experiments/yamichain-privacy-lab -> target
+      - name: Check isolated lab and sealed production boundary
+        shell: bash
+        run: |
+          set -euo pipefail
+          manifest=experiments/yamichain-privacy-lab/Cargo.toml
+          cargo fmt --manifest-path "$manifest" -- --check
+          cargo clippy --manifest-path "$manifest" --all-targets --locked -- -D warnings
+          cargo test --manifest-path "$manifest" --locked
+          cargo test --manifest-path "$manifest" --release --locked
+          cargo run --manifest-path "$manifest" --release --locked --example offline
+          cargo test -p yami-chain -p yami-chain-naming -p yami-chain-privacy -p yami-chain-storage -p yami-chain-consensus --release --locked
+          python tools/check-chain-independence.py

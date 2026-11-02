@@ -6,6 +6,9 @@ import subprocess
 metadata = json.loads(subprocess.check_output(
     ['cargo', 'metadata', '--no-deps', '--format-version', '1', '--locked'], text=True))
 packages = {p['name']: p for p in metadata['packages']}
+for package in packages.values():
+    if any(d['name'] == 'yamichain-privacy-lab' for d in package['dependencies']):
+        raise SystemExit(f"FAIL: workspace package {package['name']} depends on offline privacy lab")
 protected = ['yami-browser', 'yami-node', 'yami-relay-cli', 'yami-testnet',
              'yami-yns', 'yami-identity', 'yami-dht', 'yami-games']
 for root in protected:

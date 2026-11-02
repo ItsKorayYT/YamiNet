@@ -37,3 +37,4 @@ yns.tmp
 /fuzz/corpus/
 /fuzz/artifacts/
 /fuzz/coverage/
+/experiments/yamichain-privacy-lab/target/

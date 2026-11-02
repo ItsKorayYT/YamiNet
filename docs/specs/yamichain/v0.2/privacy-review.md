@@ -1,6 +1,14 @@
 # Privacy backend gate — 2026-11-02
 
-Decision: **DEFER selection and proof integration**. Ordinary payments must remain
+Follow-up: the user's Milestone A instruction separately authorizes an **offline**
+real-proof experiment. [The isolated RingCT lab](../../../../experiments/yamichain-privacy-lab/README.md)
+pins monero-oxide's complete CLSAG/Bulletproofs+ wallet path and records evidence,
+formats, tests and limitations. This selects an experimental baseline only;
+consensus backend selection/activation remains deferred. Orchard is excluded at
+the user's request. The original comparison below is historical, not an
+instruction to block the newly authorized offline work.
+
+Original decision: **DEFER selection and proof integration**. Ordinary payments must remain
 shielded; all payment/protocol proof versions remain rejected in debug and release.
 No transparent fallback, new proof dependency, wallet, mint or private-value wire
 format was introduced. This is a source/licensing assessment, not a cryptographic

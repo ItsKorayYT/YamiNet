@@ -1,0 +1,170 @@
+# Generated from cargo metadata --locked; declared licenses, not a legal/audit attestation.
+name	version	license	source
+aead	0.5.2	MIT OR Apache-2.0	registry+https://github.com/rust-lang/crates.io-index
+age	0.11.1	MIT OR Apache-2.0	registry+https://github.com/rust-lang/crates.io-index
+age-core	0.11.0	MIT OR Apache-2.0	registry+https://github.com/rust-lang/crates.io-index
+arc-swap	1.9.3	MIT OR Apache-2.0	registry+https://github.com/rust-lang/crates.io-index
+autocfg	1.5.1	Apache-2.0 OR MIT	registry+https://github.com/rust-lang/crates.io-index
+base64	0.21.7	MIT OR Apache-2.0	registry+https://github.com/rust-lang/crates.io-index
+basic-toml	0.1.10	MIT OR Apache-2.0	registry+https://github.com/rust-lang/crates.io-index
+bech32	0.9.1	MIT	registry+https://github.com/rust-lang/crates.io-index
+bitflags	2.13.2	MIT OR Apache-2.0	registry+https://github.com/rust-lang/crates.io-index
+block-buffer	0.10.4	MIT OR Apache-2.0	registry+https://github.com/rust-lang/crates.io-index
+block-buffer	0.12.1	MIT OR Apache-2.0	registry+https://github.com/rust-lang/crates.io-index
+cfg-if	1.0.5	MIT OR Apache-2.0	registry+https://github.com/rust-lang/crates.io-index
+chacha20	0.9.1	Apache-2.0 OR MIT	registry+https://github.com/rust-lang/crates.io-index
+chacha20poly1305	0.10.1	Apache-2.0 OR MIT	registry+https://github.com/rust-lang/crates.io-index
+cipher	0.4.4	MIT OR Apache-2.0	registry+https://github.com/rust-lang/crates.io-index
+const-oid	0.10.2	Apache-2.0 OR MIT	registry+https://github.com/rust-lang/crates.io-index
+cookie-factory	0.3.3	MIT	registry+https://github.com/rust-lang/crates.io-index
+cpufeatures	0.2.17	MIT OR Apache-2.0	registry+https://github.com/rust-lang/crates.io-index
+cpufeatures	0.3.1	MIT OR Apache-2.0	registry+https://github.com/rust-lang/crates.io-index
+crypto-bigint	0.5.5	Apache-2.0 OR MIT	registry+https://github.com/rust-lang/crates.io-index
+crypto-common	0.1.7	MIT OR Apache-2.0	registry+https://github.com/rust-lang/crates.io-index
+crypto-common	0.2.2	MIT OR Apache-2.0	registry+https://github.com/rust-lang/crates.io-index
+curve25519-dalek	4.1.3	BSD-3-Clause	registry+https://github.com/rust-lang/crates.io-index
+curve25519-dalek	5.0.0	BSD-3-Clause	registry+https://github.com/rust-lang/crates.io-index
+curve25519-dalek-derive	0.1.1	MIT/Apache-2.0	registry+https://github.com/rust-lang/crates.io-index
+digest	0.10.7	MIT OR Apache-2.0	registry+https://github.com/rust-lang/crates.io-index
+digest	0.11.3	MIT OR Apache-2.0	registry+https://github.com/rust-lang/crates.io-index
+displaydoc	0.2.7	MIT OR Apache-2.0	registry+https://github.com/rust-lang/crates.io-index
+ed25519	3.0.0	Apache-2.0 OR MIT	registry+https://github.com/rust-lang/crates.io-index
+ed25519-dalek	3.0.0	BSD-3-Clause	registry+https://github.com/rust-lang/crates.io-index
+ff	0.13.1	MIT/Apache-2.0	registry+https://github.com/rust-lang/crates.io-index
+fiat-crypto	0.2.9	MIT OR Apache-2.0 OR BSD-1-Clause	registry+https://github.com/rust-lang/crates.io-index
+fiat-crypto	0.3.0	MIT OR Apache-2.0 OR BSD-1-Clause	registry+https://github.com/rust-lang/crates.io-index
+find-crate	0.6.3	Apache-2.0 OR MIT	registry+https://github.com/rust-lang/crates.io-index
+fluent	0.16.1	Apache-2.0 OR MIT	registry+https://github.com/rust-lang/crates.io-index
+fluent-bundle	0.15.3	Apache-2.0 OR MIT	registry+https://github.com/rust-lang/crates.io-index
+fluent-langneg	0.13.1	Apache-2.0 OR MIT	registry+https://github.com/rust-lang/crates.io-index
+fluent-syntax	0.11.1	Apache-2.0 OR MIT	registry+https://github.com/rust-lang/crates.io-index
+foldhash	0.2.0	Zlib	registry+https://github.com/rust-lang/crates.io-index
+futures	0.3.34	MIT OR Apache-2.0	registry+https://github.com/rust-lang/crates.io-index
+futures-channel	0.3.34	MIT OR Apache-2.0	registry+https://github.com/rust-lang/crates.io-index
+futures-core	0.3.34	MIT OR Apache-2.0	registry+https://github.com/rust-lang/crates.io-index
+futures-executor	0.3.34	MIT OR Apache-2.0	registry+https://github.com/rust-lang/crates.io-index
+futures-io	0.3.34	MIT OR Apache-2.0	registry+https://github.com/rust-lang/crates.io-index
+futures-macro	0.3.34	MIT OR Apache-2.0	registry+https://github.com/rust-lang/crates.io-index
+futures-sink	0.3.34	MIT OR Apache-2.0	registry+https://github.com/rust-lang/crates.io-index
+futures-task	0.3.34	MIT OR Apache-2.0	registry+https://github.com/rust-lang/crates.io-index
+futures-util	0.3.34	MIT OR Apache-2.0	registry+https://github.com/rust-lang/crates.io-index
+generic-array	0.14.7	MIT	registry+https://github.com/rust-lang/crates.io-index
+getrandom	0.2.17	MIT OR Apache-2.0	registry+https://github.com/rust-lang/crates.io-index
+group	0.13.0	MIT/Apache-2.0	registry+https://github.com/rust-lang/crates.io-index
+hashbrown	0.16.1	MIT OR Apache-2.0	registry+https://github.com/rust-lang/crates.io-index
+hex	0.4.3	MIT OR Apache-2.0	registry+https://github.com/rust-lang/crates.io-index
+hex-literal	1.1.0	MIT OR Apache-2.0	registry+https://github.com/rust-lang/crates.io-index
+hkdf	0.12.4	MIT OR Apache-2.0	registry+https://github.com/rust-lang/crates.io-index
+hmac	0.12.1	MIT OR Apache-2.0	registry+https://github.com/rust-lang/crates.io-index
+hybrid-array	0.4.15	MIT OR Apache-2.0	registry+https://github.com/rust-lang/crates.io-index
+i18n-config	0.4.8	MIT	registry+https://github.com/rust-lang/crates.io-index
+i18n-embed	0.15.4	MIT	registry+https://github.com/rust-lang/crates.io-index
+i18n-embed-fl	0.9.4	MIT	registry+https://github.com/rust-lang/crates.io-index
+i18n-embed-impl	0.8.4	MIT	registry+https://github.com/rust-lang/crates.io-index
+inout	0.1.4	MIT OR Apache-2.0	registry+https://github.com/rust-lang/crates.io-index
+intl-memoizer	0.5.3	Apache-2.0 OR MIT	registry+https://github.com/rust-lang/crates.io-index
+intl_pluralrules	7.0.2	Apache-2.0/MIT	registry+https://github.com/rust-lang/crates.io-index
+io_tee	0.1.1	MIT OR Apache-2.0	registry+https://github.com/rust-lang/crates.io-index
+keccak	0.1.6	Apache-2.0 OR MIT	registry+https://github.com/rust-lang/crates.io-index
+lazy_static	1.5.1	MIT OR Apache-2.0	registry+https://github.com/rust-lang/crates.io-index
+libc	0.2.191	MIT OR Apache-2.0	registry+https://github.com/rust-lang/crates.io-index
+libm	0.2.16	MIT	registry+https://github.com/rust-lang/crates.io-index
+lock_api	0.4.14	MIT OR Apache-2.0	registry+https://github.com/rust-lang/crates.io-index
+log	0.4.35	MIT OR Apache-2.0	registry+https://github.com/rust-lang/crates.io-index
+memchr	2.8.3	Unlicense OR MIT	registry+https://github.com/rust-lang/crates.io-index
+mime	0.3.17	MIT OR Apache-2.0	registry+https://github.com/rust-lang/crates.io-index
+mime_guess	2.0.5	MIT	registry+https://github.com/rust-lang/crates.io-index
+minimal-lexical	0.2.1	MIT/Apache-2.0	registry+https://github.com/rust-lang/crates.io-index
+monero-address	0.1.0	MIT	git+https://github.com/monero-oxide/monero-oxide?rev=a6b46701fb9b331006d7f2f2278bf51f123b1447#a6b46701fb9b331006d7f2f2278bf51f123b1447
+monero-base58	0.1.0	MIT	git+https://github.com/monero-oxide/monero-oxide?rev=a6b46701fb9b331006d7f2f2278bf51f123b1447#a6b46701fb9b331006d7f2f2278bf51f123b1447
+monero-borromean	0.1.0	MIT	git+https://github.com/monero-oxide/monero-oxide?rev=a6b46701fb9b331006d7f2f2278bf51f123b1447#a6b46701fb9b331006d7f2f2278bf51f123b1447
+monero-bulletproofs	0.1.0	MIT	git+https://github.com/monero-oxide/monero-oxide?rev=a6b46701fb9b331006d7f2f2278bf51f123b1447#a6b46701fb9b331006d7f2f2278bf51f123b1447
+monero-bulletproofs-generators	0.1.0	MIT	git+https://github.com/monero-oxide/monero-oxide?rev=a6b46701fb9b331006d7f2f2278bf51f123b1447#a6b46701fb9b331006d7f2f2278bf51f123b1447
+monero-clsag	0.1.0	MIT	git+https://github.com/monero-oxide/monero-oxide?rev=a6b46701fb9b331006d7f2f2278bf51f123b1447#a6b46701fb9b331006d7f2f2278bf51f123b1447
+monero-ed25519	0.1.0	MIT	git+https://github.com/monero-oxide/monero-oxide?rev=a6b46701fb9b331006d7f2f2278bf51f123b1447#a6b46701fb9b331006d7f2f2278bf51f123b1447
+monero-interface	0.2.1	MIT	git+https://github.com/monero-oxide/monero-oxide?rev=a6b46701fb9b331006d7f2f2278bf51f123b1447#a6b46701fb9b331006d7f2f2278bf51f123b1447
+monero-io	0.1.0	MIT	git+https://github.com/monero-oxide/monero-oxide?rev=a6b46701fb9b331006d7f2f2278bf51f123b1447#a6b46701fb9b331006d7f2f2278bf51f123b1447
+monero-mlsag	0.1.0	MIT	git+https://github.com/monero-oxide/monero-oxide?rev=a6b46701fb9b331006d7f2f2278bf51f123b1447#a6b46701fb9b331006d7f2f2278bf51f123b1447
+monero-oxide	0.1.0	MIT	git+https://github.com/monero-oxide/monero-oxide?rev=a6b46701fb9b331006d7f2f2278bf51f123b1447#a6b46701fb9b331006d7f2f2278bf51f123b1447
+monero-primitives	0.1.0	MIT	git+https://github.com/monero-oxide/monero-oxide?rev=a6b46701fb9b331006d7f2f2278bf51f123b1447#a6b46701fb9b331006d7f2f2278bf51f123b1447
+monero-wallet	0.2.0	MIT	git+https://github.com/monero-oxide/monero-oxide?rev=a6b46701fb9b331006d7f2f2278bf51f123b1447#a6b46701fb9b331006d7f2f2278bf51f123b1447
+nom	7.1.3	MIT	registry+https://github.com/rust-lang/crates.io-index
+num-traits	0.2.19	MIT OR Apache-2.0	registry+https://github.com/rust-lang/crates.io-index
+opaque-debug	0.3.1	MIT OR Apache-2.0	registry+https://github.com/rust-lang/crates.io-index
+parking_lot	0.12.5	MIT OR Apache-2.0	registry+https://github.com/rust-lang/crates.io-index
+parking_lot_core	0.9.12	MIT OR Apache-2.0	registry+https://github.com/rust-lang/crates.io-index
+pbkdf2	0.12.2	MIT OR Apache-2.0	registry+https://github.com/rust-lang/crates.io-index
+pin-project	1.1.13	Apache-2.0 OR MIT	registry+https://github.com/rust-lang/crates.io-index
+pin-project-internal	1.1.13	Apache-2.0 OR MIT	registry+https://github.com/rust-lang/crates.io-index
+pin-project-lite	0.2.17	Apache-2.0 OR MIT	registry+https://github.com/rust-lang/crates.io-index
+poly1305	0.8.0	Apache-2.0 OR MIT	registry+https://github.com/rust-lang/crates.io-index
+ppv-lite86	0.2.21	MIT OR Apache-2.0	registry+https://github.com/rust-lang/crates.io-index
+proc-macro-error-attr2	2.0.0	MIT OR Apache-2.0	registry+https://github.com/rust-lang/crates.io-index
+proc-macro-error2	2.0.1	MIT OR Apache-2.0	registry+https://github.com/rust-lang/crates.io-index
+proc-macro2	1.0.107	MIT OR Apache-2.0	registry+https://github.com/rust-lang/crates.io-index
+quote	1.0.47	MIT OR Apache-2.0	registry+https://github.com/rust-lang/crates.io-index
+rand	0.8.8	MIT OR Apache-2.0	registry+https://github.com/rust-lang/crates.io-index
+rand_chacha	0.3.1	MIT OR Apache-2.0	registry+https://github.com/rust-lang/crates.io-index
+rand_core	0.6.4	MIT OR Apache-2.0	registry+https://github.com/rust-lang/crates.io-index
+rand_distr	0.4.3	MIT OR Apache-2.0	registry+https://github.com/rust-lang/crates.io-index
+redox_syscall	0.5.18	MIT	registry+https://github.com/rust-lang/crates.io-index
+rust-embed	8.13.0	MIT	registry+https://github.com/rust-lang/crates.io-index
+rust-embed-impl	8.13.0	MIT	registry+https://github.com/rust-lang/crates.io-index
+rust-embed-utils	8.13.0	MIT	registry+https://github.com/rust-lang/crates.io-index
+rustc-hash	1.1.0	Apache-2.0/MIT	registry+https://github.com/rust-lang/crates.io-index
+rustc-hash	2.1.3	Apache-2.0 OR MIT	registry+https://github.com/rust-lang/crates.io-index
+rustc_version	0.4.1	MIT OR Apache-2.0	registry+https://github.com/rust-lang/crates.io-index
+rustversion	1.0.23	MIT OR Apache-2.0	registry+https://github.com/rust-lang/crates.io-index
+salsa20	0.10.2	MIT OR Apache-2.0	registry+https://github.com/rust-lang/crates.io-index
+same-file	1.0.6	Unlicense/MIT	registry+https://github.com/rust-lang/crates.io-index
+scopeguard	1.2.0	MIT OR Apache-2.0	registry+https://github.com/rust-lang/crates.io-index
+scrypt	0.11.0	MIT OR Apache-2.0	registry+https://github.com/rust-lang/crates.io-index
+secrecy	0.10.3	Apache-2.0 OR MIT	registry+https://github.com/rust-lang/crates.io-index
+self_cell	0.10.3	Apache-2.0	registry+https://github.com/rust-lang/crates.io-index
+self_cell	1.3.0	Apache-2.0 OR GPL-2.0-only	registry+https://github.com/rust-lang/crates.io-index
+semver	1.0.28	MIT OR Apache-2.0	registry+https://github.com/rust-lang/crates.io-index
+serde	1.0.229	MIT OR Apache-2.0	registry+https://github.com/rust-lang/crates.io-index
+serde_core	1.0.229	MIT OR Apache-2.0	registry+https://github.com/rust-lang/crates.io-index
+serde_derive	1.0.229	MIT OR Apache-2.0	registry+https://github.com/rust-lang/crates.io-index
+sha2	0.10.9	MIT OR Apache-2.0	registry+https://github.com/rust-lang/crates.io-index
+sha2	0.11.1	MIT OR Apache-2.0	registry+https://github.com/rust-lang/crates.io-index
+sha3	0.10.9	MIT OR Apache-2.0	registry+https://github.com/rust-lang/crates.io-index
+signature	3.0.0	Apache-2.0 OR MIT	registry+https://github.com/rust-lang/crates.io-index
+slab	0.4.12	MIT	registry+https://github.com/rust-lang/crates.io-index
+smallvec	1.16.4	MIT OR Apache-2.0	registry+https://github.com/rust-lang/crates.io-index
+spin	0.10.1	MIT	registry+https://github.com/rust-lang/crates.io-index
+std-shims	0.1.5	MIT	registry+https://github.com/rust-lang/crates.io-index
+strsim	0.11.1	MIT	registry+https://github.com/rust-lang/crates.io-index
+subtle	2.6.1	BSD-3-Clause	registry+https://github.com/rust-lang/crates.io-index
+syn	2.0.119	MIT OR Apache-2.0	registry+https://github.com/rust-lang/crates.io-index
+syn	3.0.9	MIT OR Apache-2.0	registry+https://github.com/rust-lang/crates.io-index
+thiserror	1.0.69	MIT OR Apache-2.0	registry+https://github.com/rust-lang/crates.io-index
+thiserror	2.0.21	MIT OR Apache-2.0	registry+https://github.com/rust-lang/crates.io-index
+thiserror-impl	1.0.69	MIT OR Apache-2.0	registry+https://github.com/rust-lang/crates.io-index
+thiserror-impl	2.0.21	MIT OR Apache-2.0	registry+https://github.com/rust-lang/crates.io-index
+tinystr	0.8.5	Unicode-3.0	registry+https://github.com/rust-lang/crates.io-index
+toml	0.5.11	MIT/Apache-2.0	registry+https://github.com/rust-lang/crates.io-index
+type-map	0.5.1	MIT/Apache-2.0	registry+https://github.com/rust-lang/crates.io-index
+typenum	1.20.1	MIT OR Apache-2.0	registry+https://github.com/rust-lang/crates.io-index
+unic-langid	0.9.6	MIT OR Apache-2.0	registry+https://github.com/rust-lang/crates.io-index
+unic-langid-impl	0.9.6	MIT OR Apache-2.0	registry+https://github.com/rust-lang/crates.io-index
+unicase	2.10.0	MIT OR Apache-2.0	registry+https://github.com/rust-lang/crates.io-index
+unicode-ident	1.0.27	(MIT OR Apache-2.0) AND Unicode-3.0	registry+https://github.com/rust-lang/crates.io-index
+universal-hash	0.5.1	MIT OR Apache-2.0	registry+https://github.com/rust-lang/crates.io-index
+version_check	0.9.5	MIT/Apache-2.0	registry+https://github.com/rust-lang/crates.io-index
+walkdir	2.5.0	Unlicense/MIT	registry+https://github.com/rust-lang/crates.io-index
+wasi	0.11.1+wasi-snapshot-preview1	Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT	registry+https://github.com/rust-lang/crates.io-index
+winapi-util	0.1.11	Unlicense OR MIT	registry+https://github.com/rust-lang/crates.io-index
+windows-link	0.2.1	MIT OR Apache-2.0	registry+https://github.com/rust-lang/crates.io-index
+windows-sys	0.61.2	MIT OR Apache-2.0	registry+https://github.com/rust-lang/crates.io-index
+x25519-dalek	2.0.1	BSD-3-Clause	registry+https://github.com/rust-lang/crates.io-index
+yami-chain	0.1.0	GPL-3.0-only	local
+yami-chain-naming	0.1.0	GPL-3.0-only	local
+yami-chain-privacy	0.1.0	GPL-3.0-only	local
+yamichain-privacy-lab	0.1.0	GPL-3.0-only	local
+zerocopy	0.8.63	BSD-2-Clause OR Apache-2.0 OR MIT	registry+https://github.com/rust-lang/crates.io-index
+zerocopy-derive	0.8.63	BSD-2-Clause OR Apache-2.0 OR MIT	registry+https://github.com/rust-lang/crates.io-index
+zerofrom	0.1.8	Unicode-3.0	registry+https://github.com/rust-lang/crates.io-index
+zeroize	1.8.2	Apache-2.0 OR MIT	registry+https://github.com/rust-lang/crates.io-index
+zeroize_derive	1.5.0	Apache-2.0 OR MIT	registry+https://github.com/rust-lang/crates.io-index
+zerovec	0.11.9	Unicode-3.0	registry+https://github.com/rust-lang/crates.io-index
