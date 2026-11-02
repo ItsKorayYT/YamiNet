@@ -4,6 +4,7 @@ use std::{
     fs::{self, File, OpenOptions},
     io::{self, Read, Write},
     path::{Path, PathBuf},
+    sync::Mutex,
 };
 use yami_chain::{
     codec::{Reader, Writer},
@@ -45,8 +46,8 @@ fn invalid(error: impl std::fmt::Display) -> io::Error {
 }
 
 pub fn read_bounded(path: &Path, limit: usize) -> io::Result<Vec<u8>> {
-    if fs::symlink_metadata(path)?.file_type().is_symlink() {
-        return Err(invalid("symlinked record"));
+    if !fs::symlink_metadata(path)?.file_type().is_file() {
+        return Err(invalid("record must be a regular file"));
     }
     let f = File::open(path)?;
     if f.metadata()?.len() > limit as u64 {
@@ -64,6 +65,7 @@ pub fn read_bounded(path: &Path, limit: usize) -> io::Result<Vec<u8>> {
 pub struct Journal {
     path: PathBuf,
     _lock: File,
+    write_lock: Mutex<()>,
 }
 impl Journal {
     pub fn open(path: &Path) -> io::Result<Self> {
@@ -72,7 +74,7 @@ impl Journal {
             return Err(invalid("symlinked store"));
         }
         let lock_path = path.join("store.lock");
-        if lock_path.exists() && fs::symlink_metadata(&lock_path)?.file_type().is_symlink() {
+        if fs::symlink_metadata(&lock_path).is_ok_and(|m| !m.file_type().is_file()) {
             return Err(invalid("symlinked lock"));
         }
         let lock = OpenOptions::new()
@@ -86,6 +88,7 @@ impl Journal {
         let journal = Self {
             path: path.to_owned(),
             _lock: lock,
+            write_lock: Mutex::new(()),
         };
         // Only this process can mutate these files now. Unrenamed records were
         // never acknowledged. Malachite WAL has its own recovery semantics.
@@ -112,7 +115,14 @@ impl Journal {
     }
     /// Under the store lock; never replace a committed destination.
     pub fn write_once(&self, name: &str, bytes: &[u8]) -> io::Result<()> {
-        if name.is_empty()
+        let _guard = self
+            .write_lock
+            .lock()
+            .map_err(|_| invalid("poisoned store lock"))?;
+        if !name
+            .as_bytes()
+            .first()
+            .is_some_and(u8::is_ascii_alphanumeric)
             || !name
                 .bytes()
                 .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'.')
@@ -123,7 +133,7 @@ impl Journal {
             return Err(invalid("record cap"));
         }
         let final_path = self.path.join(name);
-        if final_path.exists() {
+        if fs::symlink_metadata(&final_path).is_ok() {
             if read_bounded(&final_path, MAX_RECORD_BYTES)? == bytes {
                 return Ok(());
             }
@@ -160,7 +170,21 @@ impl Journal {
         verify: impl Fn(&FinalizedRecord) -> io::Result<()>,
     ) -> io::Result<State> {
         self.write_once("genesis.bin", &genesis.canonical())?;
-        let mut heights = Vec::new();
+        // Replay in height order with constant history-index memory. A second
+        // streaming directory pass rejects gaps and noncanonical filenames.
+        let mut state = State::new(genesis).map_err(invalid)?;
+        while let Some(record) = self.record(
+            state
+                .height()
+                .checked_add(1)
+                .ok_or_else(|| invalid("height overflow"))?,
+        )? {
+            if record.block.header.height != state.height() + 1 {
+                return Err(invalid("record height mismatch"));
+            }
+            verify(&record)?;
+            state = state.execute(&record.block).map_err(invalid)?;
+        }
         for entry in fs::read_dir(&self.path)? {
             let name = entry?.file_name();
             let name = name.to_string_lossy();
@@ -169,33 +193,36 @@ impl Journal {
                 .and_then(|s| s.strip_suffix(".bin"))
             {
                 let value = height.parse::<u64>().map_err(invalid)?;
-                if name != format!("finalized-{value:020}.bin") {
-                    return Err(invalid("noncanonical filename"));
+                if name != format!("finalized-{value:020}.bin")
+                    || value == 0
+                    || value > state.height()
+                {
+                    return Err(invalid("noncanonical filename or finalized history gap"));
                 }
-                heights.push(value);
             }
-        }
-        heights.sort_unstable();
-        let mut state = State::new(genesis).map_err(invalid)?;
-        for height in heights {
-            if height
-                != state
-                    .height()
-                    .checked_add(1)
-                    .ok_or_else(|| invalid("height overflow"))?
-            {
-                return Err(invalid("finalized history gap"));
-            }
-            let record = self
-                .record(height)?
-                .ok_or_else(|| invalid("missing record"))?;
-            if record.block.header.height != height {
-                return Err(invalid("record height mismatch"));
-            }
-            verify(&record)?;
-            state = state.execute(&record.block).map_err(invalid)?;
         }
         Ok(state)
+    }
+    /// Delete only reproducible payloads at already authenticated finalized heights.
+    /// Signing records, evidence, WAL and certified history are never removed.
+    pub fn remove_finalized_candidates(&self, finalized: u64) -> io::Result<()> {
+        for entry in fs::read_dir(&self.path)? {
+            let entry = entry?;
+            let name = entry.file_name();
+            let Some(name) = name.to_str() else { continue };
+            let tail = name
+                .strip_prefix("candidate-")
+                .or_else(|| name.strip_prefix("proposal-"));
+            if let Some(height) = tail
+                .and_then(|s| s.split('-').next())
+                .and_then(|s| s.parse::<u64>().ok())
+            {
+                if height <= finalized {
+                    fs::remove_file(entry.path())?;
+                }
+            }
+        }
+        self.sync_dir()
     }
     /// Persist BEFORE producing/releasing the signature, even if later work fails.
     pub fn reserve_signature(
@@ -294,6 +321,28 @@ mod tests {
             .is_err());
         fs::write(path.join("finalized-00000000000000000001.bin"), b"broken").unwrap();
         assert!(j.replay(genesis, |_| Ok(())).is_err());
+        drop(j);
+        fs::remove_dir_all(path).unwrap();
+    }
+    #[test]
+    fn invalid_names_and_non_regular_records_are_rejected() {
+        let path = dir();
+        let j = Journal::open(&path).unwrap();
+        for name in ["", ".", "..", "../outside", ".pending-hidden", "a/b"] {
+            assert!(j.write_once(name, b"bad").is_err());
+        }
+        assert!(read_bounded(&path, 100).is_err());
+        fs::write(path.join("oversize"), [0; 17]).unwrap();
+        assert!(read_bounded(&path.join("oversize"), 16).is_err());
+        #[cfg(unix)]
+        {
+            std::os::unix::fs::symlink(path.join("absent"), path.join("dangling")).unwrap();
+            assert!(j.write_once("dangling", b"must not replace").is_err());
+            assert!(fs::symlink_metadata(path.join("dangling"))
+                .unwrap()
+                .file_type()
+                .is_symlink());
+        }
         drop(j);
         fs::remove_dir_all(path).unwrap();
     }

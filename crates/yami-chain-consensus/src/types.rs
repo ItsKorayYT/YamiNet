@@ -128,6 +128,7 @@ pub struct Part {
     pub valid_round: m::Round,
     pub proposer: Address,
     pub block: Block,
+    pub signature: [u8; 64],
 }
 impl m::ProposalPart<Context> for Part {
     fn is_first(&self) -> bool {

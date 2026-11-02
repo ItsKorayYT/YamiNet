@@ -199,7 +199,9 @@ impl Wire for Part {
         put_round(w, self.round);
         put_round(w, self.valid_round);
         w.raw(&self.proposer.0 .0);
-        w.bytes(&self.block.canonical()?)
+        w.bytes(&self.block.canonical()?)?;
+        w.raw(&self.signature);
+        Ok(())
     }
     fn get(r: &mut Reader<'_>) -> Result<Self> {
         Ok(Self {
@@ -208,6 +210,7 @@ impl Wire for Part {
             valid_round: get_round(r)?,
             proposer: Address(Digest(r.array()?)),
             block: Block::decode(r.bytes(MAX_BLOCK_BYTES)?)?,
+            signature: r.array()?,
         })
     }
 }

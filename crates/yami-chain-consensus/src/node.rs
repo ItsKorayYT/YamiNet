@@ -1,5 +1,6 @@
 pub use crate::signing::CrashPoint;
 use crate::{
+    candidates::Candidates,
     signing::{maybe_crash, DurableSigner, SignatureVerifier},
     types::*,
     wire::{
@@ -24,13 +25,12 @@ use malachite::{
     RequestContext, SyncContext, WalContext,
 };
 use std::{
-    collections::BTreeMap,
     path::{Path, PathBuf},
     sync::Arc,
     time::Duration,
 };
-use yami_chain::{development_key, Block, Digest, Genesis, State, MAX_BLOCK_BYTES};
-use yami_chain_storage::{read_bounded, FinalizedRecord, Journal};
+use yami_chain::{development_key, Block, Digest, Genesis, State};
+use yami_chain_storage::{FinalizedRecord, Journal};
 
 #[derive(Clone)]
 struct Config {
@@ -151,11 +151,11 @@ pub async fn run_node(options: NodeOptions) -> Result<State> {
     }
     let key = development_key("consensus", options.index);
     let address = Address(Digest(key.verifying_key().to_bytes()));
-    let signer = DurableSigner {
+    let signer = Arc::new(DurableSigner {
         key,
         journal: journal.clone(),
         crash: options.crash,
-    };
+    });
     let keypair = transport(options.index)?;
     use malachite_signing::Signer as _;
     let proof = signer
@@ -181,14 +181,14 @@ pub async fn run_node(options: NodeOptions) -> Result<State> {
             .with_default_consensus(ConsensusContext::new_validator(
                 address,
                 Box::new(SignatureVerifier),
-                Box::new(signer),
+                Box::new((*signer).clone()),
             ))
             .with_default_sync(SyncContext::new(WireCodec))
             .with_default_request(RequestContext::new(16))
             .build()
             .await?;
     let result = tokio::select! {
-        result=tokio::time::timeout(options.timeout,app_loop(state,journal.clone(),&mut channels,&options))=> {
+        result=tokio::time::timeout(options.timeout,app_loop(state,journal.clone(),&mut channels,&options,signer.clone()))=> {
             result.unwrap_or_else(|_|Err(eyre!("local consensus deadline reached; quorum/liveness not established")))
         },
         signal=tokio::signal::ctrl_c()=>{signal.map_err(eyre::Report::from).and_then(|()|journal.replay(Genesis::local(),verify_record).map_err(Into::into))},
@@ -198,44 +198,13 @@ pub async fn run_node(options: NodeOptions) -> Result<State> {
     result
 }
 
-fn pending_name(block: &Block) -> yami_chain::Result<String> {
-    Ok(format!(
-        "candidate-{:020}-{}.bin",
-        block.header.height,
-        block.id()?
-    ))
-}
-fn remember(journal: &Journal, blocks: &mut BTreeMap<Digest, Block>, block: Block) -> Result<()> {
-    let id = block.id()?;
-    if !blocks.contains_key(&id) {
-        if blocks.len() >= 64 {
-            return Err(eyre!("candidate quota exhausted"));
-        }
-        journal.write_once(&pending_name(&block)?, &block.canonical()?)?;
-        blocks.insert(id, block);
-    }
-    Ok(())
-}
-fn recover_candidates(journal: &Journal, state: &State) -> Result<BTreeMap<Digest, Block>> {
-    let mut blocks = BTreeMap::new();
-    let prefix = format!("candidate-{:020}-", state.height() + 1);
-    for entry in std::fs::read_dir(journal.path())? {
-        let entry = entry?;
-        if entry.file_name().to_string_lossy().starts_with(&prefix) {
-            if blocks.len() >= 64 {
-                return Err(eyre!("candidate quota exhausted"));
-            }
-            let block = Block::decode(&read_bounded(&entry.path(), MAX_BLOCK_BYTES)?)?;
-            state.execute(&block)?;
-            if entry.file_name().to_string_lossy() != pending_name(&block)? {
-                return Err(eyre!("candidate filename mismatch"));
-            }
-            blocks.insert(block.id()?, block);
-        }
-    }
-    Ok(blocks)
-}
-async fn publish(channels: &Channels<Context>, part: Part) -> Result<()> {
+async fn publish(
+    channels: &Channels<Context>,
+    signer: &DurableSigner,
+    mut part: Part,
+) -> Result<()> {
+    use malachite_signing::Signer as _;
+    part.signature = signer.sign_proposal(part.proposal()?).await?.signature;
     let id = part.block.id()?;
     channels
         .network
@@ -262,8 +231,10 @@ async fn app_loop(
     journal: Arc<Journal>,
     channels: &mut Channels<Context>,
     options: &NodeOptions,
+    signer: Arc<DurableSigner>,
 ) -> Result<State> {
-    let mut blocks = recover_candidates(&journal, &state)?;
+    let mut candidates = Candidates::new(journal.clone());
+    let mut active_round = m::Round::Nil;
     while let Some(msg) = channels.consensus.recv().await {
         match msg {
             AppMsg::ConsensusReady { reply } => {
@@ -272,27 +243,19 @@ async fn app_loop(
             AppMsg::StartedRound {
                 height,
                 round,
-                proposer,
                 reply_value,
                 ..
             } => {
                 if height.0 != state.height() + 1 {
                     return Err(eyre!("height/membership mismatch"));
                 }
-                // Return only previously built/received, executed and persisted
-                // payloads. Fresh peers must receive and validate real block data.
-                let proposals = blocks
-                    .values()
-                    .filter(|block| block.header.height == height.0)
-                    .map(|block| {
-                        proposal(&Part {
-                            height,
-                            round,
-                            valid_round: m::Round::Nil,
-                            proposer,
-                            block: block.clone(),
-                        })
-                    })
+                active_round = round;
+                // Recover the exact authenticated metadata for this round, never
+                // relabel arbitrary cached blocks as a fresh proposal.
+                let proposals = candidates
+                    .recover(&state, round)?
+                    .into_iter()
+                    .map(|part| proposal(&part))
                     .collect::<Result<Vec<_>>>()?;
                 let _ = reply_value.send(proposals);
             }
@@ -306,7 +269,7 @@ async fn app_loop(
                     return Err(eyre!("proposal height mismatch"));
                 }
                 let block = state.development_block()?;
-                remember(&journal, &mut blocks, block.clone())?;
+                candidates.store_block(&block)?;
                 let proposer = Context
                     .select_proposer(&Committee::local(), height, round)
                     .address;
@@ -316,28 +279,22 @@ async fn app_loop(
                     valid_round: m::Round::Nil,
                     proposer,
                     block,
+                    signature: [0; 64],
                 };
                 let _ = reply.send(LocallyProposedValue::new(
                     height,
                     round,
                     Value(part.block.id()?),
                 ));
-                publish(channels, part).await?;
+                publish(channels, &signer, part).await?;
             }
             AppMsg::ReceivedProposalPart { part, reply, .. } => {
                 let mut result = None;
                 if part.sequence == 0 {
                     if let StreamContent::Data(part) = part.content {
-                        if part.height.0 == state.height() + 1
-                            && part.block.header.height == part.height.0
-                            && part.round.is_defined()
-                            && Context
-                                .select_proposer(&Committee::local(), part.height, part.round)
-                                .address
-                                == part.proposer
-                            && state.execute(&part.block).is_ok()
+                        if part.round == active_round
+                            && candidates.admit(&state, active_round, &part)?
                         {
-                            remember(&journal, &mut blocks, part.block.clone())?;
                             result = Some(proposal(&part)?);
                         }
                     }
@@ -351,15 +308,17 @@ async fn app_loop(
                 address,
                 value_id,
             } => {
-                if let Some(block) = blocks.get(&value_id.0) {
+                if let Some(block) = candidates.block(height.0, value_id.0)? {
                     publish(
                         channels,
+                        &signer,
                         Part {
                             height,
                             round,
                             valid_round,
                             proposer: address,
-                            block: block.clone(),
+                            block,
+                            signature: [0; 64],
                         },
                     )
                     .await?;
@@ -391,10 +350,9 @@ async fn app_loop(
                 if !extensions.extensions.is_empty() {
                     return Err(eyre!("unexpected vote extensions"));
                 }
-                let block = blocks
-                    .get(&certificate.value_id.0)
-                    .ok_or_else(|| eyre!("decided payload unavailable"))?
-                    .clone();
+                let block = candidates
+                    .block(certificate.height.0, certificate.value_id.0)?
+                    .ok_or_else(|| eyre!("decided payload unavailable"))?;
                 verify_certificate(&block, &certificate)?;
                 let next = state.execute(&block)?;
                 maybe_crash(&journal, options.crash, CrashPoint::BeforeCommit)?;
@@ -419,7 +377,8 @@ async fn app_loop(
                 if state.height() >= options.target_height {
                     return Ok(state);
                 }
-                blocks = recover_candidates(&journal, &state)?;
+                candidates.prune_finalized(state.height())?;
+                active_round = m::Round::Nil;
                 let _ = reply.send(Next::Start(Height(state.height() + 1), params()));
             }
             AppMsg::GetHistoryMinHeight { reply } => {
@@ -475,8 +434,9 @@ async fn app_loop(
                             valid_round: m::Round::Nil,
                             proposer,
                             block,
+                            signature: [0; 64],
                         };
-                        remember(&journal, &mut blocks, part.block.clone())?;
+                        candidates.store_block(&part.block)?;
                         SyncedValueOutcome::Verdict(proposal(&part)?)
                     }
                     _ => SyncedValueOutcome::PeerFault,

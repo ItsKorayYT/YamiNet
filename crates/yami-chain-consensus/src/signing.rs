@@ -23,7 +23,7 @@ pub(crate) fn vote_preimage(v: &Vote) -> yami_chain::Result<Vec<u8>> {
     put_vote(&mut w, v)?;
     Ok(w.0)
 }
-fn proposal_preimage(p: &Proposal) -> Vec<u8> {
+pub(crate) fn proposal_preimage(p: &Proposal) -> Vec<u8> {
     let mut w = prefix(2);
     put_proposal(&mut w, p);
     w.0
@@ -51,6 +51,7 @@ pub(crate) fn maybe_crash(
     Ok(())
 }
 // Deliberately no Debug/Serialize: this object contains a consensus signing key.
+#[derive(Clone)]
 pub(crate) struct DurableSigner {
     pub key: SigningKey,
     pub journal: Arc<Journal>,

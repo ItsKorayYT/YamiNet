@@ -1,4 +1,5 @@
 //! Fixed-validator local Malachite adapter. NOT production-ready; no real money.
+mod candidates;
 mod node;
 mod signing;
 mod types;
