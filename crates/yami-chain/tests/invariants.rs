@@ -16,18 +16,18 @@ fn canonical_replay_and_versioned_vectors() {
         assert_eq!(a, b);
     }
     assert_eq!(initial.height(), 0);
-    // Independent Python hashlib/Ed25519 encoding, recorded in vectors.md.
+    // Independent Python hashlib/Ed25519 encoding, reproduced by tools/yamichain-v02-vectors.py.
     assert_eq!(
         initial.genesis().id().to_string(),
-        "d8b06ded9d9a1159dd872bf164abdba3e9f260b13369414fc1df7d4b8f19c806"
+        "8670929a7158fdd0734ac9d90d10c5ae1665486aa56df7df897147f45faa3550"
     );
     assert_eq!(
         initial.root().to_string(),
-        "ed53a6b3ac52317b8492c2e54b5c4f9af3a6938c35e73f7f7e94335b6b73e381"
+        "b0bf32e7b35dea08c5e5e09cfed574a550b7e7a5c0908efa17677974913241c8"
     );
     assert_eq!(
         a.root().to_string(),
-        "cb30e18ba81cad8f669389e40f08daa3e19be24ed257b50c557867b90198df1c"
+        "92478812c3224a0eee5818c5e1994094e4bd211d7e9fa8741c0f669bb2336d59"
     );
 }
 #[test]
@@ -36,10 +36,10 @@ fn malformed_domains_versions_lengths_and_trailing_bytes() {
     genesis.chain_id = "other".into();
     assert_eq!(State::new(genesis), Err(Error::Chain));
     let mut genesis = Genesis::local();
-    genesis.protocol = 2;
+    genesis.protocol = 3;
     assert_eq!(State::new(genesis), Err(Error::Version));
     let mut genesis = Genesis::local();
-    genesis.validators[1] = genesis.validators[0];
+    genesis.epochs[0].first_height = 0;
     assert_eq!(State::new(genesis), Err(Error::Genesis));
     let mut genesis = Genesis::local();
     genesis.features = 1;
@@ -56,7 +56,7 @@ fn malformed_domains_versions_lengths_and_trailing_bytes() {
     assert_eq!(Block::decode(&wrong_chain), Err(Error::Chain));
     let mut version = good.clone();
     let version_offset = 14 + CHAIN_ID.len();
-    version[version_offset + 1] = 2;
+    version[version_offset + 1] = 3;
     assert_eq!(Block::decode(&version), Err(Error::Version));
     let mut huge = good;
     huge[10..14].copy_from_slice(&u32::MAX.to_be_bytes());
@@ -109,6 +109,8 @@ fn amount_overflow_underflow_and_privacy_types_never_decode_as_actions() {
     let tx = Transaction::sign("test-x", 0, 1, &development_key("registry", 0)).unwrap();
     let mut bytes = tx.canonical().unwrap();
     let tag = 7 + 4 + CHAIN_ID.len() + 2 + 8 + 8 + 8 + 32;
-    bytes[tag] = 2;
-    assert_eq!(Transaction::decode(&bytes), Err(Error::Unsupported));
+    for unknown in 2..=u8::MAX {
+        bytes[tag] = unknown;
+        assert_eq!(Transaction::decode(&bytes), Err(Error::Unsupported));
+    }
 }

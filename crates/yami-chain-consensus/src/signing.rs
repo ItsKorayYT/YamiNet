@@ -10,23 +10,30 @@ use std::sync::Arc;
 use yami_chain::{codec::Writer, Genesis, Signer as _, SigningKey};
 use yami_chain_storage::Journal;
 
-fn prefix(step: u8) -> Writer {
+fn prefix(genesis: &Genesis, height: u64, step: u8) -> yami_chain::Result<Writer> {
     let mut w = Writer::default();
-    w.raw(b"YC-CONSENSUS-1");
-    w.raw(&Genesis::local().id().0);
-    w.raw(&Genesis::local().committee_hash().0);
+    w.raw(b"YC-CONSENSUS-2");
+    w.raw(&genesis.id().0);
+    w.raw(&genesis.committee_at(height)?.hash().0);
     w.u8(step);
-    w
+    Ok(w)
 }
-pub(crate) fn vote_preimage(v: &Vote) -> yami_chain::Result<Vec<u8>> {
-    let mut w = prefix(1);
+pub(crate) fn vote_preimage_for(genesis: &Genesis, v: &Vote) -> yami_chain::Result<Vec<u8>> {
+    let mut w = prefix(genesis, v.height.0, 1)?;
     put_vote(&mut w, v)?;
     Ok(w.0)
 }
-pub(crate) fn proposal_preimage(p: &Proposal) -> Vec<u8> {
-    let mut w = prefix(2);
+#[cfg(test)]
+pub(crate) fn vote_preimage(v: &Vote) -> yami_chain::Result<Vec<u8>> {
+    vote_preimage_for(&Genesis::local(), v)
+}
+pub(crate) fn proposal_preimage_for(
+    genesis: &Genesis,
+    p: &Proposal,
+) -> yami_chain::Result<Vec<u8>> {
+    let mut w = prefix(genesis, p.height.0, 2)?;
     put_proposal(&mut w, p);
-    w.0
+    Ok(w.0)
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -34,6 +41,7 @@ pub enum CrashPoint {
     Proposal,
     Vote,
     BeforeCommit,
+    BeforeEpoch,
 }
 pub(crate) fn maybe_crash(
     journal: &Journal,
@@ -54,17 +62,36 @@ pub(crate) fn maybe_crash(
 #[derive(Clone)]
 pub(crate) struct DurableSigner {
     pub key: SigningKey,
+    pub genesis: Genesis,
     pub journal: Arc<Journal>,
     pub crash: Option<CrashPoint>,
 }
-pub(crate) struct SignatureVerifier;
+pub(crate) struct SignatureVerifier(pub Genesis);
+fn transport_peer(genesis: &Genesis, key: &[u8; 32]) -> Option<Vec<u8>> {
+    let member = genesis
+        .epochs
+        .iter()
+        .find_map(|epoch| epoch.validators.member(key))?;
+    let public = libp2p_identity::ed25519::PublicKey::try_from_bytes(&member.transport_key).ok()?;
+    Some(
+        libp2p_identity::PublicKey::from(public)
+            .to_peer_id()
+            .to_bytes(),
+    )
+}
 #[async_trait]
 impl Signer<Context> for DurableSigner {
     async fn sign_vote(&self, vote: Vote) -> Result<m::SignedMessage<Context, Vote>, Error> {
-        if vote.address.0 .0 != self.key.verifying_key().to_bytes() || vote.height.0 == 0 {
+        if vote.address.0 .0 != self.key.verifying_key().to_bytes()
+            || vote.height.0 == 0
+            || !self
+                .genesis
+                .committee_at(vote.height.0)
+                .is_ok_and(|s| s.member(&vote.address.0 .0).is_some())
+        {
             return Err(Error::new());
         }
-        let preimage = vote_preimage(&vote).map_err(Error::from_source)?;
+        let preimage = vote_preimage_for(&self.genesis, &vote).map_err(Error::from_source)?;
         let round = vote.round.as_u32().ok_or_else(Error::new)?;
         let step = match vote.step {
             m::VoteType::Prevote => 1,
@@ -86,7 +113,20 @@ impl Signer<Context> for DurableSigner {
         if proposal.address.0 .0 != self.key.verifying_key().to_bytes() || proposal.height.0 == 0 {
             return Err(Error::new());
         }
-        let preimage = proposal_preimage(&proposal);
+        use m::Context as _;
+        if Context
+            .select_proposer(
+                &Committee::at(&self.genesis, proposal.height.0).map_err(Error::from_source)?,
+                proposal.height,
+                proposal.round,
+            )
+            .address
+            != proposal.address
+        {
+            return Err(Error::new());
+        }
+        let preimage =
+            proposal_preimage_for(&self.genesis, &proposal).map_err(Error::from_source)?;
         let round = proposal.round.as_u32().ok_or_else(Error::new)?;
         self.journal
             .reserve_signature(proposal.height.0, round, 0, &preimage)
@@ -107,7 +147,11 @@ impl Signer<Context> for DurableSigner {
         public_key: Vec<u8>,
         peer_id: Vec<u8>,
     ) -> Result<m::ValidatorProof<Context>, Error> {
-        if public_key != self.key.verifying_key().to_bytes() || peer_id.len() > 128 {
+        if public_key != self.key.verifying_key().to_bytes()
+            || peer_id.len() > 128
+            || transport_peer(&self.genesis, &self.key.verifying_key().to_bytes()).as_ref()
+                != Some(&peer_id)
+        {
             return Err(Error::new());
         }
         let bytes = m::ValidatorProof::<Context>::signing_bytes(&public_key, &peer_id);
@@ -126,9 +170,15 @@ impl Verifier<Context> for SignatureVerifier {
         sig: &[u8; 64],
         key: &[u8; 32],
     ) -> Result<VerificationResult, Error> {
-        let bytes = vote_preimage(vote).map_err(Error::from_source)?;
+        let Ok(bytes) = vote_preimage_for(&self.0, vote) else {
+            return Ok(VerificationResult::Invalid);
+        };
         Ok(VerificationResult::from_bool(
-            vote.address.0 .0 == *key && yami_chain::verify(key, &bytes, sig).is_ok(),
+            self.0
+                .committee_at(vote.height.0)
+                .is_ok_and(|s| s.member(key).is_some())
+                && vote.address.0 .0 == *key
+                && yami_chain::verify(key, &bytes, sig).is_ok(),
         ))
     }
     async fn verify_signed_proposal(
@@ -138,7 +188,16 @@ impl Verifier<Context> for SignatureVerifier {
         key: &[u8; 32],
     ) -> Result<VerificationResult, Error> {
         Ok(VerificationResult::from_bool(
-            p.address.0 .0 == *key && yami_chain::verify(key, &proposal_preimage(p), sig).is_ok(),
+            self.0
+                .committee_at(p.height.0)
+                .is_ok_and(|s| s.member(key).is_some())
+                && p.address.0 .0 == *key
+                && yami_chain::verify(
+                    key,
+                    &proposal_preimage_for(&self.0, p).map_err(Error::from_source)?,
+                    sig,
+                )
+                .is_ok(),
         ))
     }
     async fn verify_signed_vote_extension(
@@ -158,7 +217,7 @@ impl Verifier<Context> for SignatureVerifier {
             return Ok(VerificationResult::Invalid);
         };
         Ok(VerificationResult::from_bool(
-            Genesis::local().validators.contains(&key)
+            transport_peer(&self.0, &key).as_ref() == Some(&p.peer_id)
                 && yami_chain::verify(&key, &p.preimage(), &p.signature).is_ok(),
         ))
     }

@@ -1,17 +1,20 @@
 //! Deterministic, non-financial chain foundation. No wallet or monetary state.
 pub mod codec;
+pub mod committee;
 use codec::{Reader, Writer};
+pub use committee::{Epoch, Member, ValidatorSet};
 pub use ed25519_dalek::{Signer, SigningKey, VerifyingKey};
 use sha2::{Digest as _, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
 pub use yami_chain_naming::TestNames;
 pub use yami_chain_privacy as privacy;
 
-pub const CHAIN_ID: &str = "yamichain-local-0.1";
-pub const PROTOCOL: u16 = 1;
+pub const CHAIN_ID: &str = "yamichain-local-0.2";
+pub const PROTOCOL: u16 = 2;
 pub const MAX_BLOCK_BYTES: usize = 65_536;
 pub const MAX_TX_BYTES: usize = 1024;
 pub const MAX_TXS: usize = 64;
+pub const MAX_CERTIFICATE_BYTES: usize = 16_384;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Error {
@@ -86,68 +89,39 @@ pub struct Genesis {
     pub chain_id: String,
     pub protocol: u16,
     pub features: u64,
-    pub validators: [[u8; 32]; 4],
-    pub transport_keys: [[u8; 32]; 4],
+    pub epochs: Vec<Epoch>,
 }
 impl Genesis {
     pub fn local() -> Self {
         static LOCAL: std::sync::OnceLock<Genesis> = std::sync::OnceLock::new();
         LOCAL
-            .get_or_init(|| Self {
-                chain_id: CHAIN_ID.into(),
-                protocol: PROTOCOL,
-                features: 0,
-                validators: std::array::from_fn(|i| {
-                    development_key("consensus", i as u8)
-                        .verifying_key()
-                        .to_bytes()
-                }),
-                transport_keys: std::array::from_fn(|i| {
-                    development_key("transport", i as u8)
-                        .verifying_key()
-                        .to_bytes()
-                }),
-            })
+            .get_or_init(|| Self::development_schedule(&[(1, 4)]).expect("valid local fixture"))
             .clone()
     }
     pub fn validate(&self) -> Result<()> {
         domain(&self.chain_id, self.protocol, self.features)?;
-        let keys: BTreeSet<_> = self
-            .validators
-            .iter()
-            .chain(self.transport_keys.iter())
-            .collect();
-        if keys.len() != 8 {
-            return Err(Error::Genesis);
-        }
-        for key in keys {
-            VerifyingKey::from_bytes(key).map_err(|_| Error::Genesis)?;
-        }
-        // Only the exact public four-validator local fixture is authorized in 0.1.
-        if self != &Self::local() {
-            return Err(Error::Genesis);
-        }
-        Ok(())
+        committee::validate_epochs(&self.epochs)
     }
     pub fn canonical(&self) -> Vec<u8> {
         let mut w = Writer::default();
-        w.bytes(self.chain_id.as_bytes()).expect("bounded chain ID");
+        w.raw(b"YC-GENESIS-2");
+        // IDs are validated before a genesis can be used by State or a node.
+        w.bytes(self.chain_id.as_bytes())
+            .expect("genesis ID length");
         w.u16(self.protocol);
         w.u64(self.features);
-        for key in self.validators.iter().chain(self.transport_keys.iter()) {
-            w.raw(key);
+        w.u32(self.epochs.len() as u32);
+        for epoch in &self.epochs {
+            w.u64(epoch.first_height);
+            epoch.validators.put(&mut w);
         }
         w.0
     }
     pub fn id(&self) -> Digest {
-        hash(b"yamichain-genesis-v1", &self.canonical())
-    }
-    pub fn committee_hash(&self) -> Digest {
-        let mut keys = self.validators;
-        keys.sort();
-        hash(b"yamichain-fixed-committee-v1", &keys.concat())
+        hash(b"yamichain-genesis-v2", &self.canonical())
     }
 }
+
 fn domain(chain: &str, protocol: u16, features: u64) -> Result<()> {
     if chain != CHAIN_ID {
         return Err(Error::Chain);
@@ -394,9 +368,7 @@ impl State {
             if !seen.insert(hash(b"yamichain-tx-id-v1", &bytes)) {
                 return Err(Error::Duplicate);
             }
-            if self.genesis.validators.contains(&tx.registry_owner)
-                || self.genesis.transport_keys.contains(&tx.registry_owner)
-            {
+            if self.genesis.is_reserved_key(&tx.registry_owner) {
                 return Err(Error::Signature);
             }
             verify(&tx.registry_owner, &tx.signing_bytes()?, &tx.signature)?;
@@ -432,7 +404,7 @@ impl State {
             header: Header {
                 height: next.height,
                 parent: self.tip,
-                committee: self.genesis.committee_hash(),
+                committee: self.genesis.committee_at(next.height)?.hash(),
                 transactions: hash(b"yamichain-transactions-v1", &w.0),
                 state: next.root(),
             },

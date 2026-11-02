@@ -15,6 +15,7 @@ malachite = { package = "arc-malachitebft-app-channel", version = "=0.8.2" }
 malachite-core = { package = "arc-malachitebft-core-consensus", version = "=0.8.2" }
 malachite-signing = { package = "arc-malachitebft-signing", version = "=0.8.2" }
 malachite-sync = { package = "arc-malachitebft-sync", version = "=0.8.2" }
+libp2p-identity = { version = "0.2.14", default-features = false, features = ["ed25519", "peerid"] }
 async-trait = "0.1"
 bytes = "1"
 bytesize = "2"

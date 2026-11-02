@@ -1,5 +1,7 @@
-//! Fixed-validator local Malachite adapter. NOT production-ready; no real money.
+//! Height-specific local Malachite adapter. NOT production-ready; no real money.
 mod candidates;
+mod checkpoint;
+pub use checkpoint::*;
 mod node;
 mod signing;
 mod types;
@@ -9,3 +11,4 @@ pub use types::*;
 pub use wire::{decode_certificate, encode_certificate, verify_record};
 #[cfg(test)]
 mod tests;
+

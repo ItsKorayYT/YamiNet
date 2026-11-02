@@ -25,11 +25,20 @@ pub(crate) trait Wire: Sized {
     fn get(r: &mut Reader<'_>) -> Result<Self>;
 }
 #[derive(Clone, Copy, Debug)]
-pub(crate) struct WireCodec;
-fn encode<T: Wire>(value: &T) -> Result<Bytes> {
+pub(crate) struct WireCodec {
+    genesis: Digest,
+}
+impl WireCodec {
+    pub fn new(genesis: &Genesis) -> Self {
+        Self {
+            genesis: genesis.id(),
+        }
+    }
+}
+fn encode<T: Wire>(genesis: Digest, value: &T) -> Result<Bytes> {
     let mut w = Writer::default();
     w.raw(b"YC-MSG-1");
-    w.raw(&Genesis::local().id().0);
+    w.raw(&genesis.0);
     w.u8(T::TAG);
     value.put(&mut w)?;
     if w.0.len() > MAX_MESSAGE {
@@ -37,10 +46,9 @@ fn encode<T: Wire>(value: &T) -> Result<Bytes> {
     }
     Ok(w.0.into())
 }
-fn decode<T: Wire>(bytes: Bytes) -> Result<T> {
+fn decode<T: Wire>(genesis: Digest, bytes: Bytes) -> Result<T> {
     let mut r = Reader::new(&bytes, MAX_MESSAGE)?;
-    if r.take(8)? != b"YC-MSG-1" || r.array::<32>()? != Genesis::local().id().0 || r.u8()? != T::TAG
-    {
+    if r.take(8)? != b"YC-MSG-1" || r.array::<32>()? != genesis.0 || r.u8()? != T::TAG {
         return Err(Error::Encoding);
     }
     let value = T::get(&mut r)?;
@@ -50,8 +58,8 @@ fn decode<T: Wire>(bytes: Bytes) -> Result<T> {
 macro_rules! codec {
     ($($t:ty),* $(,)?)=>{$(impl Codec<$t> for WireCodec {
         type Error=Error;
-        fn encode(&self,value:&$t)->Result<Bytes> {encode(value)}
-        fn decode(&self,bytes:Bytes)->Result<$t> {decode(bytes)}
+        fn encode(&self,value:&$t)->Result<Bytes> {encode(self.genesis,value)}
+        fn decode(&self,bytes:Bytes)->Result<$t> {decode(self.genesis,bytes)}
     })*};
 }
 codec!(
@@ -69,7 +77,7 @@ codec!(
 );
 impl HasEncodedLen<sync::Response<Context>> for WireCodec {
     fn encoded_len(&self, v: &sync::Response<Context>) -> Result<usize> {
-        Ok(encode(v)?.len())
+        Ok(encode(self.genesis, v)?.len())
     }
 }
 pub(crate) fn put_round(w: &mut Writer, round: m::Round) {
@@ -288,7 +296,7 @@ fn count(r: &mut Reader<'_>, max: usize) -> Result<usize> {
 impl Wire for m::PolkaCertificate<Context> {
     const TAG: u8 = 5;
     fn put(&self, w: &mut Writer) -> Result<()> {
-        if self.polka_signatures.len() > 4 {
+        if self.polka_signatures.len() > yami_chain::committee::MAX_VALIDATORS {
             return Err(Error::Limit);
         }
         w.u64(self.height.0);
@@ -305,7 +313,7 @@ impl Wire for m::PolkaCertificate<Context> {
         let height = get_height(r)?;
         let round = get_round(r)?;
         let value_id = Value(Digest(r.array()?));
-        let n = count(r, 4)?;
+        let n = count(r, yami_chain::committee::MAX_VALIDATORS)?;
         let mut polka_signatures = Vec::with_capacity(n);
         for _ in 0..n {
             polka_signatures.push(m::PolkaSignature::new(
@@ -335,7 +343,7 @@ impl Wire for LivenessMsg<Context> {
                 p.put(w)?;
             }
             Self::SkipRoundCertificate(c) => {
-                if c.round_signatures.len() > 8 {
+                if c.round_signatures.len() > 2 * yami_chain::committee::MAX_VALIDATORS {
                     return Err(Error::Limit);
                 }
                 w.u8(3);
@@ -371,7 +379,7 @@ impl Wire for LivenessMsg<Context> {
                     2 => m::RoundCertificateType::Precommit,
                     _ => return Err(Error::Encoding),
                 };
-                let n = count(r, 8)?;
+                let n = count(r, 2 * yami_chain::committee::MAX_VALIDATORS)?;
                 let mut round_signatures = Vec::with_capacity(n);
                 for _ in 0..n {
                     let step = match r.u8()? {
@@ -419,7 +427,7 @@ impl Wire for m::ValidatorProof<Context> {
 impl Wire for m::CommitCertificate<Context> {
     const TAG: u8 = 8;
     fn put(&self, w: &mut Writer) -> Result<()> {
-        if self.commit_signatures.len() > 4 {
+        if self.commit_signatures.len() > yami_chain::committee::MAX_VALIDATORS {
             return Err(Error::Limit);
         }
         w.u64(self.height.0);
@@ -438,7 +446,7 @@ impl Wire for m::CommitCertificate<Context> {
         let height = get_height(r)?;
         let round = get_round(r)?;
         let value_id = Value(Digest(r.array()?));
-        let n = count(r, 4)?;
+        let n = count(r, yami_chain::committee::MAX_VALIDATORS)?;
         let mut commit_signatures = Vec::with_capacity(n);
         let mut previous = None;
         for _ in 0..n {
@@ -537,36 +545,47 @@ impl Wire for sync::Response<Context> {
         )))
     }
 }
-pub fn encode_certificate(c: &m::CommitCertificate<Context>) -> Result<Vec<u8>> {
-    Ok(encode(c)?.to_vec())
+pub fn encode_certificate(genesis: &Genesis, c: &m::CommitCertificate<Context>) -> Result<Vec<u8>> {
+    Ok(encode(genesis.id(), c)?.to_vec())
 }
-pub fn decode_certificate(bytes: &[u8]) -> Result<m::CommitCertificate<Context>> {
-    decode(Bytes::copy_from_slice(bytes))
+pub fn decode_certificate(
+    genesis: &Genesis,
+    bytes: &[u8],
+) -> Result<m::CommitCertificate<Context>> {
+    decode(genesis.id(), Bytes::copy_from_slice(bytes))
 }
-pub fn verify_record(record: &FinalizedRecord) -> std::io::Result<()> {
+pub fn verify_record(genesis: &Genesis, record: &FinalizedRecord) -> std::io::Result<()> {
     verify_certificate(
+        genesis,
         &record.block,
-        &decode_certificate(&record.certificate).map_err(std::io::Error::other)?,
+        &decode_certificate(genesis, &record.certificate).map_err(std::io::Error::other)?,
     )
     .map_err(std::io::Error::other)
 }
-pub(crate) fn verify_certificate(block: &Block, c: &m::CommitCertificate<Context>) -> Result<()> {
+pub(crate) fn verify_certificate(
+    genesis: &Genesis,
+    block: &Block,
+    c: &m::CommitCertificate<Context>,
+) -> Result<()> {
     if c.height.0 != block.header.height
         || c.height.0 == 0
         || c.round.is_nil()
         || c.value_id.0 != block.id()?
-        || block.header.committee != Genesis::local().committee_hash()
+        || block.header.committee != genesis.committee_at(c.height.0)?.hash()
     {
         return Err(Error::Header);
     }
-    if c.commit_signatures.len() < 3 || c.commit_signatures.len() > 4 {
+    let set = genesis.committee_at(c.height.0)?;
+    if c.commit_signatures.is_empty() || c.commit_signatures.len() > set.members().len() {
         return Err(Error::Signature);
     }
     let mut seen = BTreeSet::new();
+    let mut power = 0u128;
     for s in &c.commit_signatures {
-        if !seen.insert(s.address) || !Genesis::local().validators.contains(&s.address.0 .0) {
+        if !seen.insert(s.address) || set.member(&s.address.0 .0).is_none() {
             return Err(Error::Signature);
         }
+        power += u128::from(set.member(&s.address.0 .0).ok_or(Error::Signature)?.power);
         let vote = Vote {
             height: c.height,
             round: c.round,
@@ -577,9 +596,12 @@ pub(crate) fn verify_certificate(block: &Block, c: &m::CommitCertificate<Context
         };
         yami_chain::verify(
             &s.address.0 .0,
-            &crate::signing::vote_preimage(&vote)?,
+            &crate::signing::vote_preimage_for(genesis, &vote)?,
             &s.signature,
         )?;
+    }
+    if power * 3 <= u128::from(set.total_power()) * 2 {
+        return Err(Error::Signature);
     }
     Ok(())
 }

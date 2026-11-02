@@ -43,11 +43,11 @@ async fn effect(
         Effect::SignProposal(p, r) => r.resume_with(signer.sign_proposal(p).await?),
         Effect::VerifySignature(msg, key, r) => {
             let valid = match msg.message {
-                ConsensusMsg::Vote(v) => SignatureVerifier
+                ConsensusMsg::Vote(v) => SignatureVerifier(signer.genesis.clone())
                     .verify_signed_vote(&v, &msg.signature, &key)
                     .await?
                     .is_valid(),
-                ConsensusMsg::Proposal(p) => SignatureVerifier
+                ConsensusMsg::Proposal(p) => SignatureVerifier(signer.genesis.clone())
                     .verify_signed_proposal(&p, &msg.signature, &key)
                     .await?
                     .is_valid(),
@@ -55,31 +55,32 @@ async fn effect(
             r.resume_with(valid)
         }
         Effect::VerifyCommitCertificate(c, set, t, r) => r.resume_with(
-            SignatureVerifier
+            SignatureVerifier(signer.genesis.clone())
                 .verify_commit_certificate(&Context, &c, &set, t)
                 .await,
         ),
         Effect::VerifyExtendedCommitCertificate(c, set, t, policy, r) => r.resume_with(
-            SignatureVerifier
+            SignatureVerifier(signer.genesis.clone())
                 .verify_extended_commit_certificate(&Context, &c, &set, t, policy)
                 .await,
         ),
         Effect::VerifyPolkaCertificate(c, set, t, r) => r.resume_with(
-            SignatureVerifier
+            SignatureVerifier(signer.genesis.clone())
                 .verify_polka_certificate(&Context, &c, &set, t)
                 .await,
         ),
         Effect::VerifyRoundCertificate(c, set, t, r) => r.resume_with(
-            SignatureVerifier
+            SignatureVerifier(signer.genesis.clone())
                 .verify_round_certificate(&Context, &c, &set, t)
                 .await,
         ),
         Effect::CertVerifiedSyncValue(response, proposer, r) => {
             let block = yami_chain::Block::decode(&response.value_bytes).unwrap();
-            State::new(Genesis::local())
-                .unwrap()
-                .execute(&block)
-                .unwrap();
+            let mut state = State::new(signer.genesis.clone()).unwrap();
+            while state.height() + 1 < block.header.height {
+                state = state.execute(&state.development_block().unwrap()).unwrap();
+            }
+            state.execute(&block).unwrap();
             net.messages.push_back((
                 node,
                 Input::ProposedValue(
@@ -186,6 +187,15 @@ async fn effect(
 async fn schedule(
     active: usize,
     equivocate: bool,
+    seed: u64,
+) -> Vec<Vec<m::CommitCertificate<Context>>> {
+    schedule_at(Genesis::local(), 1, active, equivocate, seed).await
+}
+async fn schedule_at(
+    genesis: Genesis,
+    height: u64,
+    active: usize,
+    equivocate: bool,
     mut seed: u64,
 ) -> Vec<Vec<m::CommitCertificate<Context>>> {
     let root = std::env::temp_dir().join(format!(
@@ -193,17 +203,20 @@ async fn schedule(
         std::process::id(),
         ID.fetch_add(1, Ordering::Relaxed)
     ));
-    let block = State::new(Genesis::local())
-        .unwrap()
-        .development_block()
-        .unwrap();
+    let mut app_state = State::new(genesis.clone()).unwrap();
+    while app_state.height() + 1 < height {
+        app_state = app_state
+            .execute(&app_state.development_block().unwrap())
+            .unwrap();
+    }
+    let block = app_state.development_block().unwrap();
     let value = Value(block.id().unwrap());
-    let committee = Committee::local();
+    let committee = Committee::at(&genesis, height).unwrap();
     let mut nodes = Vec::new();
     let mut start = VecDeque::new();
     for i in 0..active {
-        let address = committee.0[i].address;
-        let key = (0..4)
+        let address = committee.members()[i].address;
+        let key = (0..100)
             .map(|i| development_key("consensus", i))
             .find(|k| k.verifying_key().to_bytes() == address.0 .0)
             .unwrap();
@@ -212,7 +225,7 @@ async fn schedule(
             metrics: Metrics::new(),
             state: malachite_core::State::new(
                 Context,
-                Height(1),
+                Height(height),
                 committee.clone(),
                 malachite_core::Params {
                     address,
@@ -224,6 +237,7 @@ async fn schedule(
                 128,
             ),
             signer: DurableSigner {
+                genesis: genesis.clone(),
                 key,
                 journal,
                 crash: None,
@@ -234,7 +248,7 @@ async fn schedule(
         start.push_back((
             i,
             Input::StartHeight(
-                Height(1),
+                Height(height),
                 committee.clone(),
                 false,
                 None,
@@ -256,8 +270,8 @@ async fn schedule(
     }
     if equivocate {
         assert_eq!(active, 3);
-        let address = committee.0[3].address;
-        let key = (0..4)
+        let address = committee.members()[3].address;
+        let key = (0..100)
             .map(|i| development_key("consensus", i))
             .find(|k| k.verifying_key().to_bytes() == address.0 .0)
             .unwrap();
@@ -266,7 +280,7 @@ async fn schedule(
             for step in [m::VoteType::Prevote, m::VoteType::Precommit] {
                 for v in [value, Value(Digest([0xA5; 32]))] {
                     let vote = Vote {
-                        height: Height(1),
+                        height: Height(height),
                         round: m::Round::ZERO,
                         value: m::NilOrVal::Val(v),
                         step,
@@ -339,12 +353,12 @@ async fn schedule(
         let result: Result<(), malachite_core::Error<Context>> = malachite_core::process!(input:input,state:&mut node.state,metrics:&node.metrics,with:e=>effect(e,i,&node.signer,&mut network,&mut node.decisions).await);
         result.unwrap();
         steps += 1;
-        assert!(steps < 10_000, "unbounded schedule");
+        assert!(steps < 10000 + active * active * 100, "unbounded schedule");
     }
     let decisions = nodes.iter().map(|n| n.decisions.clone()).collect();
     for node in &nodes {
         for cert in &node.decisions {
-            verify_certificate(&block, cert).unwrap();
+            verify_certificate(&genesis, &block, cert).unwrap();
         }
     }
     drop(nodes);
@@ -392,6 +406,7 @@ async fn durable_signer_refuses_conflict_and_certificate_tampering() {
     let vote = Context.new_precommit(Height(1), m::Round::ZERO, m::NilOrVal::Val(value), address);
     let first = {
         let signer = DurableSigner {
+            genesis: Genesis::local(),
             key: key.clone(),
             journal: Arc::new(Journal::open(&path).unwrap()),
             crash: None,
@@ -399,6 +414,7 @@ async fn durable_signer_refuses_conflict_and_certificate_tampering() {
         signer.sign_vote(vote.clone()).await.unwrap()
     };
     let signer = DurableSigner {
+        genesis: Genesis::local(),
         key,
         journal: Arc::new(Journal::open(&path).unwrap()),
         crash: None,
@@ -416,32 +432,36 @@ async fn durable_signer_refuses_conflict_and_certificate_tampering() {
         .unwrap()
         .development_block()
         .unwrap();
-    let bytes = encode_certificate(&cert).unwrap();
-    assert_eq!(decode_certificate(&bytes).unwrap(), cert);
+    let bytes = encode_certificate(&Genesis::local(), &cert).unwrap();
+    assert_eq!(decode_certificate(&Genesis::local(), &bytes).unwrap(), cert);
     let mut bad = cert.clone();
     bad.commit_signatures[0].signature[0] ^= 1;
-    assert!(verify_certificate(&block, &bad).is_err());
+    assert!(verify_certificate(&Genesis::local(), &block, &bad).is_err());
     let mut bad = cert.clone();
     bad.commit_signatures[1] = bad.commit_signatures[0].clone();
-    assert!(verify_certificate(&block, &bad).is_err());
+    assert!(verify_certificate(&Genesis::local(), &block, &bad).is_err());
     let mut bad = cert.clone();
     bad.height = Height(2);
-    assert!(verify_certificate(&block, &bad).is_err());
+    assert!(verify_certificate(&Genesis::local(), &block, &bad).is_err());
     let mut bad = cert;
     bad.commit_signatures.pop();
-    assert!(verify_certificate(&block, &bad).is_err());
+    assert!(verify_certificate(&Genesis::local(), &block, &bad).is_err());
 }
 
 #[test]
 fn wire_rejects_wrong_network_truncation_trailing_data_and_oversized_sync() {
     use m::Context as _;
     use malachite::app::types::codec::Codec;
-    let address = Committee::local().0[0].address;
+    let address = Committee::local().members()[0].address;
     let vote = Context.new_prevote(Height(1), m::Round::ZERO, m::NilOrVal::Nil, address);
     let message = SignedConsensusMsg::Vote(m::SignedMessage::new(vote, [0; 64]));
-    let bytes = WireCodec.encode(&message).unwrap();
-    let decode =
-        |bytes| <WireCodec as Codec<SignedConsensusMsg<Context>>>::decode(&WireCodec, bytes);
+    let bytes = WireCodec::new(&Genesis::local()).encode(&message).unwrap();
+    let decode = |bytes| {
+        <WireCodec as Codec<SignedConsensusMsg<Context>>>::decode(
+            &WireCodec::new(&Genesis::local()),
+            bytes,
+        )
+    };
     assert_eq!(decode(bytes.clone()).unwrap(), message);
     for len in 0..bytes.len() {
         assert!(decode(bytes.slice(..len)).is_err());
@@ -456,10 +476,13 @@ fn wire_rejects_wrong_network_truncation_trailing_data_and_oversized_sync() {
     let request = malachite_sync::Request::<Context>::ValueRequest(
         malachite_sync::ValueRequest::new(Height(1)..=Height(9)),
     );
-    let encoded = WireCodec.encode(&request).unwrap();
+    let encoded = WireCodec::new(&Genesis::local()).encode(&request).unwrap();
     assert!(
-        <WireCodec as Codec<malachite_sync::Request<Context>>>::decode(&WireCodec, encoded)
-            .is_err()
+        <WireCodec as Codec<malachite_sync::Request<Context>>>::decode(
+            &WireCodec::new(&Genesis::local()),
+            encoded
+        )
+        .is_err()
     );
     let cert = m::CommitCertificate::<Context> {
         height: Height(1),
@@ -475,5 +498,237 @@ fn wire_rejects_wrong_network_truncation_trailing_data_and_oversized_sync() {
         Height(1),
         vec![malachite_sync::RawDecidedValue::new(bytes::Bytes::new(), cert); 9],
     ));
-    assert!(WireCodec.encode(&response).is_err());
+    assert!(WireCodec::new(&Genesis::local()).encode(&response).is_err());
+}
+
+fn certify(
+    genesis: &Genesis,
+    block: &yami_chain::Block,
+    limit: usize,
+) -> m::CommitCertificate<Context> {
+    let height = Height(block.header.height);
+    let value_id = Value(block.id().unwrap());
+    let signatures = genesis
+        .committee_at(height.0)
+        .unwrap()
+        .members()
+        .iter()
+        .take(limit)
+        .map(|member| {
+            let key = (0..100)
+                .map(|i| development_key("consensus", i))
+                .find(|key| key.verifying_key().to_bytes() == member.consensus_key)
+                .unwrap();
+            let address = Address(Digest(member.consensus_key));
+            let vote = Vote {
+                height,
+                round: m::Round::ZERO,
+                value: m::NilOrVal::Val(value_id),
+                step: m::VoteType::Precommit,
+                address,
+                extension: None,
+            };
+            m::CommitSignature::new(
+                address,
+                key.sign(&crate::signing::vote_preimage_for(genesis, &vote).unwrap())
+                    .to_bytes(),
+            )
+        })
+        .collect();
+    m::CommitCertificate {
+        height,
+        round: m::Round::ZERO,
+        value_id,
+        commit_signatures: signatures,
+    }
+}
+#[tokio::test]
+async fn malachite_uses_different_height_specific_committees() {
+    let genesis = Genesis::development_schedule(&[(1, 4), (3, 7), (5, 3)]).unwrap();
+    for (height, count) in [(1, 4), (3, 7), (5, 3)] {
+        let decisions = schedule_at(genesis.clone(), height, count, false, 17).await;
+        assert!(decisions.iter().all(|d| d.len() == 1));
+        assert!(decisions
+            .iter()
+            .flatten()
+            .all(|c| c.value_id == decisions[0][0].value_id));
+    }
+}
+#[test]
+fn committees_certificates_cover_sizes_weights_history_and_recovery() {
+    for size in [1, 2, 4, 7, 25, 100] {
+        let genesis = Genesis::development_schedule(&[(1, size)]).unwrap();
+        let block = State::new(genesis.clone())
+            .unwrap()
+            .development_block()
+            .unwrap();
+        let cert = certify(&genesis, &block, size);
+        verify_certificate(&genesis, &block, &cert).unwrap();
+        assert_eq!(
+            decode_certificate(&genesis, &encode_certificate(&genesis, &cert).unwrap()).unwrap(),
+            cert
+        );
+        let insufficient = certify(&genesis, &block, (2 * size) / 3);
+        assert!(verify_certificate(&genesis, &block, &insufficient).is_err());
+    }
+    let mut genesis = Genesis::development_schedule(&[(1, 3)]).unwrap();
+    let mut members = genesis.epochs[0].validators.members().to_vec();
+    members[0].power = 5;
+    genesis.epochs[0].validators = yami_chain::ValidatorSet::new(members).unwrap();
+    let block = State::new(genesis.clone())
+        .unwrap()
+        .development_block()
+        .unwrap();
+    verify_certificate(&genesis, &block, &certify(&genesis, &block, 1)).unwrap();
+    let mut impostor = certify(&genesis, &block, 3);
+    impostor.commit_signatures.remove(0);
+    assert!(verify_certificate(&genesis, &block, &impostor).is_err());
+
+    let genesis = Genesis::development_schedule(&[(1, 4), (3, 7), (5, 3)]).unwrap();
+    let path = std::env::temp_dir().join(format!("yami-epochs-{}", std::process::id()));
+    let mut state = State::new(genesis.clone()).unwrap();
+    for _ in 0..7 {
+        // Reopen and authenticate the complete history after every durable write,
+        // including immediately before and after both epoch boundaries.
+        let journal = Journal::open(&path).unwrap();
+        let replay = journal
+            .replay(genesis.clone(), |r| verify_record(&genesis, r))
+            .unwrap();
+        assert_eq!(replay, state);
+        let block = state.development_block().unwrap();
+        let cert = certify(&genesis, &block, 100);
+        journal
+            .append(&yami_chain_storage::FinalizedRecord {
+                block: block.clone(),
+                certificate: encode_certificate(&genesis, &cert).unwrap(),
+            })
+            .unwrap();
+        state = state.execute(&block).unwrap();
+    }
+    let journal = Journal::open(&path).unwrap();
+    let checkpoint = crate::authenticate_checkpoint(&journal, &genesis, 3, 7).unwrap();
+    assert_eq!(checkpoint.height(), 3);
+    checkpoint.persist(&journal).unwrap();
+    let bytes = checkpoint.canonical().unwrap();
+    crate::verify_checkpoint(&journal, &genesis, 3, 7, &bytes).unwrap();
+    for i in [0, 20, 60, 100, bytes.len() - 1] {
+        let mut forged = bytes.clone();
+        forged[i] ^= 1;
+        assert!(crate::verify_checkpoint(&journal, &genesis, 3, 7, &forged).is_err());
+    }
+    assert!(crate::authenticate_checkpoint(&journal, &genesis, 3, 2).is_err());
+    checkpoint.prune_candidates(&journal).unwrap();
+    assert!(journal.record(1).unwrap().is_some());
+    let record = journal.record(3).unwrap().unwrap();
+    let mut unauthorized = genesis.clone();
+    unauthorized.epochs[1].first_height = 4;
+    assert!(verify_record(&unauthorized, &record).is_err());
+    assert!(journal
+        .replay(unauthorized.clone(), |r| verify_record(&unauthorized, r))
+        .is_err());
+    assert_eq!(
+        journal
+            .replay(genesis.clone(), |r| verify_record(&genesis, r))
+            .unwrap(),
+        state
+    );
+    drop(journal);
+    std::fs::remove_dir_all(path).unwrap();
+}
+
+#[tokio::test]
+async fn transport_binding_malformed_votes_and_proposal_reservations_fail_closed() {
+    use m::Context as _;
+    let genesis = Genesis::local();
+    let path = std::env::temp_dir().join(format!("yami-transport-{}", std::process::id()));
+    let key = development_key("consensus", 0);
+    let signer = DurableSigner {
+        key: key.clone(),
+        genesis: genesis.clone(),
+        journal: Arc::new(Journal::open(&path).unwrap()),
+        crash: None,
+    };
+    let peer = |index| {
+        malachite::app::types::Keypair::ed25519_from_bytes(
+            development_key("transport", index).to_bytes(),
+        )
+        .unwrap()
+        .public()
+        .to_peer_id()
+        .to_bytes()
+    };
+    let proof = signer
+        .sign_validator_proof(key.verifying_key().to_bytes().to_vec(), peer(0))
+        .await
+        .unwrap();
+    let verifier = SignatureVerifier(genesis.clone());
+    assert!(verifier
+        .verify_validator_proof(&proof)
+        .await
+        .unwrap()
+        .is_valid());
+    assert!(signer
+        .sign_validator_proof(key.verifying_key().to_bytes().to_vec(), peer(1))
+        .await
+        .is_err());
+    let mut forged = proof;
+    forged.peer_id = peer(1);
+    forged.signature = key.sign(&forged.preimage()).to_bytes();
+    assert!(!verifier
+        .verify_validator_proof(&forged)
+        .await
+        .unwrap()
+        .is_valid());
+    let vote = Context.new_prevote(
+        Height(0),
+        m::Round::ZERO,
+        m::NilOrVal::Nil,
+        Address(Digest(key.verifying_key().to_bytes())),
+    );
+    assert!(!verifier
+        .verify_signed_vote(&vote, &[0; 64], &key.verifying_key().to_bytes())
+        .await
+        .unwrap()
+        .is_valid());
+    drop(signer);
+    std::fs::remove_dir_all(&path).unwrap();
+
+    let address = Context
+        .select_proposer(&Committee::local(), Height(1), m::Round::ZERO)
+        .address;
+    let key = (0..4)
+        .map(|i| development_key("consensus", i))
+        .find(|k| k.verifying_key().to_bytes() == address.0 .0)
+        .unwrap();
+    let proposal = Context.new_proposal(
+        Height(1),
+        m::Round::ZERO,
+        Value(Digest([1; 32])),
+        m::Round::Nil,
+        address,
+    );
+    let signature = {
+        let signer = DurableSigner {
+            key: key.clone(),
+            genesis: genesis.clone(),
+            journal: Arc::new(Journal::open(&path).unwrap()),
+            crash: None,
+        };
+        signer.sign_proposal(proposal.clone()).await.unwrap()
+    };
+    let signer = DurableSigner {
+        key,
+        genesis,
+        journal: Arc::new(Journal::open(&path).unwrap()),
+        crash: None,
+    };
+    assert_eq!(
+        signature,
+        signer.sign_proposal(proposal.clone()).await.unwrap()
+    );
+    let mut conflict = proposal;
+    conflict.value = Value(Digest([2; 32]));
+    assert!(signer.sign_proposal(conflict).await.is_err());
+    drop(signer);
+    std::fs::remove_dir_all(path).unwrap();
 }

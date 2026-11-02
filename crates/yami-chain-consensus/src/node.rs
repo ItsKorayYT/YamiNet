@@ -60,12 +60,16 @@ fn transport(index: u8) -> Result<Keypair> {
         development_key("transport", index).to_bytes(),
     )?)
 }
-fn config(index: u8, base: u16) -> Result<Config> {
+fn config(index: u8, base: u16, genesis: &Genesis) -> Result<Config> {
     let mut consensus = config::ConsensusConfig::default();
     consensus.p2p.listen_addr =
         format!("/ip4/127.0.0.1/tcp/{}", base + u16::from(index)).parse()?;
-    consensus.p2p.persistent_peers = (0..4_u8)
-        .filter(|i| *i != index)
+    consensus.p2p.persistent_peers = (0..yami_chain::committee::MAX_VALIDATORS as u8)
+        .filter(|i| {
+            *i != index
+                && genesis
+                    .has_consensus_key(&development_key("consensus", *i).verifying_key().to_bytes())
+        })
         .map(|i| {
             let peer = transport(i)?.public().to_peer_id();
             Ok(format!("/ip4/127.0.0.1/tcp/{}/p2p/{peer}", base + u16::from(i)).parse()?)
@@ -93,9 +97,9 @@ fn config(index: u8, base: u16) -> Result<Config> {
         sync,
     })
 }
-fn params() -> m::HeightParams<Context> {
-    m::HeightParams::new(
-        Committee::local(),
+fn params(genesis: &Genesis, height: u64) -> Result<m::HeightParams<Context>> {
+    Ok(m::HeightParams::new(
+        Committee::at(genesis, height)?,
         m::LinearTimeouts {
             propose: Duration::from_millis(800),
             prevote: Duration::from_millis(400),
@@ -104,39 +108,72 @@ fn params() -> m::HeightParams<Context> {
             ..Default::default()
         },
         Some(Duration::from_millis(400)),
-    )
+    ))
 }
 
 /// All defaults are local-only. No configurable public listen address or secret key input.
 pub struct NodeOptions {
     pub directory: PathBuf,
+    pub genesis: Genesis,
     pub index: u8,
     pub base_port: u16,
     pub target_height: u64,
     pub timeout: Duration,
+    pub linger: Duration,
     pub crash: Option<CrashPoint>,
 }
 pub fn inspect(directory: &Path) -> Result<State> {
+    inspect_with_genesis(directory, Genesis::local())
+}
+pub fn inspect_with_genesis(directory: &Path, genesis: Genesis) -> Result<State> {
     if !directory.join("genesis.bin").is_file() {
         return Err(eyre!("no initialized local chain store"));
     }
     let journal = Journal::open(directory)?;
-    Ok(journal.replay(Genesis::local(), verify_record)?)
+    Ok(journal.replay(genesis.clone(), |record| verify_record(&genesis, record))?)
 }
 pub async fn run_node(options: NodeOptions) -> Result<State> {
-    if options.index >= 4
+    options.genesis.validate()?;
+    let development_keys: std::collections::BTreeMap<_, _> = (0
+        ..yami_chain::committee::MAX_VALIDATORS as u8)
+        .map(|i| {
+            (
+                development_key("consensus", i).verifying_key().to_bytes(),
+                development_key("transport", i).verifying_key().to_bytes(),
+            )
+        })
+        .collect();
+    if options
+        .genesis
+        .epochs
+        .iter()
+        .flat_map(|e| e.validators.members())
+        .any(|m| development_keys.get(&m.consensus_key) != Some(&m.transport_key))
+    {
+        return Err(eyre!(
+            "local runner accepts only separate public development consensus/transport identities"
+        ));
+    }
+    if options.index >= yami_chain::committee::MAX_VALIDATORS as u8
+        || !options.genesis.has_consensus_key(
+            &development_key("consensus", options.index)
+                .verifying_key()
+                .to_bytes(),
+        )
         || options.base_port < 1024
-        || options.base_port > 65532
+        || options.base_port > 65436
         || options.target_height == 0
         || options.target_height > 100_000
     {
         return Err(eyre!(
-            "index 0..3, base port 1024..65532, target height 1..100000 required"
+            "index must be a scheduled public development identity; base port 1024..65436, height 1..100000"
         ));
     }
     let journal = Arc::new(Journal::open(&options.directory)?);
     journal.write_once("validator-index.bin", &[options.index])?;
-    let state = journal.replay(Genesis::local(), verify_record)?;
+    let state = journal.replay(options.genesis.clone(), |record| {
+        verify_record(&options.genesis, record)
+    })?;
     if state.height() >= options.target_height {
         return Ok(state);
     }
@@ -152,6 +189,7 @@ pub async fn run_node(options: NodeOptions) -> Result<State> {
     let key = development_key("consensus", options.index);
     let address = Address(Digest(key.verifying_key().to_bytes()));
     let signer = Arc::new(DurableSigner {
+        genesis: options.genesis.clone(),
         key,
         journal: journal.clone(),
         crash: options.crash,
@@ -168,30 +206,33 @@ pub async fn run_node(options: NodeOptions) -> Result<State> {
         format!("yamichain-local-{}", options.index),
         keypair,
         address.to_string(),
-        WireCodec.encode(&proof)?,
+        WireCodec::new(&options.genesis).encode(&proof)?,
     );
     std::fs::create_dir_all(options.directory.join("wal"))?;
-    let (mut channels, handle) =
-        EngineBuilder::new(Context, config(options.index, options.base_port)?)
-            .with_default_wal(WalContext::new(
-                options.directory.join("wal/consensus.wal"),
-                WireCodec,
-            ))
-            .with_default_network(NetworkContext::new(identity, WireCodec))
-            .with_default_consensus(ConsensusContext::new_validator(
-                address,
-                Box::new(SignatureVerifier),
-                Box::new((*signer).clone()),
-            ))
-            .with_default_sync(SyncContext::new(WireCodec))
-            .with_default_request(RequestContext::new(16))
-            .build()
-            .await?;
+    let (mut channels, handle) = EngineBuilder::new(
+        Context,
+        config(options.index, options.base_port, &options.genesis)?,
+    )
+    .with_default_wal(WalContext::new(
+        options.directory.join("wal/consensus.wal"),
+        WireCodec::new(&options.genesis),
+    ))
+    .with_default_network(NetworkContext::new(
+        identity,
+        WireCodec::new(&options.genesis),
+    ))
+    .with_default_consensus(ConsensusContext::new_validator(
+        address,
+        Box::new(SignatureVerifier(options.genesis.clone())),
+        Box::new((*signer).clone()),
+    ))
+    .with_default_sync(SyncContext::new(WireCodec::new(&options.genesis)))
+    .with_default_request(RequestContext::new(16))
+    .build()
+    .await?;
     let result = tokio::select! {
-        result=tokio::time::timeout(options.timeout,app_loop(state,journal.clone(),&mut channels,&options,signer.clone()))=> {
-            result.unwrap_or_else(|_|Err(eyre!("local consensus deadline reached; quorum/liveness not established")))
-        },
-        signal=tokio::signal::ctrl_c()=>{signal.map_err(eyre::Report::from).and_then(|()|journal.replay(Genesis::local(),verify_record).map_err(Into::into))},
+        result=app_loop(state,journal.clone(),&mut channels,&options,signer.clone())=>result,
+        signal=tokio::signal::ctrl_c()=>{signal.map_err(eyre::Report::from).and_then(|()|journal.replay(options.genesis.clone(),|record| verify_record(&options.genesis,record)).map_err(Into::into))},
     };
     handle.actor.stop(None);
     let _ = tokio::time::timeout(Duration::from_secs(5), handle.handle).await;
@@ -235,10 +276,27 @@ async fn app_loop(
 ) -> Result<State> {
     let mut candidates = Candidates::new(journal.clone());
     let mut active_round = m::Round::Nil;
-    while let Some(msg) = channels.consensus.recv().await {
+    let consensus_deadline = tokio::time::Instant::now() + options.timeout;
+    let mut serve_deadline = None;
+    let mut _held_final_reply = None;
+    loop {
+        let deadline = serve_deadline.unwrap_or(consensus_deadline);
+        let msg = match tokio::time::timeout_at(deadline, channels.consensus.recv()).await {
+            Ok(msg) => msg,
+            Err(_) if state.height() >= options.target_height => return Ok(state),
+            Err(_) => {
+                return Err(eyre!(
+                    "local consensus deadline reached; quorum/liveness not established"
+                ))
+            }
+        };
+        let Some(msg) = msg else { break };
         match msg {
             AppMsg::ConsensusReady { reply } => {
-                let _ = reply.send((Height(state.height() + 1), params()));
+                let _ = reply.send((
+                    Height(state.height() + 1),
+                    params(state.genesis(), state.height() + 1)?,
+                ));
             }
             AppMsg::StartedRound {
                 height,
@@ -271,7 +329,7 @@ async fn app_loop(
                 let block = state.development_block()?;
                 candidates.store_block(&block)?;
                 let proposer = Context
-                    .select_proposer(&Committee::local(), height, round)
+                    .select_proposer(&Committee::at(state.genesis(), height.0)?, height, round)
                     .address;
                 let part = Part {
                     height,
@@ -353,12 +411,12 @@ async fn app_loop(
                 let block = candidates
                     .block(certificate.height.0, certificate.value_id.0)?
                     .ok_or_else(|| eyre!("decided payload unavailable"))?;
-                verify_certificate(&block, &certificate)?;
+                verify_certificate(state.genesis(), &block, &certificate)?;
                 let next = state.execute(&block)?;
                 maybe_crash(&journal, options.crash, CrashPoint::BeforeCommit)?;
                 journal.append(&FinalizedRecord {
                     block,
-                    certificate: encode_certificate(&certificate)?,
+                    certificate: encode_certificate(state.genesis(), &certificate)?,
                 })?;
                 state = next;
                 let _ = reply.send(());
@@ -369,17 +427,36 @@ async fn app_loop(
                 let record = journal
                     .record(certificate.height.0)?
                     .ok_or_else(|| eyre!("decision not durable"))?;
-                verify_certificate(&record.block, &certificate)?;
+                verify_certificate(state.genesis(), &record.block, &certificate)?;
                 if state.height() != certificate.height.0 || state.tip() != certificate.value_id.0 {
                     return Err(eyre!("finalized state mismatch"));
                 }
+                if state
+                    .genesis()
+                    .epochs
+                    .iter()
+                    .any(|e| e.first_height == state.height() + 1)
+                {
+                    maybe_crash(&journal, options.crash, CrashPoint::BeforeEpoch)?;
+                }
                 println!("{}", status_json(&state));
                 if state.height() >= options.target_height {
-                    return Ok(state);
+                    if options.linger.is_zero() {
+                        return Ok(state);
+                    }
+                    // Keep serving certified history at the terminal demo height.
+                    // Hold the finalization reply so the engine does not start a
+                    // new height while lagging participants fetch the last record.
+                    serve_deadline = Some(tokio::time::Instant::now() + options.linger);
+                    _held_final_reply = Some(reply);
+                    continue;
                 }
                 candidates.prune_finalized(state.height())?;
                 active_round = m::Round::Nil;
-                let _ = reply.send(Next::Start(Height(state.height() + 1), params()));
+                let _ = reply.send(Next::Start(
+                    Height(state.height() + 1),
+                    params(state.genesis(), state.height() + 1)?,
+                ));
             }
             AppMsg::GetHistoryMinHeight { reply } => {
                 let _ = reply.send(Height(1));
@@ -393,10 +470,10 @@ async fn app_loop(
                         let Some(record) = journal.record(height)? else {
                             break;
                         };
-                        verify_record(&record)?;
+                        verify_record(state.genesis(), &record)?;
                         let certificate =
                             m::ExtendedCommitCertificate::from_commit_certificate_and_extensions(
-                                decode_certificate(&record.certificate)?,
+                                decode_certificate(state.genesis(), &record.certificate)?,
                                 m::VoteExtensions::default(),
                             );
                         values.push(RawDecidedValue::new(

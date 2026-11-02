@@ -142,6 +142,7 @@ impl m::ProposalPart<Context> for Part {
 pub struct Validator {
     pub address: Address,
     pub key: [u8; 32],
+    pub power: u64,
 }
 impl m::Validator<Context> for Validator {
     fn address(&self) -> &Address {
@@ -151,28 +152,41 @@ impl m::Validator<Context> for Validator {
         &self.key
     }
     fn voting_power(&self) -> u64 {
-        1
+        self.power
     }
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Committee(pub [Validator; 4]);
+pub struct Committee(Vec<Validator>, u64);
 impl Committee {
     pub fn local() -> Self {
-        let mut keys = Genesis::local().validators;
-        keys.sort();
-        Self(keys.map(|key| Validator {
-            address: Address(Digest(key)),
-            key,
-        }))
+        Self::at(&Genesis::local(), 1).expect("local committee")
+    }
+    pub fn at(genesis: &Genesis, height: u64) -> yami_chain::Result<Self> {
+        let set = genesis.committee_at(height)?;
+        Ok(Self(
+            set.members()
+                .iter()
+                .map(|member| Validator {
+                    address: Address(Digest(member.consensus_key)),
+                    key: member.consensus_key,
+                    power: member.power,
+                })
+                .collect(),
+            set.total_power(),
+        ))
+    }
+    pub fn members(&self) -> &[Validator] {
+        &self.0
     }
 }
 impl m::ValidatorSet<Context> for Committee {
     fn count(&self) -> usize {
-        4
+        self.0.len()
     }
     fn total_voting_power(&self) -> u64 {
-        4
+        self.1
     }
+
     fn get_by_address(&self, a: &Address) -> Option<&Validator> {
         self.0.iter().find(|v| &v.address == a)
     }
@@ -222,8 +236,9 @@ impl m::Context for Context {
         height: Height,
         round: m::Round,
     ) -> &'a Validator {
-        let i = ((height.0.saturating_sub(1) % 4 + u64::from(round.as_u32().unwrap_or(0)) % 4) % 4)
-            as usize;
+        let i = ((height.0.saturating_sub(1) % set.0.len() as u64
+            + u64::from(round.as_u32().unwrap_or(0)) % set.0.len() as u64)
+            % set.0.len() as u64) as usize;
         &set.0[i]
     }
     fn new_proposal(

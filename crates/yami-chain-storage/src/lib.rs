@@ -8,10 +8,10 @@ use std::{
 };
 use yami_chain::{
     codec::{Reader, Writer},
-    Block, Digest, Genesis, State, MAX_BLOCK_BYTES,
+    Block, Digest, Genesis, State, MAX_BLOCK_BYTES, MAX_CERTIFICATE_BYTES,
 };
 
-pub const MAX_RECORD_BYTES: usize = MAX_BLOCK_BYTES + 4096 + 32;
+pub const MAX_RECORD_BYTES: usize = MAX_BLOCK_BYTES + MAX_CERTIFICATE_BYTES + 32;
 
 #[derive(Clone, Debug)]
 pub struct FinalizedRecord {
@@ -24,7 +24,7 @@ impl FinalizedRecord {
         w.raw(b"YC-RECORD-1");
         w.bytes(&self.block.canonical().map_err(invalid)?)
             .map_err(invalid)?;
-        if self.certificate.len() > 4096 {
+        if self.certificate.len() > MAX_CERTIFICATE_BYTES {
             return Err(invalid("certificate cap"));
         }
         w.bytes(&self.certificate).map_err(invalid)?;
@@ -36,7 +36,7 @@ impl FinalizedRecord {
             return Err(invalid("record domain"));
         }
         let block = Block::decode(r.bytes(MAX_BLOCK_BYTES).map_err(invalid)?).map_err(invalid)?;
-        let certificate = r.bytes(4096).map_err(invalid)?.to_vec();
+        let certificate = r.bytes(MAX_CERTIFICATE_BYTES).map_err(invalid)?.to_vec();
         r.end().map_err(invalid)?;
         Ok(Self { block, certificate })
     }
@@ -54,7 +54,8 @@ pub fn read_bounded(path: &Path, limit: usize) -> io::Result<Vec<u8>> {
         return Err(invalid("record cap"));
     }
     let mut bytes = Vec::new();
-    f.take(limit as u64 + 1).read_to_end(&mut bytes)?;
+    f.take((limit as u64).saturating_add(1))
+        .read_to_end(&mut bytes)?;
     if bytes.len() > limit {
         return Err(invalid("record cap"));
     }
@@ -129,12 +130,17 @@ impl Journal {
         {
             return Err(invalid("invalid record name"));
         }
-        if bytes.len() > MAX_RECORD_BYTES {
+        let limit = if name == "genesis.bin" {
+            yami_chain::committee::MAX_GENESIS_BYTES
+        } else {
+            MAX_RECORD_BYTES
+        };
+        if bytes.len() > limit {
             return Err(invalid("record cap"));
         }
         let final_path = self.path.join(name);
         if fs::symlink_metadata(&final_path).is_ok() {
-            if read_bounded(&final_path, MAX_RECORD_BYTES)? == bytes {
+            if read_bounded(&final_path, limit)? == bytes {
                 return Ok(());
             }
             return Err(invalid("conflicting durable record"));
@@ -169,10 +175,10 @@ impl Journal {
         genesis: Genesis,
         verify: impl Fn(&FinalizedRecord) -> io::Result<()>,
     ) -> io::Result<State> {
+        let mut state = State::new(genesis.clone()).map_err(invalid)?;
         self.write_once("genesis.bin", &genesis.canonical())?;
         // Replay in height order with constant history-index memory. A second
         // streaming directory pass rejects gaps and noncanonical filenames.
-        let mut state = State::new(genesis).map_err(invalid)?;
         while let Some(record) = self.record(
             state
                 .height()
@@ -344,6 +350,39 @@ mod tests {
                 .is_symlink());
         }
         drop(j);
+        fs::remove_dir_all(path).unwrap();
+    }
+}
+
+#[cfg(test)]
+mod genesis_limits {
+    use super::*;
+    #[test]
+    fn full_scheduled_genesis_is_bounded_and_invalid_genesis_does_not_poison_store() {
+        let path = std::env::temp_dir().join(format!("yami-large-genesis-{}", std::process::id()));
+        let journal = Journal::open(&path).unwrap();
+        let mut invalid_genesis = Genesis::local();
+        invalid_genesis.epochs.clear();
+        assert!(journal.replay(invalid_genesis, |_| Ok(())).is_err());
+        assert!(!path.join("genesis.bin").exists());
+        let mut genesis = Genesis::development_schedule(&[(1, 100)]).unwrap();
+        let set = genesis.epochs[0].validators.clone();
+        genesis.epochs = (1..=64)
+            .map(|first_height| yami_chain::Epoch {
+                first_height,
+                validators: set.clone(),
+            })
+            .collect();
+        assert!(genesis.canonical().len() > MAX_RECORD_BYTES);
+        assert_eq!(
+            journal
+                .replay(genesis.clone(), |_| Ok(()))
+                .unwrap()
+                .height(),
+            0
+        );
+        assert_eq!(journal.replay(genesis, |_| Ok(())).unwrap().height(), 0);
+        drop(journal);
         fs::remove_dir_all(path).unwrap();
     }
 }

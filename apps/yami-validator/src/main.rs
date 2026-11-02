@@ -1,7 +1,7 @@
 use eyre::{eyre, Result};
 use std::{path::PathBuf, time::Duration};
-use yami_chain_consensus::{inspect, run_node, status_json, CrashPoint, NodeOptions};
-const HELP:&str="yami-validator 0.1 — NOT production-ready; no real money\n\nIsolated four-validator Malachite prototype. Public development keys; loopback only.\nAll YAMI payments and value-bearing protocol actions are disabled.\n\nUsage:\n  yami-validator run --dir PATH --index 0..3 [--base-port 28100] [--height 10] [--timeout 60]\n  yami-validator status --dir PATH\n  yami-validator inspect --dir PATH\n\nrun starts one independent process, binding only 127.0.0.1:base-port+index.\nLaunch four processes with separate directories and the same base port.\nstatus/inspect replay and authenticate durable finalized history under an exclusive\nstore lock; stop that validator before inspecting it. No wallet, public RPC or mint.\n\nTest fault injection: --crash-after proposal|vote|before-commit (run only).\nThe process exits 86 once per directory at the selected durable boundary.\nPreserve the entire directory, including signing records and WAL, when restarting.\n";
+use yami_chain_consensus::{inspect_with_genesis, run_node, status_json, CrashPoint, NodeOptions};
+const HELP:&str="yami-validator 0.2 — NOT production-ready; no real money\n\nIsolated configurable-committee Malachite prototype. Public development keys; loopback only.\nAll YAMI payments and value-bearing protocol actions are disabled.\n\nUsage:\n  yami-validator run --dir PATH --index N [--base-port 28100] [--height 10] [--timeout 60]\n  yami-validator status --dir PATH\n  yami-validator inspect --dir PATH\n\nrun starts one independent process, binding only 127.0.0.1:base-port+index.\nLaunch the scheduled public development identities with separate stores.\n--committee-plan 1:4,5:7,9:5 pins sizes at activation heights; default 1:4.\nSupply the same plan for run/status/inspect; changing it refuses the existing store.\nstatus/inspect replay and authenticate durable finalized history under an exclusive\nstore lock; stop that validator before inspecting it. No wallet, public RPC or mint.\n\nOptional --linger SECONDS serves certified history at the terminal demo height.\nTest fault injection: --crash-after proposal|vote|before-commit|epoch (run only).\nThe process exits 86 once per directory at the selected durable boundary.\nPreserve the entire directory, including signing records and WAL, when restarting.\n";
 #[tokio::main(flavor = "multi_thread", worker_threads = 2)]
 async fn main() {
     if let Err(error) = run().await {
@@ -24,7 +24,9 @@ async fn run() -> Result<()> {
     let mut base_port = 28100;
     let mut height = 10;
     let mut timeout = 60;
+    let mut linger = 0;
     let mut crash = None;
+    let mut plan = vec![(1, 4)];
     let mut seen = std::collections::BTreeSet::new();
     for pair in args[1..].chunks(2) {
         if pair.len() != 2 || !seen.insert(pair[0].as_str()) {
@@ -33,15 +35,28 @@ async fn run() -> Result<()> {
         let value = &pair[1];
         match pair[0].as_str() {
             "--dir" => dir = Some(PathBuf::from(value)),
+            "--committee-plan" => {
+                plan = value
+                    .split(',')
+                    .map(|item| {
+                        let (height, count) = item
+                            .split_once(':')
+                            .ok_or_else(|| eyre!("committee plan: HEIGHT:SIZE,..."))?;
+                        Ok((height.parse()?, count.parse()?))
+                    })
+                    .collect::<Result<Vec<_>>>()?;
+            }
             "--index" if command == "run" => index = Some(value.parse()?),
             "--base-port" if command == "run" => base_port = value.parse()?,
             "--height" if command == "run" => height = value.parse()?,
             "--timeout" if command == "run" => timeout = value.parse()?,
+            "--linger" if command == "run" => linger = value.parse()?,
             "--crash-after" if command == "run" => {
                 crash = Some(match value.as_str() {
                     "proposal" => CrashPoint::Proposal,
                     "vote" => CrashPoint::Vote,
                     "before-commit" => CrashPoint::BeforeCommit,
+                    "epoch" => CrashPoint::BeforeEpoch,
                     _ => return Err(eyre!("unknown crash point")),
                 })
             }
@@ -49,22 +64,25 @@ async fn run() -> Result<()> {
         }
     }
     let directory = dir.ok_or_else(|| eyre!("--dir is required"))?;
+    let genesis = yami_chain::Genesis::development_schedule(&plan)?;
     let state = if command == "run" {
-        if timeout == 0 || timeout > 3600 {
-            return Err(eyre!("timeout must be 1..3600 seconds"));
+        if timeout == 0 || timeout > 3600 || linger > 60 {
+            return Err(eyre!("timeout must be 1..3600 seconds and linger 0..60"));
         }
         eprintln!("NOT production-ready; no real money. Public development keys; loopback only.");
         run_node(NodeOptions {
             directory,
+            genesis,
             index: index.ok_or_else(|| eyre!("--index is required"))?,
             base_port,
             target_height: height,
             timeout: Duration::from_secs(timeout),
+            linger: Duration::from_secs(linger),
             crash,
         })
         .await?
     } else {
-        inspect(&directory)?
+        inspect_with_genesis(&directory, genesis)?
     };
     println!("{}", status_json(&state));
     Ok(())
