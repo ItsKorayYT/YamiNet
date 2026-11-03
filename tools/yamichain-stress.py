@@ -17,6 +17,7 @@ import platform
 import resource
 import random
 import signal
+import shutil
 import subprocess
 import time
 
@@ -58,6 +59,22 @@ def usage(path):
             'allocated_bytes': sum(st.st_blocks * 512 for p, st in files), 'files': len(files),
             'wal_bytes': sum(st.st_size for p, st in files if p.suffix == '.wal'),
             'signing_bytes': sum(st.st_size for p, st in files if p.name.startswith('signed-'))}
+
+
+def validator_command(binary, address_space_mib):
+    """Apply the limit before exec, including to restarted validators.
+
+    RLIMIT_AS limits virtual address space, not RSS or a cgroup memory budget.
+    Keep binary hashing independent of the launcher.
+    """
+    if not address_space_mib:
+        return [str(binary)]
+    if not 128 <= address_space_mib <= 65536:
+        raise ValueError('address-space limit must be 128..65536 MiB, or zero')
+    launcher = shutil.which('prlimit')
+    if not launcher:
+        raise RuntimeError('prlimit is required to enforce the address-space limit')
+    return [launcher, f'--as={address_space_mib * 1024 * 1024}', '--', str(binary)]
 
 
 class Proxies:
@@ -195,8 +212,8 @@ async def run(args):
         log_path = root / f'node-{index}-{len(logs)}.log'
         log = open(log_path, 'w', encoding='utf-8')
         logs.append((log_path, log))
-        processes[index] = subprocess.Popen([
-            str(binary), 'run', '--dir', str(root / f'node-{index}'), '--index', str(index),
+        processes[index] = subprocess.Popen(validator_command(binary, args.address_space_mib) + [
+            'run', '--dir', str(root / f'node-{index}'), '--index', str(index),
             '--committee-plan', plan, '--base-port', str(args.base_port),
             '--peer-base-port', str(args.base_port if args.direct else args.proxy_base_port + 100 * (index if args.distinct_source_ips else proxy.group(index))),
             '--height', str(args.height), '--timeout', str(args.timeout), '--linger', str(history_linger),
@@ -250,6 +267,8 @@ async def run(args):
               'driver_sha256': hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
               'visible_host_logical_cpus': os.cpu_count(),
               'cpu_model': next((line.split(':', 1)[1].strip() for line in Path('/proc/cpuinfo').read_text().splitlines() if line.startswith('model name')), 'not reported'),
+              'per_validator_address_space_limit_bytes': args.address_space_mib * 1024 * 1024 if args.address_space_mib else None,
+              'memory_limit_scope': 'RLIMIT_AS virtual address space, not a per-node cgroup/RSS limit',
               'network_path': 'direct loopback' if args.direct else 'encrypted TCP fault proxy',
               'round_timeout_ms':args.round_timeout_ms, 'startup_barrier_seconds': args.startup_barrier, 'distinct_loopback_source_ips': args.distinct_source_ips, 'sparse_authenticated_neighbors': args.sparse, 'validators': args.validators, 'committee_plan': plan, 'target_height': args.height,
               'transactions_per_block': args.transactions, 'delay_ms_per_stream_read': args.delay_ms, 'jitter_ms_per_read':args.jitter_ms, 'stream_reset_percent_per_read':args.stream_reset_percent, 'fault_seed':args.seed, 'partition_seconds':args.partition_seconds,
@@ -435,6 +454,8 @@ def main():
     parser.add_argument('--validators', type=int, choices=[4, 25, 50, 100], default=4)
     parser.add_argument('--height', type=int, default=256)
     parser.add_argument('--transactions', type=int, default=16)
+    parser.add_argument('--address-space-mib', type=int, default=0,
+                        help='enforce per-validator RLIMIT_AS before exec; 0 disables (not an RSS limit)')
     parser.add_argument('--timeout', type=int, default=600)
     parser.add_argument('--partition-seconds', type=int, choices=range(7,301), default=7)
     parser.add_argument('--jitter-ms', type=float, default=0)
@@ -453,6 +474,10 @@ def main():
     parser.add_argument('--base-port', type=int, default=20000)
     parser.add_argument('--proxy-base-port', type=int, default=30000)
     args = parser.parse_args()
+    try:
+        validator_command(args.binary, args.address_space_mib)
+    except (ValueError, RuntimeError) as error:
+        parser.error(str(error))
     if not 0 <= args.transactions <= 64 or not 1 <= args.height <= 100000 or not 0 <= args.delay_ms <= 1000:
         parser.error('workload bounds exceeded')
     if not 0 <= args.jitter_ms <= 1000 or not 0 <= args.stream_reset_percent <= 10:

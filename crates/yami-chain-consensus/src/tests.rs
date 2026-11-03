@@ -713,6 +713,124 @@ fn committees_certificates_cover_sizes_weights_history_and_recovery() {
     std::fs::remove_dir_all(path).unwrap();
 }
 
+#[test]
+fn history_snapshot_restore_checks_complete_archive_and_resumes_certified_prefix() {
+    let root = std::env::temp_dir().join(format!("yami-snapshot-{}", std::process::id()));
+    let source = Journal::open(&root.join("source")).unwrap();
+    let genesis = Genesis::development_schedule(&[(1, 4), (3, 7), (5, 3)]).unwrap();
+    let mut state = source
+        .replay(genesis.clone(), |r| verify_record(&genesis, r))
+        .unwrap();
+    for _ in 0..7 {
+        let block = state.development_block().unwrap();
+        let certificate = encode_certificate(&genesis, &certify(&genesis, &block, 100)).unwrap();
+        state = state.execute(&block).unwrap();
+        source
+            .append(&yami_chain_storage::FinalizedRecord { block, certificate })
+            .unwrap();
+    }
+    let bytes = crate::export_history_snapshot(&source, &genesis, 7).unwrap();
+    let digest = crate::history_snapshot_digest(&bytes);
+    let mut target = Journal::open(&root.join("target")).unwrap();
+    assert!(
+        crate::restore_history_snapshot(&mut target, &genesis, &bytes, Digest([0; 32])).is_err()
+    );
+    assert!(
+        crate::restore_history_snapshot(&mut target, &Genesis::local(), &bytes, digest).is_err()
+    );
+    assert!(target.record(1).unwrap().is_none());
+    for attack in 0..5 {
+        let mut bad = bytes.clone();
+        match attack {
+            0 => {
+                bad.pop();
+            }
+            1 => bad.push(0),
+            2 => {
+                let last = bad.len() - 1;
+                bad[last] ^= 1;
+            } // terminal certificate
+            3 => bad[b"YC-HISTORY-SNAPSHOT-1".len() + 32 + 8] ^= 1, // terminal tip
+            _ => {
+                let at = b"YC-HISTORY-SNAPSHOT-1".len() + 32;
+                bad[at..at + 8].copy_from_slice(&u64::MAX.to_be_bytes());
+            }
+        }
+        // Even pinning adversarial bytes cannot bypass certificate/execution checks.
+        let digest = crate::history_snapshot_digest(&bad);
+        assert!(crate::restore_history_snapshot(&mut target, &genesis, &bad, digest).is_err());
+        assert!(target.record(1).unwrap().is_none());
+        assert!(!target.path().join("genesis.bin").exists());
+    }
+    // An interrupted restore leaves exactly the same certified prefix as sync.
+    target
+        .replay(genesis.clone(), |r| verify_record(&genesis, r))
+        .unwrap();
+    for h in 1..=2 {
+        let mut record = source.record(h).unwrap().unwrap();
+        if h == 1 {
+            record.certificate =
+                encode_certificate(&genesis, &certify(&genesis, &record.block, 3)).unwrap();
+            assert_ne!(
+                record.certificate,
+                source.record(h).unwrap().unwrap().certificate
+            );
+        }
+        target.append(&record).unwrap();
+    }
+    let original_certificate = target.record(1).unwrap().unwrap().certificate;
+    drop(target);
+    let mut target = Journal::open(&root.join("target")).unwrap();
+    assert_eq!(
+        crate::restore_history_snapshot(&mut target, &genesis, &bytes, digest).unwrap(),
+        state
+    );
+    assert_eq!(
+        crate::restore_history_snapshot(&mut target, &genesis, &bytes, digest).unwrap(),
+        state
+    );
+    assert_eq!(
+        target
+            .replay(genesis.clone(), |r| verify_record(&genesis, r))
+            .unwrap(),
+        state
+    );
+    assert_eq!(
+        target.record(1).unwrap().unwrap().certificate,
+        original_certificate
+    );
+    let older = crate::export_history_snapshot(&source, &genesis, 3).unwrap();
+    assert!(crate::restore_history_snapshot(
+        &mut target,
+        &genesis,
+        &older,
+        crate::history_snapshot_digest(&older)
+    )
+    .is_err());
+    assert_eq!(
+        target
+            .replay(genesis.clone(), |r| verify_record(&genesis, r))
+            .unwrap(),
+        state
+    );
+    // A separately certified conflicting block must not replace local history.
+    let mut conflict = Journal::open(&root.join("conflict")).unwrap();
+    let initial = conflict
+        .replay(genesis.clone(), |r| verify_record(&genesis, r))
+        .unwrap();
+    let block = initial.development_workload_block(2).unwrap();
+    let certificate = encode_certificate(&genesis, &certify(&genesis, &block, 100)).unwrap();
+    conflict
+        .append(&yami_chain_storage::FinalizedRecord { block, certificate })
+        .unwrap();
+    assert!(crate::restore_history_snapshot(&mut conflict, &genesis, &bytes, digest).is_err());
+    assert!(conflict.record(2).unwrap().is_none());
+    drop(conflict);
+    drop(target);
+    drop(source);
+    std::fs::remove_dir_all(root).unwrap();
+}
+
 #[tokio::test]
 async fn transport_binding_malformed_votes_and_proposal_reservations_fail_closed() {
     use m::Context as _;

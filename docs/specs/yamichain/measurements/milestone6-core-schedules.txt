@@ -1,0 +1,19 @@
+Scope: authenticated Malachite core schedules; timers and I/O modeled.
+These are not 25/50/100-process resource measurements.
+
+running 1 test
+scale-core size=4 case=reordered elapsed_ms=4 authenticated_decisions=4
+scale-core size=4 case=malicious elapsed_ms=4 authenticated_decisions=3
+scale-core size=4 case=partition-recovery elapsed_ms=8 authenticated_decisions=4
+scale-core size=25 case=reordered elapsed_ms=142 authenticated_decisions=25
+scale-core size=25 case=malicious elapsed_ms=142 authenticated_decisions=24
+scale-core size=25 case=partition-recovery elapsed_ms=219 authenticated_decisions=25
+scale-core size=50 case=reordered elapsed_ms=565 authenticated_decisions=50
+scale-core size=50 case=malicious elapsed_ms=566 authenticated_decisions=49
+scale-core size=50 case=partition-recovery elapsed_ms=948 authenticated_decisions=50
+scale-core size=100 case=reordered elapsed_ms=2461 authenticated_decisions=100
+scale-core size=100 case=malicious elapsed_ms=2423 authenticated_decisions=99
+scale-core size=100 case=partition-recovery elapsed_ms=3954 authenticated_decisions=100
+test tests::scale_stress_authenticated_core ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 19 filtered out; finished in 11.45s

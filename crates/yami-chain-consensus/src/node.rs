@@ -383,11 +383,9 @@ async fn app_loop(
             }
             AppMsg::ReceivedProposalPart { part, reply, .. } => {
                 let mut result = None;
-                if part.sequence == 0 {
-                    if let StreamContent::Data(part) = part.content {
-                        if candidates.admit(&state, active_round, &part)? {
-                            result = Some(proposal(&part)?);
-                        }
+                if let Some(part) = single_part_proposal(part) {
+                    if candidates.admit(&state, active_round, &part)? {
+                        result = Some(proposal(&part)?);
                     }
                 }
                 let _ = reply.send(result);
@@ -559,6 +557,59 @@ async fn app_loop(
 }
 pub fn status_json(state: &State) -> String {
     format!("{{\"chain_id\":\"{}\",\"height\":{},\"block\":\"{}\",\"state_root\":\"{}\",\"test_tlds\":{},\"payments_enabled\":false,\"production_ready\":false}}",yami_chain::CHAIN_ID,state.height(),state.tip(),state.root(),state.names().entries().count())
+}
+
+// Our transport publishes exactly one data part, keyed by its block ID. Reject
+// misleading stream metadata before any candidate disk write or app admission.
+fn single_part_proposal(stream: StreamMessage<Part>) -> Option<Part> {
+    if stream.sequence != 0 {
+        return None;
+    }
+    let StreamContent::Data(part) = stream.content else {
+        return None;
+    };
+    let id = part.block.id().ok()?;
+    (stream.stream_id.to_bytes().as_ref() == id.0.as_slice()).then_some(part)
+}
+
+#[cfg(test)]
+mod stream_tests {
+    use super::*;
+    #[test]
+    fn invalid_peer_streams_cannot_relabel_or_resequence_proposal_payloads() {
+        let state = State::new(Genesis::local()).unwrap();
+        let part = Part {
+            height: Height(1),
+            round: m::Round::ZERO,
+            valid_round: m::Round::Nil,
+            proposer: Context
+                .select_proposer(&Committee::local(), Height(1), m::Round::ZERO)
+                .address,
+            block: state.development_block().unwrap(),
+            signature: [0; 64],
+        };
+        let id = part.block.id().unwrap();
+        let stream = |id: &[u8], sequence| {
+            StreamMessage::new(
+                StreamId::new(Bytes::copy_from_slice(id)),
+                sequence,
+                StreamContent::Data(part.clone()),
+            )
+        };
+        assert_eq!(single_part_proposal(stream(&id.0, 0)), Some(part.clone()));
+        for wrong in [vec![], vec![0; 31], vec![0; 32], vec![0; 33]] {
+            assert!(single_part_proposal(stream(&wrong, 0)).is_none());
+        }
+        for sequence in [1, 2, u64::MAX] {
+            assert!(single_part_proposal(stream(&id.0, sequence)).is_none());
+        }
+        assert!(single_part_proposal(StreamMessage::new(
+            StreamId::new(Bytes::copy_from_slice(&id.0)),
+            0,
+            StreamContent::Fin
+        ))
+        .is_none());
+    }
 }
 
 // A local rehearsal topology, not validator selection. All scheduled identities

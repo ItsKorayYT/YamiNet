@@ -134,6 +134,12 @@ impl Candidates {
             if original.height != part.height || original.round != part.round {
                 return Err(eyre!("proposal filename mismatch"));
             }
+            // Disk cache membership is not authentication. Recheck even an
+            // identical retransmission: corrupted metadata/payloads must never
+            // become a Valid proposal or an equivocation evidence source.
+            if !Self::valid(state, &original) {
+                return Err(eyre!("invalid cached proposal"));
+            }
             if original != *part {
                 // Keep one independently verifiable equivocation pair per round;
                 // additional equivocations consume no further storage.
@@ -258,6 +264,58 @@ mod tests {
         assert_eq!(std::fs::read_dir(&path).unwrap().count(), 2); // lock and evidence
         drop(c);
         std::fs::remove_dir_all(path).unwrap();
+    }
+    #[test]
+    fn corrupted_cache_cannot_validate_retransmissions_or_create_evidence() {
+        for attack in 0..3 {
+            let path = std::env::temp_dir().join(format!(
+                "yami-cache-corrupt-{}-{attack}",
+                std::process::id()
+            ));
+            let state = State::new(Genesis::local()).unwrap();
+            let journal = Arc::new(Journal::open(&path).unwrap());
+            let mut c = Candidates::new(journal.clone());
+            let original = signed(&state, m::Round::ZERO, "test-authenticated");
+            assert!(c.admit(&state, original.round, &original).unwrap());
+            assert!(c.admit(&state, original.round, &original).unwrap());
+            let mut corrupt = original.clone();
+            match attack {
+                0 => corrupt.signature[0] ^= 1,
+                1 => corrupt.proposer = Address(Digest([99; 32])),
+                _ => {
+                    corrupt.block.header.state = Digest([99; 32]);
+                    let key = (0..4)
+                        .map(|i| development_key("consensus", i))
+                        .find(|k| k.verifying_key().to_bytes() == corrupt.proposer.0 .0)
+                        .unwrap();
+                    corrupt.signature = key
+                        .sign(
+                            &proposal_preimage_for(state.genesis(), &corrupt.proposal().unwrap())
+                                .unwrap(),
+                        )
+                        .to_bytes();
+                    c.store_block(&corrupt.block).unwrap();
+                }
+            }
+            // Model disk corruption using the supported legacy cache encoding.
+            let name = Candidates::name(1, original.round).unwrap();
+            std::fs::write(
+                path.join(name),
+                WireCodec::new(state.genesis()).encode(&corrupt).unwrap(),
+            )
+            .unwrap();
+            assert!(c.admit(&state, original.round, &corrupt).is_err());
+            assert!(c.admit(&state, original.round, &original).is_err());
+            assert!(c.recover(&state, original.round).is_err());
+            assert!(!std::fs::read_dir(&path).unwrap().any(|e| e
+                .unwrap()
+                .file_name()
+                .to_string_lossy()
+                .starts_with("equivocation-")));
+            drop(c);
+            drop(journal);
+            std::fs::remove_dir_all(path).unwrap();
+        }
     }
 }
 

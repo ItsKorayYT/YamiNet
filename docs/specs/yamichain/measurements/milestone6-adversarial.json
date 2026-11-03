@@ -1,0 +1,226 @@
+{
+  "result": "PASS",
+  "scope": "real Malachite processes, public development keys, loopback encrypted TCP; non-financial naming workload",
+  "generated_at": "2026-11-03T14:15:49.951854+00:00",
+  "architecture": "x86_64",
+  "binary_sha256": "4f0e18efb96dd0baef7cdedb32dfdf620a6c09cc10cfa8bcef28ea381675580a",
+  "driver_sha256": "1253213d2b2f424ebf0da74665bbdd61f659f64f2bf134ae689e9b53a9994314",
+  "visible_host_logical_cpus": 3,
+  "cpu_model": "AMD EPYC 7763 64-Core Processor",
+  "per_validator_address_space_limit_bytes": 2147483648,
+  "memory_limit_scope": "RLIMIT_AS virtual address space, not a per-node cgroup/RSS limit",
+  "network_path": "encrypted TCP fault proxy",
+  "round_timeout_ms": 800,
+  "startup_barrier_seconds": 0,
+  "distinct_loopback_source_ips": false,
+  "sparse_authenticated_neighbors": false,
+  "validators": 4,
+  "committee_plan": "1:4",
+  "target_height": 64,
+  "transactions_per_block": 16,
+  "delay_ms_per_stream_read": 0,
+  "jitter_ms_per_read": 0,
+  "stream_reset_percent_per_read": 0,
+  "fault_seed": 17,
+  "partition_seconds": 7,
+  "cgroup": {
+    "cpu.max": "200000 100000",
+    "memory.max": "8589934592",
+    "memory.swap.max": "max"
+  },
+  "unverified_targets": [
+    "20 GB SSD capacity and physical SSD performance",
+    "large/pruned state",
+    "native ARM64 unless architecture reports aarch64",
+    "shielded payment/proof workload"
+  ],
+  "in_progress": false,
+  "elapsed_seconds": 38.946,
+  "last_observed_heights": {
+    "1": 64,
+    "2": 64,
+    "3": 64,
+    "0": 64
+  },
+  "sampled_combined_peak_rss_bytes": 75063296,
+  "sampled_per_validator_peak_rss_bytes": [
+    18661376,
+    18735104,
+    18849792,
+    18817024
+  ],
+  "cgroup_memory_peak_bytes": "6383435776",
+  "cgroup_cpu_stat": "usage_usec 2757447975\nuser_usec 2596775147\nsystem_usec 160672828\nnice_usec 0\nnr_periods 22901\nnr_throttled 4057\nthrottled_usec 23812705\nnr_bursts 0\nburst_usec 0",
+  "samples": [
+    {
+      "seconds": 0.135,
+      "height_min": 0,
+      "height_max": 0,
+      "sampled_combined_rss_bytes": 67026944,
+      "forwarded_transport_bytes": 40077,
+      "store_logical_bytes": 5291,
+      "wal_bytes": 603,
+      "signing_bytes": 315
+    },
+    {
+      "seconds": 5.187,
+      "height_min": 5,
+      "height_max": 5,
+      "sampled_combined_rss_bytes": 66043904,
+      "forwarded_transport_bytes": 386161,
+      "store_logical_bytes": 86926,
+      "wal_bytes": 2318,
+      "signing_bytes": 9027
+    },
+    {
+      "seconds": 10.24,
+      "height_min": 5,
+      "height_max": 5,
+      "sampled_combined_rss_bytes": 48771072,
+      "forwarded_transport_bytes": 405263,
+      "store_logical_bytes": 86926,
+      "wal_bytes": 2318,
+      "signing_bytes": 9027
+    },
+    {
+      "seconds": 15.294,
+      "height_min": 7,
+      "height_max": 7,
+      "sampled_combined_rss_bytes": 73187328,
+      "forwarded_transport_bytes": 695090,
+      "store_logical_bytes": 144599,
+      "wal_bytes": 8064,
+      "signing_bytes": 13794
+    },
+    {
+      "seconds": 20.36,
+      "height_min": 20,
+      "height_max": 20,
+      "sampled_combined_rss_bytes": 73793536,
+      "forwarded_transport_bytes": 1484589,
+      "store_logical_bytes": 340808,
+      "wal_bytes": 8064,
+      "signing_bytes": 32267
+    },
+    {
+      "seconds": 25.42,
+      "height_min": 32,
+      "height_max": 32,
+      "sampled_combined_rss_bytes": 74129408,
+      "forwarded_transport_bytes": 2212543,
+      "store_logical_bytes": 521924,
+      "wal_bytes": 8064,
+      "signing_bytes": 49319
+    },
+    {
+      "seconds": 30.494,
+      "height_min": 45,
+      "height_max": 45,
+      "sampled_combined_rss_bytes": 74559488,
+      "forwarded_transport_bytes": 2988098,
+      "store_logical_bytes": 718133,
+      "wal_bytes": 8064,
+      "signing_bytes": 67792
+    },
+    {
+      "seconds": 35.558,
+      "height_min": 57,
+      "height_max": 57,
+      "sampled_combined_rss_bytes": 74797056,
+      "forwarded_transport_bytes": 3723844,
+      "store_logical_bytes": 899249,
+      "wal_bytes": 8064,
+      "signing_bytes": 84844
+    }
+  ],
+  "faults": [
+    {
+      "kind": "partition",
+      "seconds": 2.559
+    },
+    {
+      "kind": "partition-healed",
+      "seconds": 9.631,
+      "no_quorum_height": 5
+    },
+    {
+      "kind": "SIGKILL",
+      "seconds": 9.631
+    },
+    {
+      "kind": "malformed-TCP-probes-completed",
+      "attempts": 64,
+      "bytes_drained_to_sockets": 1060992
+    },
+    {
+      "kind": "restart-preserving-entire-store",
+      "seconds": 11.654
+    }
+  ],
+  "elapsed_seconds_including_serving_and_shutdown": 38.405,
+  "maximum_history_linger_seconds": 12,
+  "validator_cpu_seconds": 5.009,
+  "proxy_and_monitor_cpu_seconds": 0.82,
+  "sequential_authenticated_replay_seconds": 0.541,
+  "final_height": 64,
+  "total_test_transactions": 1024,
+  "seconds_to_all_target": 38.097,
+  "seconds_from_first_all_height_to_target": 36.75,
+  "finalized_block": "9fdbe3c2baec37f723fd1e66adc2341355332feac3db237272a0b67685de4d89",
+  "finalized_state": "371d3c9aaced0d42b45f0bb5f2a8011cc96792a951ef5dac8795ec6543087153",
+  "cgroup_memory_events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0",
+  "namespace_loopback_bytes_including_proxy_hops_and_TCP_overhead": {
+    "rx": 10991391,
+    "tx": 10991391
+  },
+  "per_process_block_io_counters_available": true,
+  "sampled_processes": 5,
+  "processes_with_observed_io_counters": 5,
+  "sampled_block_io_bytes": {
+    "read": 0,
+    "write": 11460608
+  },
+  "per_destination_forwarded_transport_bytes": [
+    1117210,
+    976672,
+    1345963,
+    650609
+  ],
+  "forwarded_transport_bytes": 4090454,
+  "stream_resets": 0,
+  "observed_proxy_source_ips": [
+    "127.0.0.1"
+  ],
+  "proxy_connections": 18,
+  "partition_rejected_connections": 32,
+  "stores": [
+    {
+      "logical_bytes": 247430,
+      "allocated_bytes": 1150976,
+      "files": 282,
+      "wal_bytes": 2016,
+      "signing_bytes": 23272
+    },
+    {
+      "logical_bytes": 247555,
+      "allocated_bytes": 1155072,
+      "files": 283,
+      "wal_bytes": 2016,
+      "signing_bytes": 23397
+    },
+    {
+      "logical_bytes": 247587,
+      "allocated_bytes": 1155072,
+      "files": 283,
+      "wal_bytes": 2016,
+      "signing_bytes": 23429
+    },
+    {
+      "logical_bytes": 247235,
+      "allocated_bytes": 1146880,
+      "files": 281,
+      "wal_bytes": 2016,
+      "signing_bytes": 23272
+    }
+  ]
+}

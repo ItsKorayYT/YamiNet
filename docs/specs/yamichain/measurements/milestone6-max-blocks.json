@@ -1,0 +1,231 @@
+{
+  "result": "PASS",
+  "scope": "real Malachite processes, public development keys, loopback encrypted TCP; non-financial naming workload",
+  "generated_at": "2026-11-03T14:16:28.986738+00:00",
+  "architecture": "x86_64",
+  "binary_sha256": "4f0e18efb96dd0baef7cdedb32dfdf620a6c09cc10cfa8bcef28ea381675580a",
+  "driver_sha256": "1253213d2b2f424ebf0da74665bbdd61f659f64f2bf134ae689e9b53a9994314",
+  "visible_host_logical_cpus": 3,
+  "cpu_model": "AMD EPYC 7763 64-Core Processor",
+  "per_validator_address_space_limit_bytes": 2147483648,
+  "memory_limit_scope": "RLIMIT_AS virtual address space, not a per-node cgroup/RSS limit",
+  "network_path": "direct loopback",
+  "round_timeout_ms": 800,
+  "startup_barrier_seconds": 0,
+  "distinct_loopback_source_ips": false,
+  "sparse_authenticated_neighbors": false,
+  "validators": 4,
+  "committee_plan": "1:4",
+  "target_height": 128,
+  "transactions_per_block": 64,
+  "delay_ms_per_stream_read": 0,
+  "jitter_ms_per_read": 0,
+  "stream_reset_percent_per_read": 0,
+  "fault_seed": 17,
+  "partition_seconds": 7,
+  "cgroup": {
+    "cpu.max": "200000 100000",
+    "memory.max": "8589934592",
+    "memory.swap.max": "max"
+  },
+  "unverified_targets": [
+    "20 GB SSD capacity and physical SSD performance",
+    "large/pruned state",
+    "native ARM64 unless architecture reports aarch64",
+    "shielded payment/proof workload"
+  ],
+  "in_progress": false,
+  "elapsed_seconds": 58.25,
+  "last_observed_heights": {
+    "0": 128,
+    "1": 128,
+    "2": 128,
+    "3": 128
+  },
+  "sampled_combined_peak_rss_bytes": 85540864,
+  "sampled_per_validator_peak_rss_bytes": [
+    21385216,
+    21364736,
+    21434368,
+    21368832
+  ],
+  "cgroup_memory_peak_bytes": "6383435776",
+  "cgroup_cpu_stat": "usage_usec 2782983583\nuser_usec 2619721926\nsystem_usec 163261657\nnice_usec 0\nnr_periods 23485\nnr_throttled 4076\nthrottled_usec 25399646\nnr_bursts 0\nburst_usec 0",
+  "samples": [
+    {
+      "seconds": 0.134,
+      "height_min": 0,
+      "height_max": 0,
+      "sampled_combined_rss_bytes": 68304896,
+      "forwarded_transport_bytes": 0,
+      "store_logical_bytes": 104170,
+      "wal_bytes": 8064,
+      "signing_bytes": 1421
+    },
+    {
+      "seconds": 5.18,
+      "height_min": 12,
+      "height_max": 12,
+      "sampled_combined_rss_bytes": 72294400,
+      "forwarded_transport_bytes": 0,
+      "store_logical_bytes": 689424,
+      "wal_bytes": 8490,
+      "signing_bytes": 18473
+    },
+    {
+      "seconds": 10.227,
+      "height_min": 25,
+      "height_max": 25,
+      "sampled_combined_rss_bytes": 75108352,
+      "forwarded_transport_bytes": 0,
+      "store_logical_bytes": 1309011,
+      "wal_bytes": 4818,
+      "signing_bytes": 36630
+    },
+    {
+      "seconds": 15.275,
+      "height_min": 37,
+      "height_max": 37,
+      "sampled_combined_rss_bytes": 76107776,
+      "forwarded_transport_bytes": 0,
+      "store_logical_bytes": 1911265,
+      "wal_bytes": 8206,
+      "signing_bytes": 53998
+    },
+    {
+      "seconds": 20.327,
+      "height_min": 49,
+      "height_max": 50,
+      "sampled_combined_rss_bytes": 77586432,
+      "forwarded_transport_bytes": 0,
+      "store_logical_bytes": 2506994,
+      "wal_bytes": 4894,
+      "signing_bytes": 71839
+    },
+    {
+      "seconds": 25.39,
+      "height_min": 62,
+      "height_max": 62,
+      "sampled_combined_rss_bytes": 78049280,
+      "forwarded_transport_bytes": 0,
+      "store_logical_bytes": 3133390,
+      "wal_bytes": 8206,
+      "signing_bytes": 89523
+    },
+    {
+      "seconds": 30.445,
+      "height_min": 74,
+      "height_max": 75,
+      "sampled_combined_rss_bytes": 78979072,
+      "forwarded_transport_bytes": 0,
+      "store_logical_bytes": 3679297,
+      "wal_bytes": 2194,
+      "signing_bytes": 106575
+    },
+    {
+      "seconds": 35.507,
+      "height_min": 87,
+      "height_max": 87,
+      "sampled_combined_rss_bytes": 80064512,
+      "forwarded_transport_bytes": 0,
+      "store_logical_bytes": 4355373,
+      "wal_bytes": 8064,
+      "signing_bytes": 125048
+    },
+    {
+      "seconds": 40.572,
+      "height_min": 99,
+      "height_max": 100,
+      "sampled_combined_rss_bytes": 81641472,
+      "forwarded_transport_bytes": 0,
+      "store_logical_bytes": 4978013,
+      "wal_bytes": 7106,
+      "signing_bytes": 143205
+    },
+    {
+      "seconds": 45.634,
+      "height_min": 112,
+      "height_max": 112,
+      "sampled_combined_rss_bytes": 83607552,
+      "forwarded_transport_bytes": 0,
+      "store_logical_bytes": 5581764,
+      "wal_bytes": 8490,
+      "signing_bytes": 160573
+    },
+    {
+      "seconds": 50.696,
+      "height_min": 124,
+      "height_max": 125,
+      "sampled_combined_rss_bytes": 83369984,
+      "forwarded_transport_bytes": 0,
+      "store_logical_bytes": 6194313,
+      "wal_bytes": 6964,
+      "signing_bytes": 178414
+    }
+  ],
+  "faults": [],
+  "elapsed_seconds_including_serving_and_shutdown": 54.154,
+  "maximum_history_linger_seconds": 12,
+  "validator_cpu_seconds": 20.744,
+  "proxy_and_monitor_cpu_seconds": 0.527,
+  "sequential_authenticated_replay_seconds": 4.096,
+  "final_height": 128,
+  "total_test_transactions": 8192,
+  "seconds_to_all_target": 52.031,
+  "seconds_from_first_all_height_to_target": 51.491,
+  "finalized_block": "55ef56511c8b05d4fe3ead2c0f01763ae9556e471f954a70d0796c94a1813a2e",
+  "finalized_state": "ac1d6ff3b262ebebda31a57649807bb31293ce59cda2bd3e0bc7d691bad7a2a2",
+  "cgroup_memory_events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0",
+  "namespace_loopback_bytes_including_proxy_hops_and_TCP_overhead": {
+    "rx": 18134719,
+    "tx": 18134719
+  },
+  "per_process_block_io_counters_available": true,
+  "sampled_processes": 4,
+  "processes_with_observed_io_counters": 4,
+  "sampled_block_io_bytes": {
+    "read": 12288,
+    "write": 30810112
+  },
+  "per_destination_forwarded_transport_bytes": [
+    0,
+    0,
+    0,
+    0
+  ],
+  "forwarded_transport_bytes": 0,
+  "stream_resets": 0,
+  "observed_proxy_source_ips": [],
+  "proxy_connections": 0,
+  "partition_rejected_connections": 0,
+  "stores": [
+    {
+      "logical_bytes": 1579662,
+      "allocated_bytes": 3305472,
+      "files": 550,
+      "wal_bytes": 2016,
+      "signing_bytes": 45472
+    },
+    {
+      "logical_bytes": 1579662,
+      "allocated_bytes": 3305472,
+      "files": 550,
+      "wal_bytes": 2016,
+      "signing_bytes": 45472
+    },
+    {
+      "logical_bytes": 1579662,
+      "allocated_bytes": 3305472,
+      "files": 550,
+      "wal_bytes": 2016,
+      "signing_bytes": 45472
+    },
+    {
+      "logical_bytes": 1579151,
+      "allocated_bytes": 3293184,
+      "files": 547,
+      "wal_bytes": 2016,
+      "signing_bytes": 45156
+    }
+  ]
+}

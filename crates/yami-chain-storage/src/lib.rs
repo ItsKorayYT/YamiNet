@@ -13,6 +13,7 @@ use yami_chain::{
 
 pub const DEFAULT_ENTRY_BUDGET: u64 = 4_000_000;
 pub const MAX_RECORD_BYTES: usize = MAX_BLOCK_BYTES + MAX_CERTIFICATE_BYTES + 32;
+const RECEIPT_BYTES: usize = 32;
 /// A budget is a refusal bound, never permission to skip verification or return
 /// partially replayed state as a trusted tip. Archive operators can raise it.
 #[derive(Clone, Copy, Debug)]
@@ -134,6 +135,12 @@ impl Journal {
             }
         }
         journal.sync_dir()?;
+        // create_dir_all may have created multiple ancestors. Syncing only the
+        // leaf does not durably publish its directory entry in its parent.
+        #[cfg(unix)]
+        for parent in fs::canonicalize(path)?.ancestors().skip(1) {
+            File::open(parent)?.sync_all()?;
+        }
         Ok(journal)
     }
     fn check_entry_budget(&self, max_entries: u64) -> io::Result<()> {
@@ -237,9 +244,20 @@ impl Journal {
         }
     }
     pub fn append(&self, record: &FinalizedRecord) -> io::Result<()> {
+        let bytes = record.canonical()?;
         self.write_once(
             &format!("finalized-{:020}.bin", record.block.header.height),
-            &record.canonical()?,
+            &bytes,
+        )?;
+        // Acknowledgement requires both immutable files to be durable. A crash
+        // between them leaves a complete record that normal replay can verify.
+        // Retaining the receipt detects a missing/replaced tail on restart.
+        self.seal_record(record.block.header.height, &bytes)
+    }
+    fn seal_record(&self, height: u64, bytes: &[u8]) -> io::Result<()> {
+        self.write_once(
+            &format!("receipt-{height:020}.bin"),
+            &yami_chain::hash(b"YC-DURABLE-RECORD-1", bytes).0,
         )
     }
     pub fn replay(
@@ -278,6 +296,18 @@ impl Journal {
             }
             verify(&record)?;
             state = state.execute(&record.block).map_err(invalid)?;
+            let receipt = self
+                .path
+                .join(format!("receipt-{:020}.bin", state.height()));
+            match read_bounded(&receipt, RECEIPT_BYTES) {
+                Ok(bytes) => {
+                    if bytes != yami_chain::hash(b"YC-DURABLE-RECORD-1", &record.canonical()?).0 {
+                        return Err(invalid("durable record receipt mismatch"));
+                    }
+                }
+                Err(e) if e.kind() == io::ErrorKind::NotFound => {}
+                Err(e) => return Err(e),
+            }
         }
         for (index, entry) in fs::read_dir(&self.path)?.enumerate() {
             if index as u64 >= budget.max_directory_entries {
@@ -287,16 +317,30 @@ impl Journal {
             let name = name.to_string_lossy();
             if let Some(height) = name
                 .strip_prefix("finalized-")
+                .or_else(|| name.strip_prefix("receipt-"))
                 .and_then(|s| s.strip_suffix(".bin"))
             {
                 let value = height.parse::<u64>().map_err(invalid)?;
-                if name != format!("finalized-{value:020}.bin")
+                let prefix = if name.starts_with("receipt-") {
+                    "receipt"
+                } else {
+                    "finalized"
+                };
+                if name != format!("{prefix}-{value:020}.bin")
                     || value == 0
                     || value > state.height()
                 {
                     return Err(invalid("noncanonical filename or finalized history gap"));
                 }
             }
+        }
+        // Upgrade old stores only after every certificate, transition and
+        // directory entry has passed. Never authenticate a partial replay.
+        if state.height() > 0 {
+            let record = self
+                .record(state.height())?
+                .ok_or_else(|| invalid("missing replay tip"))?;
+            self.seal_record(state.height(), &record.canonical()?)?;
         }
         Ok(state)
     }
@@ -442,6 +486,125 @@ mod tests {
         }
         drop(j);
         fs::remove_dir_all(path).unwrap();
+    }
+    #[test]
+    fn durable_receipts_detect_truncated_tail_and_replaced_valid_history() {
+        let path = dir();
+        let genesis = Genesis::local();
+        let mut state = State::new(genesis.clone()).unwrap();
+        let j = Journal::open(&path).unwrap();
+        for _ in 0..3 {
+            let block = state.development_block().unwrap();
+            state = state.execute(&block).unwrap();
+            j.append(&FinalizedRecord {
+                block,
+                certificate: vec![],
+            })
+            .unwrap();
+        }
+        let tip = j.record(3).unwrap().unwrap().canonical().unwrap();
+        drop(j);
+        fs::remove_file(path.join("finalized-00000000000000000003.bin")).unwrap();
+        let j = Journal::open(&path).unwrap();
+        assert!(j.replay(genesis.clone(), |_| Ok(())).is_err());
+        fs::write(path.join("finalized-00000000000000000003.bin"), &tip).unwrap();
+        assert_eq!(j.replay(genesis.clone(), |_| Ok(())).unwrap(), state);
+        // Even a replacement that decodes and executes cannot silently replace
+        // acknowledged bytes (certificate authentication is still mandatory).
+        let mut replacement = j.record(3).unwrap().unwrap();
+        replacement.certificate = vec![1];
+        fs::write(
+            path.join("finalized-00000000000000000003.bin"),
+            replacement.canonical().unwrap(),
+        )
+        .unwrap();
+        assert!(j.replay(genesis, |_| Ok(())).is_err());
+        drop(j);
+        fs::remove_dir_all(path).unwrap();
+    }
+    #[test]
+    fn legacy_tip_is_sealed_only_after_complete_authenticated_replay() {
+        let path = dir();
+        let j = Journal::open(&path).unwrap();
+        let genesis = Genesis::local();
+        let state = State::new(genesis.clone()).unwrap();
+        let record = FinalizedRecord {
+            block: state.development_block().unwrap(),
+            certificate: vec![],
+        };
+        let name = "finalized-00000000000000000001.bin";
+        j.write_once(name, &record.canonical().unwrap()).unwrap();
+        let receipt = path.join("receipt-00000000000000000001.bin");
+        assert!(j
+            .replay(genesis.clone(), |_| Err(invalid("bad cert")))
+            .is_err());
+        assert!(!receipt.exists());
+        j.replay(genesis.clone(), |_| Ok(())).unwrap();
+        assert_eq!(fs::metadata(&receipt).unwrap().len(), RECEIPT_BYTES as u64);
+        fs::write(&receipt, [0; RECEIPT_BYTES]).unwrap();
+        assert!(j.replay(genesis.clone(), |_| Ok(())).is_err());
+        fs::write(&receipt, [0; RECEIPT_BYTES + 1]).unwrap();
+        assert!(j.replay(genesis.clone(), |_| Ok(())).is_err());
+        fs::remove_file(&receipt).unwrap();
+        fs::write(path.join("receipt-2.bin"), [0; RECEIPT_BYTES]).unwrap();
+        assert!(j.replay(genesis, |_| Ok(())).is_err());
+        assert!(!receipt.exists()); // Failed directory validation never migrates.
+        drop(j);
+        fs::remove_dir_all(path).unwrap();
+    }
+    // The child exits at the actual write boundaries without running destructors.
+    #[test]
+    fn receipt_crash_child() {
+        let Some(path) = std::env::var_os("YAMI_RECEIPT_CRASH_DIR") else {
+            return;
+        };
+        let stage = std::env::var("YAMI_RECEIPT_CRASH_STAGE").unwrap();
+        let j = Journal::open(Path::new(&path)).unwrap();
+        let state = State::new(Genesis::local()).unwrap();
+        let record = FinalizedRecord {
+            block: state.development_block().unwrap(),
+            certificate: vec![],
+        };
+        let bytes = record.canonical().unwrap();
+        j.write_once("finalized-00000000000000000001.bin", &bytes)
+            .unwrap();
+        j.write_once_inner(
+            "receipt-00000000000000000001.bin",
+            &yami_chain::hash(b"YC-DURABLE-RECORD-1", &bytes).0,
+            |at| {
+                if format!("{at:?}") == stage {
+                    std::process::exit(86);
+                }
+                Ok(())
+            },
+        )
+        .unwrap();
+        panic!("crash boundary not reached");
+    }
+    #[test]
+    fn interrupted_receipt_publication_recovers_and_retries_idempotently() {
+        for stage in ["FileSync", "Renamed", "DirectorySync"] {
+            let path = dir();
+            let status = std::process::Command::new(std::env::current_exe().unwrap())
+                .args(["--exact", "tests::receipt_crash_child", "--nocapture"])
+                .env("YAMI_RECEIPT_CRASH_DIR", &path)
+                .env("YAMI_RECEIPT_CRASH_STAGE", stage)
+                .status()
+                .unwrap();
+            assert_eq!(status.code(), Some(86));
+            let j = Journal::open(&path).unwrap();
+            assert_eq!(j.replay(Genesis::local(), |_| Ok(())).unwrap().height(), 1);
+            let record = j.record(1).unwrap().unwrap();
+            j.append(&record).unwrap();
+            j.append(&record).unwrap();
+            assert!(fs::read_dir(&path).unwrap().all(|e| !e
+                .unwrap()
+                .file_name()
+                .to_string_lossy()
+                .starts_with(".pending-")));
+            drop(j);
+            fs::remove_dir_all(path).unwrap();
+        }
     }
 }
 

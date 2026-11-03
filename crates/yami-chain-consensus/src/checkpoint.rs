@@ -2,8 +2,11 @@
 //! These cannot bootstrap snapshot trust or authorize removal of certified history.
 use crate::wire::{decode_certificate, verify_record};
 use eyre::{eyre, Result};
-use yami_chain::{codec::Writer, Digest, Genesis, State};
-use yami_chain_storage::{read_bounded, Journal};
+use yami_chain::{
+    codec::{Reader, Writer},
+    Digest, Genesis, State,
+};
+use yami_chain_storage::{read_bounded, FinalizedRecord, Journal, MAX_RECORD_BYTES};
 #[derive(Debug)]
 pub struct AuthenticatedCheckpoint {
     genesis: Digest,
@@ -182,4 +185,116 @@ pub fn verify_history_inventory(
         return Err(eyre!("inventory commitment mismatch"));
     }
     Ok(inventory)
+}
+
+/// Bounded full-history transport, not a compact state snapshot or a pruning
+/// capability. Certificates and execution are always checked from pinned genesis.
+pub const MAX_HISTORY_SNAPSHOT_BYTES: usize = 64 * 1024 * 1024;
+const SNAPSHOT_DOMAIN: &[u8] = b"YC-HISTORY-SNAPSHOT-1";
+
+pub fn history_snapshot_digest(bytes: &[u8]) -> Digest {
+    yami_chain::hash(b"YC-HISTORY-SNAPSHOT-HASH-1", bytes)
+}
+
+pub fn export_history_snapshot(
+    journal: &Journal,
+    genesis: &Genesis,
+    height: u64,
+) -> Result<Vec<u8>> {
+    let checkpoint = authenticate_checkpoint(journal, genesis, height, 1024)?;
+    let mut w = Writer::default();
+    w.raw(SNAPSHOT_DOMAIN);
+    w.raw(&checkpoint.genesis.0);
+    w.u64(height);
+    for digest in [
+        checkpoint.block,
+        checkpoint.state,
+        checkpoint.next_committee,
+    ] {
+        w.raw(&digest.0);
+    }
+    for h in 1..=height {
+        let record = journal
+            .record(h)?
+            .ok_or_else(|| eyre!("snapshot history gap"))?;
+        let bytes = record.canonical()?;
+        if w.0
+            .len()
+            .checked_add(4 + bytes.len())
+            .is_none_or(|n| n > MAX_HISTORY_SNAPSHOT_BYTES)
+        {
+            return Err(eyre!("snapshot byte budget"));
+        }
+        w.bytes(&bytes)?;
+    }
+    Ok(w.0)
+}
+
+/// The caller pins the transport digest independently. Never treat a digest
+/// supplied alongside an untrusted download as evidence of the latest head.
+/// Validate the complete archive before writing finalized records. Installation
+/// is a resumable series of atomic certified appends: an interrupted operation
+/// can leave a valid prefix, never an imported unauthenticated state or success.
+/// Does not copy signer/WAL/identity material; not a validator identity backup.
+/// The exclusive journal borrow prevents concurrent node appends during restore.
+pub fn restore_history_snapshot(
+    journal: &mut Journal,
+    genesis: &Genesis,
+    bytes: &[u8],
+    trusted_digest: Digest,
+) -> Result<State> {
+    if bytes.len() > MAX_HISTORY_SNAPSHOT_BYTES || history_snapshot_digest(bytes) != trusted_digest
+    {
+        return Err(eyre!("snapshot digest or byte budget"));
+    }
+    let mut r = Reader::new(bytes, MAX_HISTORY_SNAPSHOT_BYTES)?;
+    if r.take(SNAPSHOT_DOMAIN.len())? != SNAPSHOT_DOMAIN || r.array::<32>()? != genesis.id().0 {
+        return Err(eyre!("snapshot domain or genesis"));
+    }
+    let height = r.u64()?;
+    if height == 0 || height > 1024 {
+        return Err(eyre!("snapshot record budget"));
+    }
+    let tip = Digest(r.array()?);
+    let root = Digest(r.array()?);
+    let next_committee = Digest(r.array()?);
+    let mut state = State::new(genesis.clone())?;
+    // Retain borrowed record slices, not a second copy of the archive. No record
+    // is installed until all certificates, transitions and framing have passed.
+    let mut records = Vec::with_capacity(height as usize);
+    for _ in 0..height {
+        let bytes = r.bytes(MAX_RECORD_BYTES)?;
+        let record = FinalizedRecord::decode(bytes)?;
+        verify_record(genesis, &record)?;
+        state = state.execute(&record.block)?;
+        records.push(bytes);
+    }
+    r.end()?;
+    if state.height() != height
+        || state.tip() != tip
+        || state.root() != root
+        || genesis.committee_at(height + 1)?.hash() != next_committee
+    {
+        return Err(eyre!("snapshot terminal state mismatch"));
+    }
+    let existing = journal.replay(genesis.clone(), |record| verify_record(genesis, record))?;
+    if existing.height() > height {
+        return Err(eyre!("snapshot would roll back local history"));
+    }
+    for h in 1..=existing.height() {
+        let local = journal
+            .record(h)?
+            .ok_or_else(|| eyre!("snapshot local history gap"))?;
+        let incoming = FinalizedRecord::decode(records[(h - 1) as usize])?;
+        // Different quorum subsets can certify the same block. Both certificates
+        // were verified above; keep the local bytes/receipt rather than requiring
+        // identical certificate aggregation or overwriting an immutable record.
+        if local.block != incoming.block {
+            return Err(eyre!("snapshot conflicts with local history"));
+        }
+    }
+    for bytes in records.into_iter().skip(existing.height() as usize) {
+        journal.append(&FinalizedRecord::decode(bytes)?)?;
+    }
+    Ok(state)
 }

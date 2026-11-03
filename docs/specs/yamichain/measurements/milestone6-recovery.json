@@ -1,0 +1,226 @@
+{
+  "scope": "loopback only; public dev keys; no real money",
+  "generated_at": "2026-11-03T13:53:24.923571+00:00",
+  "binary_sha256": "d948d081c0e808e8691cfc246946dd30a42cdd25f0d9e1dcc493a0fb05f1fd9f",
+  "driver_sha256": "f2cd22a9f44b3ebcc79de85fa93a14aab27c19b7f872edffe38a2ea34a9ea475",
+  "scenarios": {
+    "normal": {
+      "result": "PASS",
+      "processes": 4,
+      "committee_plan": "1:4",
+      "crash": null,
+      "injected_exit_86": false,
+      "exit_codes": {
+        "0": 0,
+        "1": 0,
+        "2": 0,
+        "3": 0
+      },
+      "validated_synced_payloads": 0,
+      "certified_history_responses": 0,
+      "height": 6,
+      "state_root": "55bad426c7b141fbe84ddf51ca624ade4d83a0f948108735d9bbdee77b04b1d1",
+      "block": "fe483427691b8a1de33a237058ab300142906b66b434b2b153a83468f35093c6",
+      "elapsed_seconds": 11.766
+    },
+    "offline": {
+      "result": "PASS",
+      "processes": 3,
+      "committee_plan": "1:4",
+      "crash": null,
+      "injected_exit_86": false,
+      "exit_codes": {
+        "0": 0,
+        "1": 0,
+        "2": 0
+      },
+      "validated_synced_payloads": 0,
+      "certified_history_responses": 0,
+      "height": 6,
+      "state_root": "55bad426c7b141fbe84ddf51ca624ade4d83a0f948108735d9bbdee77b04b1d1",
+      "block": "fe483427691b8a1de33a237058ab300142906b66b434b2b153a83468f35093c6",
+      "elapsed_seconds": 11.357
+    },
+    "halt": {
+      "result": "PASS",
+      "processes": 2,
+      "committee_plan": "1:4",
+      "crash": null,
+      "injected_exit_86": false,
+      "exit_codes": {
+        "0": 1,
+        "1": 1
+      },
+      "validated_synced_payloads": 0,
+      "certified_history_responses": 0,
+      "height": 0,
+      "state_root": "b0bf32e7b35dea08c5e5e09cfed574a550b7e7a5c0908efa17677974913241c8",
+      "block": "8670929a7158fdd0734ac9d90d10c5ae1665486aa56df7df897147f45faa3550",
+      "elapsed_seconds": 8.083
+    },
+    "catchup": {
+      "result": "PASS",
+      "processes": 4,
+      "committee_plan": "1:4",
+      "crash": null,
+      "injected_exit_86": false,
+      "exit_codes": {
+        "0": 0,
+        "1": 0,
+        "2": 0,
+        "3": 0
+      },
+      "validated_synced_payloads": 26,
+      "certified_history_responses": 4,
+      "height": 40,
+      "state_root": "b61c25123eca5762f9986144913a1f6c4dcccb401d7ba660b6dcf79db1c0ab2b",
+      "block": "1a9699cebd8551ed7f3904cd041b2ee8b19f5289c2f3fd89086b4dd117461c6b",
+      "elapsed_seconds": 29.295
+    },
+    "proposal": {
+      "result": "PASS",
+      "processes": 4,
+      "committee_plan": "1:4",
+      "crash": "proposal",
+      "injected_exit_86": true,
+      "exit_codes": {
+        "0": 0,
+        "1": 0,
+        "2": 0,
+        "3": 0
+      },
+      "validated_synced_payloads": 0,
+      "certified_history_responses": 1,
+      "height": 8,
+      "state_root": "72713f95d46839f199a760f3b9a9081bd66e2ec40e381bd129dfc23673525647",
+      "block": "8020539c839a49a97531515393edf2fc8346bab60aab71840e8c34c97466a8b6",
+      "elapsed_seconds": 11.367
+    },
+    "vote": {
+      "result": "PASS",
+      "processes": 4,
+      "committee_plan": "1:4",
+      "crash": "vote",
+      "injected_exit_86": true,
+      "exit_codes": {
+        "0": 0,
+        "1": 0,
+        "2": 0,
+        "3": 0
+      },
+      "validated_synced_payloads": 1,
+      "certified_history_responses": 1,
+      "height": 8,
+      "state_root": "72713f95d46839f199a760f3b9a9081bd66e2ec40e381bd129dfc23673525647",
+      "block": "8020539c839a49a97531515393edf2fc8346bab60aab71840e8c34c97466a8b6",
+      "elapsed_seconds": 12.172
+    },
+    "before-commit": {
+      "result": "PASS",
+      "processes": 4,
+      "committee_plan": "1:4",
+      "crash": "before-commit",
+      "injected_exit_86": true,
+      "exit_codes": {
+        "0": 0,
+        "1": 0,
+        "2": 0,
+        "3": 0
+      },
+      "validated_synced_payloads": 1,
+      "certified_history_responses": 1,
+      "height": 8,
+      "state_root": "72713f95d46839f199a760f3b9a9081bd66e2ec40e381bd129dfc23673525647",
+      "block": "8020539c839a49a97531515393edf2fc8346bab60aab71840e8c34c97466a8b6",
+      "elapsed_seconds": 11.369
+    },
+    "seven": {
+      "result": "PASS",
+      "processes": 7,
+      "committee_plan": "1:7",
+      "crash": null,
+      "injected_exit_86": false,
+      "exit_codes": {
+        "0": 0,
+        "1": 0,
+        "2": 0,
+        "3": 0,
+        "4": 0,
+        "5": 0,
+        "6": 0
+      },
+      "validated_synced_payloads": 0,
+      "certified_history_responses": 0,
+      "height": 5,
+      "state_root": "3351d34f375738ef7e18cbb4c2f5444e191e16829c3db8dd31f9a04a04900b12",
+      "block": "069c80d1e231d6ddf9c28d1682ed5a5699dfc43796d4f8c1d59613c786ce5927",
+      "elapsed_seconds": 11.074
+    },
+    "rotation": {
+      "result": "PASS",
+      "processes": 7,
+      "committee_plan": "1:4,4:7,7:5",
+      "crash": null,
+      "injected_exit_86": false,
+      "exit_codes": {
+        "0": 0,
+        "1": 0,
+        "2": 0,
+        "3": 0,
+        "4": 0,
+        "5": 0,
+        "6": 0
+      },
+      "validated_synced_payloads": 6,
+      "certified_history_responses": 4,
+      "height": 10,
+      "state_root": "38ee7ce8c3e39017e41f9a292a83d6f59d81eb30d695f17b2dbb9d9bd171e8b3",
+      "block": "3ec6b27bc52cd0b47e345246f5ca380b8212b4ff132613c3b85b179b50689f21",
+      "elapsed_seconds": 12.316
+    },
+    "epoch": {
+      "result": "PASS",
+      "processes": 7,
+      "committee_plan": "1:4,4:7,7:5",
+      "crash": "epoch",
+      "injected_exit_86": true,
+      "exit_codes": {
+        "0": 0,
+        "1": 0,
+        "2": 0,
+        "3": 0,
+        "4": 0,
+        "5": 0,
+        "6": 0
+      },
+      "validated_synced_payloads": 1,
+      "certified_history_responses": 7,
+      "height": 10,
+      "state_root": "38ee7ce8c3e39017e41f9a292a83d6f59d81eb30d695f17b2dbb9d9bd171e8b3",
+      "block": "3ec6b27bc52cd0b47e345246f5ca380b8212b4ff132613c3b85b179b50689f21",
+      "elapsed_seconds": 12.468
+    },
+    "rotating-catchup": {
+      "result": "PASS",
+      "processes": 7,
+      "committee_plan": "1:4,4:7,8:5",
+      "crash": null,
+      "injected_exit_86": false,
+      "exit_codes": {
+        "0": 0,
+        "1": 0,
+        "2": 0,
+        "3": 0,
+        "4": 0,
+        "5": 0,
+        "6": 0
+      },
+      "validated_synced_payloads": 10,
+      "certified_history_responses": 4,
+      "height": 12,
+      "state_root": "af7c9482cb9c2971813acfc0f9deb5594e50aa09b4ae1c207b1fb0d685132dee",
+      "block": "6ee00b130de91ab3ad1a8c25053f1869be08556b4a3679b8fb5e0f143af12293",
+      "elapsed_seconds": 15.292
+    }
+  }
+}
