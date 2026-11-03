@@ -307,6 +307,7 @@ impl IsolatedNetwork {
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => (),
             Err(e) => return Err(e.into()),
         }
+        journal.ensure_capacity(w.0.len() as u64)?;
         let mut file = std::fs::OpenOptions::new()
             .write(true)
             .create_new(true)
@@ -522,6 +523,41 @@ mod tests {
             .unwrap();
             assert!(b.load().is_err());
         }
+    }
+    #[test]
+    fn discovery_pressure_preserves_durable_freshness_on_restart() {
+        use yami_chain_storage::{Journal, StorageLimits};
+        let a = Lab::new();
+        let store = a.0.join("store");
+        let journal = Journal::open(&store).unwrap();
+        a.load().unwrap().checkpoint(&journal).unwrap();
+        let original = std::fs::read(store.join("network-hints.bin")).unwrap();
+        drop(journal);
+        let journal = Journal::open_with_limits(
+            &store,
+            100,
+            StorageLimits {
+                max_bytes: 1,
+                reserve_bytes: 0,
+            },
+        )
+        .unwrap();
+        // An unchanged freshness record needs no new allocation.
+        a.load().unwrap().checkpoint(&journal).unwrap();
+        announce_isolated_endpoint(&a.0, 0, "10.81.0.9:28100".parse().unwrap(), 101).unwrap();
+        assert!(a.load().unwrap().checkpoint(&journal).is_err());
+        assert_eq!(
+            std::fs::read(store.join("network-hints.bin")).unwrap(),
+            original
+        );
+        assert!(!store.join("network-hints.next").exists());
+        drop(journal);
+        let journal = Journal::open(&store).unwrap();
+        a.load().unwrap().checkpoint(&journal).unwrap();
+        assert_ne!(
+            std::fs::read(store.join("network-hints.bin")).unwrap(),
+            original
+        );
     }
     #[test]
     fn signed_endpoint_updates_reject_rollback_after_restart() {

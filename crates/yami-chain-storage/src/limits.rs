@@ -1,5 +1,6 @@
 //! Refusal limits; never delete safety data to satisfy a quota.
 use super::*;
+pub const MIN_FREE_INODES: u64 = 128;
 pub const MAX_COMPACT_BASE_BYTES: usize = 17 * 1024 * 1024;
 #[derive(Clone, Copy, Debug)]
 pub struct StorageLimits {
@@ -14,12 +15,39 @@ impl Default for StorageLimits {
         }
     }
 }
+// Filesystems reporting no inode accounting (f_files == 0) still fail closed
+// on actual create/write/fsync errors. A preflight cannot replace an OS quota.
+#[cfg(unix)]
+fn check_filesystem_reserve(available: u128, files: u64, free: u64, needed: u64) -> io::Result<()> {
+    if available < u128::from(needed) {
+        return Err(io::Error::new(
+            io::ErrorKind::StorageFull,
+            "filesystem reserve exhausted",
+        ));
+    }
+    if files != 0 && free < MIN_FREE_INODES {
+        return Err(io::Error::new(
+            io::ErrorKind::StorageFull,
+            "filesystem inode reserve exhausted",
+        ));
+    }
+    Ok(())
+}
 impl Journal {
     /// Includes retained history, safety files, WAL and pending files. Reserve
     /// room for the largest atomic checkpoint replacement and in-flight WAL I/O.
     pub fn ensure_capacity(&self, additional: u64) -> io::Result<()> {
-        let used = self.storage_footprint(DEFAULT_ENTRY_BUDGET)?.bytes;
-        if used
+        let footprint = self.storage_footprint(DEFAULT_ENTRY_BUDGET)?;
+        // A new atomic write needs one temporary entry. Preserve room for a
+        // receipt/marker too; never allow a successful write to prevent reopen.
+        if footprint.entries.saturating_add(2) > DEFAULT_ENTRY_BUDGET {
+            return Err(io::Error::new(
+                io::ErrorKind::StorageFull,
+                "store entry reserve exhausted; safety data retained",
+            ));
+        }
+        if footprint
+            .bytes
             .checked_add(additional)
             .and_then(|n| n.checked_add(self.limits.reserve_bytes))
             .is_none_or(|n| n > self.limits.max_bytes)
@@ -32,13 +60,27 @@ impl Journal {
         #[cfg(unix)]
         {
             let stats = rustix::fs::statvfs(&self.path)?;
-            let available = u128::from(stats.f_bavail) * u128::from(stats.f_frsize);
-            if available < u128::from(additional.saturating_add(self.limits.reserve_bytes)) {
+            let block = stats.f_frsize.max(4096);
+            let allocation = additional.div_ceil(block).saturating_mul(block);
+            // Tiny immutable safety files can consume a full block each. Logical
+            // length alone substantially undercounts their SSD requirements.
+            if footprint
+                .allocated_bytes
+                .saturating_add(allocation)
+                .saturating_add(self.limits.reserve_bytes)
+                > self.limits.max_bytes
+            {
                 return Err(io::Error::new(
                     io::ErrorKind::StorageFull,
-                    "filesystem reserve exhausted",
+                    "allocated store quota/reserve exhausted; safety data retained",
                 ));
             }
+            check_filesystem_reserve(
+                u128::from(stats.f_bavail) * u128::from(stats.f_frsize),
+                stats.f_files,
+                stats.f_favail,
+                allocation.saturating_add(self.limits.reserve_bytes),
+            )?;
         }
         Ok(())
     }
@@ -218,6 +260,40 @@ mod tests {
             ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
         ))
     }
+    #[cfg(unix)]
+    #[test]
+    fn physical_blocks_and_inode_reserves_refuse_before_writes() {
+        assert!(check_filesystem_reserve(10000, 1000, 127, 1).is_err());
+        assert!(check_filesystem_reserve(10000, 1000, 128, 1).is_ok());
+        assert!(check_filesystem_reserve(0, 0, 0, 1).is_err());
+        assert!(check_filesystem_reserve(10000, 0, 0, 1).is_ok());
+        let path = directory();
+        let j = Journal::open(&path).unwrap();
+        j.reserve_signature(1, 0, 1, b"a").unwrap();
+        j.reserve_signature(2, 0, 1, b"b").unwrap();
+        let footprint = j.storage_footprint(100).unwrap();
+        assert_eq!(footprint.bytes, 2);
+        assert!(footprint.allocated_bytes > footprint.bytes);
+        drop(j);
+        let j = Journal::open_with_limits(
+            &path,
+            100,
+            StorageLimits {
+                max_bytes: footprint.allocated_bytes,
+                reserve_bytes: 0,
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            j.reserve_signature(3, 0, 1, b"c").unwrap_err().kind(),
+            io::ErrorKind::StorageFull
+        );
+        drop(j);
+        let j = Journal::open(&path).unwrap();
+        assert!(j.reserve_signature(1, 0, 1, b"conflict").is_err());
+        drop(j);
+        fs::remove_dir_all(path).unwrap();
+    }
     #[test]
     fn quota_refusal_keeps_signature_reservations_and_committed_data() {
         let path = directory();
@@ -225,21 +301,21 @@ mod tests {
             &path,
             100,
             StorageLimits {
-                max_bytes: 1024,
+                max_bytes: 9000,
                 reserve_bytes: 128,
             },
         )
         .unwrap();
-        j.reserve_signature(1, 0, 1, &[7; 500]).unwrap();
-        let error = j.reserve_signature(2, 0, 1, &[8; 500]).unwrap_err();
+        j.reserve_signature(1, 0, 1, &[7; 5000]).unwrap();
+        let error = j.reserve_signature(2, 0, 1, &[8; 5000]).unwrap_err();
         assert_eq!(error.kind(), io::ErrorKind::StorageFull);
-        j.reserve_signature(1, 0, 1, &[7; 500]).unwrap();
+        j.reserve_signature(1, 0, 1, &[7; 5000]).unwrap();
         assert!(!path
             .join("signed-00000000000000000002-0000000000-1.bin")
             .exists());
         assert_eq!(
             fs::read(path.join("signed-00000000000000000001-0000000000-1.bin")).unwrap(),
-            vec![7; 500]
+            vec![7; 5000]
         );
         drop(j);
         fs::remove_dir_all(path).unwrap();

@@ -15,8 +15,8 @@ fn main() -> eyre::Result<()> {
     let path = PathBuf::from(&args[0]);
     let height: u64 = args[1].parse()?;
     let tx: usize = args[2].parse()?;
-    if path.exists() || !(12..=4096).contains(&height) || tx > 64 {
-        eyre::bail!("fresh directory, height 12..4096, tx 0..64");
+    if path.exists() || !(12..=16384).contains(&height) || tx > 64 {
+        eyre::bail!("fresh directory, height 12..16384, tx 0..64");
     }
     std::fs::create_dir_all(&path)?;
     let mut random = std::fs::File::open("/dev/urandom")?;
@@ -102,7 +102,16 @@ fn main() -> eyre::Result<()> {
     let start = Instant::now();
     assert_eq!(replay_certified(&j, &genesis)?, state);
     let archive_restart = start.elapsed().as_secs_f64();
-    let archive_bytes = j.storage_footprint(100_000)?.bytes;
+    let archive_footprint = j.storage_footprint(100_000)?;
+    let archive_bytes = archive_footprint.bytes;
+    drop(j);
+    let start = Instant::now();
+    for _ in 0..5 {
+        let reopened = Journal::open(&path.join("archive"))?;
+        assert_eq!(replay_certified(&reopened, &genesis)?, state);
+    }
+    let archive_restarts = start.elapsed().as_secs_f64();
+    let j = Journal::open(&path.join("archive"))?;
     let start = Instant::now();
     let snapshot = export_compact_checkpoint(&j, &genesis)?;
     let export = start.elapsed().as_secs_f64();
@@ -124,6 +133,15 @@ fn main() -> eyre::Result<()> {
     let start = Instant::now();
     assert_eq!(replay_certified(&j, &genesis)?, state);
     let pruned_restart = start.elapsed().as_secs_f64();
-    println!("{{\"height\":{height},\"transactions_per_block\":{tx},\"generation_seconds\":{generation},\"archive_replay_seconds\":{archive_restart},\"archive_bytes\":{archive_bytes},\"snapshot_bytes\":{},\"export_seconds\":{export},\"import_seconds\":{import},\"compact_restart_seconds\":{compact_restart},\"fresh_bytes\":{fresh_bytes},\"prune_seconds\":{pruning},\"pruned_bytes\":{},\"retained_signing_bytes\":{},\"pruned_restart_seconds\":{pruned_restart},\"retained_tail\":8,\"passed\":true}}",snapshot.bytes().len(),after.bytes,after.signing_bytes);
+    drop(j);
+    let start = Instant::now();
+    for _ in 0..5 {
+        let reopened = Journal::open(&path.join("archive"))?;
+        assert_eq!(replay_certified(&reopened, &genesis)?, state);
+        // Retried reservations still bind the original preimage after restart.
+        assert!(reopened.reserve_signature(1, 0, 2, b"conflict").is_err());
+    }
+    let pruned_restarts = start.elapsed().as_secs_f64();
+    println!("{{\"height\":{height},\"transactions_per_block\":{tx},\"generation_seconds\":{generation},\"archive_replay_seconds\":{archive_restart},\"archive_bytes\":{archive_bytes},\"snapshot_bytes\":{},\"export_seconds\":{export},\"import_seconds\":{import},\"compact_restart_seconds\":{compact_restart},\"fresh_bytes\":{fresh_bytes},\"prune_seconds\":{pruning},\"pruned_bytes\":{},\"retained_signing_bytes\":{},\"pruned_restart_seconds\":{pruned_restart},\"retained_tail\":8,\"restart_count_per_mode\":5,\"archive_restarts_seconds\":{archive_restarts},\"pruned_restarts_seconds\":{pruned_restarts},\"archive_allocated_bytes\":{},\"pruned_allocated_bytes\":{},\"archive_entries\":{},\"pruned_entries\":{},\"passed\":true}}",snapshot.bytes().len(),after.bytes,after.signing_bytes,archive_footprint.allocated_bytes,after.allocated_bytes,archive_footprint.entries,after.entries);
     Ok(())
 }

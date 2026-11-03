@@ -241,7 +241,7 @@ async fn run() -> Result<()> {
         } else {
             let state = yami_chain_consensus::replay_certified(&journal, &genesis)?;
             let f = journal.storage_footprint(yami_chain_storage::DEFAULT_ENTRY_BUDGET)?;
-            println!("{{\"height\":{},\"history_min\":{},\"bytes\":{},\"entries\":{},\"signing_bytes\":{},\"evidence_bytes\":{},\"wal_bytes\":{},\"default_max_bytes\":18000000000}}",state.height(),yami_chain_consensus::history_min_height(&journal,&genesis)?,f.bytes,f.entries,f.signing_bytes,f.evidence_bytes,f.wal_bytes);
+            println!("{{\"height\":{},\"history_min\":{},\"bytes\":{},\"entries\":{},\"allocated_bytes\":{},\"signing_bytes\":{},\"evidence_bytes\":{},\"wal_bytes\":{},\"default_max_bytes\":18000000000}}",state.height(),yami_chain_consensus::history_min_height(&journal,&genesis)?,f.bytes,f.entries,f.allocated_bytes,f.signing_bytes,f.evidence_bytes,f.wal_bytes);
         }
         return Ok(());
     }

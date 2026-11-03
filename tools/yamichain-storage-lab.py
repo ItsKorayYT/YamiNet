@@ -16,10 +16,18 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--binary', type=Path, default=Path('target/release/yami-validator'))
+    parser.add_argument('--height', type=int, default=128)
+    parser.add_argument('--restart-count', type=int, default=1)
+    parser.add_argument('--restart-step', type=int, default=32)
     args = parser.parse_args()
+    if not 128 <= args.height <= 2048 or not 1 <= args.restart_count <= 5 or not 32 <= args.restart_step <= 128:
+        parser.error('height 128..2048, restart-count 1..5, restart-step 32..128 required')
     root = args.output.resolve()
     root.mkdir(parents=True, mode=0o700, exist_ok=False)
-    binary = args.binary.resolve()
+    # Keep one immutable executable for the entire campaign even if another
+    # terminal rebuilds the source target while containers are running.
+    binary = root/'validator'
+    shutil.copy2(args.binary.resolve(), binary)
     env = os.environ.copy()
     for key in ['DOCKER_HOST', 'DOCKER_CONTEXT', 'DOCKER_TLS', 'DOCKER_TLS_VERIFY', 'DOCKER_CERT_PATH']:
         env.pop(key, None)
@@ -52,15 +60,15 @@ def main():
                '--mount', f'type=bind,src={root/f"config-{i}"},dst=/config,readonly',
                '--mount', f'type=bind,src={root/f"store-{i}"},dst=/store', IMAGE,
                '/validator', 'run', '--dir', '/store', '--index', str(i), '--isolated-network', '/config',
-               '--height', str(target), '--timeout', '240', '--linger', str(linger), '--test-transactions', '4',
+               '--height', str(target), '--timeout', str(min(3600, max(240, args.height*3))), '--linger', str(linger), '--test-transactions', '4',
                '--storage-mode', 'archive' if i == 0 else 'pruned', '--checkpoint-interval', '32')
 
     def sample():
         raw = docker('stats', '--no-stream', '--format', '{{json .}}', *names, check=False)
         report['samples'].append(dict(at=time.monotonic()-started, nodes=[json.loads(line) for line in raw.splitlines() if line.startswith('{')]))
 
-    def wait_all(label):
-        deadline = time.monotonic()+260
+    def wait_all(label, target):
+        deadline = time.monotonic()+min(3600, max(240, args.height*3))+60
         while time.monotonic() < deadline:
             sample()
             states = [json.loads(docker('inspect', '--format', '{{json .State}}', name)) for name in names]
@@ -70,6 +78,8 @@ def main():
                 result = [local('inspect', i) for i in range(4)]
                 if len({(s['height'], s['block'], s['state_root']) for s in result}) != 1:
                     raise RuntimeError(f'{label}: certified state disagreement')
+                if any(s['height'] != target for s in result):
+                    raise RuntimeError(f'{label}: did not reach requested height {target}')
                 report[label] = result
                 return
             time.sleep(.5)
@@ -97,7 +107,7 @@ def main():
         docker('network', 'create', '--internal', '--subnet', '10.83.0.0/24', tag)
         network_created = True
         for i in range(3):
-            launch(i, 128, 30)
+            launch(i, args.height, 30)
         deadline = time.monotonic()+150
         while height(0) < 64:
             if time.monotonic() > deadline:
@@ -113,17 +123,25 @@ def main():
             raise RuntimeError('fresh bootstrap downloaded history or changed state')
         report['events'].append(dict(at=time.monotonic()-started, event='fresh_identity_bootstrapped_without_prefix_history', height=fresh['height']))
         docker('start', names[0])
-        launch(3, 128, 30)
-        wait_all('first_convergence')
+        launch(3, args.height, 30)
+        wait_all('first_convergence', args.height)
         preserve_logs('phase1')
         report['phase1_storage'] = [local('storage-info', i) for i in range(4)]
         report['safety_before_restart'] = [safety(root/f'store-{i}', False) for i in range(4)]
-        for node in names:
-            docker('rm', node)
-        for i in range(4):
-            launch(i, 160, 5)
-        wait_all('restart_convergence')
-        preserve_logs('phase2')
+        report['restarts'] = []
+        for restart in range(args.restart_count):
+            before_restart = [safety(root/f'store-{i}', False) for i in range(4)]
+            for node in names:
+                docker('rm', node)
+            for i in range(4):
+                launch(i, args.height + (restart+1)*args.restart_step, 5)
+            wait_all('restart_convergence', args.height + (restart+1)*args.restart_step)
+            preserve_logs(f'restart-{restart}')
+            for i, before in enumerate(before_restart):
+                after = safety(root/f'store-{i}', False)
+                if any(after.get(path) != digest for path, digest in before.items()):
+                    raise RuntimeError('restart changed original safety records')
+            report['restarts'].append(report['restart_convergence'])
         for i, before in enumerate(report['safety_before_restart']):
             after = safety(root/f'store-{i}', False)
             if any(after.get(path) != digest for path, digest in before.items()):

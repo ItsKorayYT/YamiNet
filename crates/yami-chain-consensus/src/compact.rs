@@ -167,33 +167,15 @@ pub fn export_compact_checkpoint(
     journal: &Journal,
     genesis: &Genesis,
 ) -> Result<VerifiedCompactCheckpoint> {
-    let current = replay_certified(journal, genesis)?;
-    export_at(journal, genesis, current.clone(), current.height())
+    let state = replay_certified(journal, genesis)?;
+    export_state(journal, genesis, state)
 }
-fn export_at(
+/// Only states obtained from a completed authenticated replay enter here.
+fn export_state(
     journal: &Journal,
     genesis: &Genesis,
-    current: State,
-    height: u64,
+    state: State,
 ) -> Result<VerifiedCompactCheckpoint> {
-    if height > current.height() {
-        return Err(eyre!("checkpoint beyond finalized head"));
-    }
-    let mut state = if height == current.height() {
-        current
-    } else {
-        local_base(journal, genesis)?.map_or(State::new(genesis.clone())?, |b| b.state)
-    };
-    if state.height() > height {
-        return Err(eyre!("checkpoint rollback below local base"));
-    }
-    while state.height() < height {
-        let record = journal
-            .record(state.height() + 1)?
-            .ok_or_else(|| eyre!("checkpoint history gap"))?;
-        verify_record(genesis, &record)?;
-        state = state.execute(&record.block)?;
-    }
     if state.height() == 0 {
         return Err(eyre!("no finalized checkpoint"));
     }
@@ -283,8 +265,28 @@ pub fn prune_certified_before_observed(
     floor: u64,
     mut observe: impl FnMut(CompactStage),
 ) -> Result<State> {
-    let current = replay_certified(journal, genesis)?;
-    let checkpoint = export_at(journal, genesis, current.clone(), floor)?;
+    let seed = local_base(journal, genesis)?.map_or(State::new(genesis.clone())?, |b| b.state);
+    if floor < seed.height() {
+        return Err(eyre!("checkpoint rollback below local base"));
+    }
+    let mut checkpoint_state = None;
+    // Capture the floor while verifying the ENTIRE suffix once. Do not publish
+    // anything if a later certificate, receipt, gap or transition fails.
+    let current = journal.replay_from_state_observed(
+        seed,
+        ReplayBudget::default(),
+        |r| verify_record(genesis, r),
+        |state| {
+            if state.height() == floor {
+                checkpoint_state = Some(state.clone());
+            }
+        },
+    )?;
+    let checkpoint = export_state(
+        journal,
+        genesis,
+        checkpoint_state.ok_or_else(|| eyre!("checkpoint beyond finalized head"))?,
+    )?;
     journal.install_compact_base(checkpoint.bytes())?;
     observe(CompactStage::BaseDurable);
     journal.install_compact_marker(&marker_bytes(&checkpoint.state))?;
@@ -376,6 +378,21 @@ mod tests {
         fn drop(&mut self) {
             let _ = std::fs::remove_dir_all(&self.path);
         }
+    }
+    #[test]
+    fn captured_floor_is_never_published_when_later_history_fails() {
+        for corrupt in ["receipt", "finalized"] {
+            let f = Fixture::new();
+            let target = f.path.join(format!("{corrupt}-00000000000000000012.bin"));
+            std::fs::write(target, b"corrupt suffix after captured floor").unwrap();
+            assert!(prune_certified_before(&f.journal, &f.genesis, 7).is_err());
+            assert!(!f.path.join("compact-base.bin").exists());
+            assert!(!f.path.join("compacted.bin").exists());
+            assert!(f.path.join("finalized-00000000000000000001.bin").exists());
+        }
+        let f = Fixture::new();
+        assert!(prune_certified_before(&f.journal, &f.genesis, 13).is_err());
+        assert!(!f.path.join("compact-base.bin").exists());
     }
     #[test]
     fn compact_rotations_tail_and_all_safety_files_survive() {

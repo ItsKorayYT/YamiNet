@@ -297,14 +297,28 @@ impl Journal {
     /// The caller must authenticate this seed against an independent checkpoint.
     pub fn replay_from_state(
         &self,
+        state: State,
+        budget: ReplayBudget,
+        verify: impl Fn(&FinalizedRecord) -> io::Result<()>,
+    ) -> io::Result<State> {
+        self.replay_from_state_observed(state, budget, verify, |_| {})
+    }
+    /// The caller must authenticate the seed against an independent checkpoint.
+    /// Observe executed states during a complete replay. Observations are NOT
+    /// authenticated results until this method returns successfully: later gaps,
+    /// receipts, certificates or budgets can still invalidate the entire replay.
+    pub fn replay_from_state_observed(
+        &self,
         mut state: State,
         budget: ReplayBudget,
         verify: impl Fn(&FinalizedRecord) -> io::Result<()>,
+        mut observe: impl FnMut(&State),
     ) -> io::Result<State> {
         self.check_entry_budget(budget.max_directory_entries)?;
         let floor = state.height();
         self.write_once("genesis.bin", &state.genesis().canonical())?;
         let mut remaining = budget.max_bytes;
+        observe(&state);
         // Replay in height order with constant history-index memory. A second
         // streaming directory pass rejects gaps and noncanonical filenames.
         while let Some(record) = self.record(
@@ -316,8 +330,9 @@ impl Journal {
             if state.height() - floor >= budget.max_records {
                 return Err(invalid("replay record budget exceeded"));
             }
+            let canonical = record.canonical()?;
             remaining = remaining
-                .checked_sub(record.canonical()?.len() as u64)
+                .checked_sub(canonical.len() as u64)
                 .ok_or_else(|| invalid("replay byte budget exceeded"))?;
             if record.block.header.height != state.height() + 1 {
                 return Err(invalid("record height mismatch"));
@@ -329,13 +344,14 @@ impl Journal {
                 .join(format!("receipt-{:020}.bin", state.height()));
             match read_bounded(&receipt, RECEIPT_BYTES) {
                 Ok(bytes) => {
-                    if bytes != yami_chain::hash(b"YC-DURABLE-RECORD-1", &record.canonical()?).0 {
+                    if bytes != yami_chain::hash(b"YC-DURABLE-RECORD-1", &canonical).0 {
                         return Err(invalid("durable record receipt mismatch"));
                     }
                 }
                 Err(e) if e.kind() == io::ErrorKind::NotFound => {}
                 Err(e) => return Err(e),
             }
+            observe(&state);
         }
         for (index, entry) in fs::read_dir(&self.path)?.enumerate() {
             if index as u64 >= budget.max_directory_entries {
@@ -770,6 +786,8 @@ mod io_boundaries {
 pub struct StorageFootprint {
     pub entries: u64,
     pub bytes: u64,
+    /// Allocated file blocks on Unix; excludes filesystem metadata overhead.
+    pub allocated_bytes: u64,
     pub signing_bytes: u64,
     pub evidence_bytes: u64,
     pub wal_bytes: u64,
@@ -802,6 +820,19 @@ impl Journal {
                     return Err(invalid("unexpected storage entry type"));
                 }
                 let size = metadata.len();
+                #[cfg(unix)]
+                {
+                    use std::os::unix::fs::MetadataExt as _;
+                    report.allocated_bytes = report
+                        .allocated_bytes
+                        .checked_add(
+                            metadata
+                                .blocks()
+                                .checked_mul(512)
+                                .ok_or_else(|| invalid("allocated size overflow"))?,
+                        )
+                        .ok_or_else(|| invalid("allocated size overflow"))?;
+                }
                 report.bytes = report
                     .bytes
                     .checked_add(size)

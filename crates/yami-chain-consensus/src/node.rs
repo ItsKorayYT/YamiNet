@@ -234,6 +234,9 @@ pub async fn run_node_with_storage(options: NodeOptions, storage: StorageOptions
     if state.height() >= options.target_height {
         return Ok(state);
     }
+    // Existing idempotent records may be read at pressure, but do not start
+    // network actors or potentially large WAL recovery before refusing new work.
+    journal.ensure_capacity(0)?;
     if !options.directory.join("wal/consensus.wal").exists()
         && std::fs::read_dir(&options.directory)?.any(|entry| {
             entry.is_ok_and(|e| e.file_name().to_string_lossy().starts_with("signed-"))
@@ -899,6 +902,67 @@ mod startup_tests {
             assert!(run_node(options).await.is_err());
             assert!(!directory.exists());
         }
+    }
+
+    #[tokio::test]
+    async fn restart_pressure_refuses_before_wal_recovery_and_retains_safety() {
+        let directory =
+            std::env::temp_dir().join(format!("yami-pressure-startup-{}", std::process::id()));
+        let genesis = Genesis::development_schedule(&[(1, 4)]).unwrap();
+        let journal = Journal::open(&directory).unwrap();
+        journal.replay(genesis.clone(), |_| Ok(())).unwrap();
+        journal.write_once("validator-index.bin", &[0]).unwrap();
+        journal
+            .reserve_signature(1, 0, 1, b"retained preimage")
+            .unwrap();
+        std::fs::create_dir(directory.join("wal")).unwrap();
+        let wal = directory.join("wal/consensus.wal");
+        std::fs::write(&wal, b"malformed WAL must not be recovered at pressure").unwrap();
+        drop(journal);
+        for _ in 0..3 {
+            let options = NodeOptions {
+                directory: directory.clone(),
+                genesis: genesis.clone(),
+                index: 0,
+                base_port: 28100,
+                peer_base_port: 28100,
+                isolated_network: None,
+                test_transactions: 0,
+                sparse_peers: false,
+                start_at: None,
+                round_timeout: Duration::from_millis(800),
+                target_height: 1,
+                timeout: Duration::from_secs(1),
+                linger: Duration::ZERO,
+                crash: None,
+            };
+            let error = run_node_with_storage(
+                options,
+                StorageOptions {
+                    checkpoint_interval: None,
+                    storage_limits: yami_chain_storage::StorageLimits {
+                        max_bytes: 1,
+                        reserve_bytes: 0,
+                    },
+                },
+            )
+            .await
+            .unwrap_err();
+            assert!(
+                error.to_string().contains("quota/reserve exhausted"),
+                "{error}"
+            );
+            assert_eq!(
+                std::fs::read(&wal).unwrap(),
+                b"malformed WAL must not be recovered at pressure"
+            );
+            let journal = Journal::open(&directory).unwrap();
+            journal
+                .reserve_signature(1, 0, 1, b"retained preimage")
+                .unwrap();
+            assert!(journal.reserve_signature(1, 0, 1, b"conflict").is_err());
+        }
+        std::fs::remove_dir_all(directory).unwrap();
     }
 
     #[test]

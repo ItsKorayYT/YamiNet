@@ -1,0 +1,101 @@
+{
+  "base_commit": "0135845e7052f3684f3f3dacd387ac8183db14ff",
+  "branch": "development/yamichain",
+  "toolchain": "rustc 1.90.0",
+  "passed": true,
+  "format": true,
+  "strict_workspace_all_targets_clippy": true,
+  "workspace_release_build": true,
+  "release_storage_benchmark_build": true,
+  "workspace_tests": {
+    "passed": 516,
+    "failed": 0,
+    "ignored": 10,
+    "suites": 95
+  },
+  "python_tooling_tests": 3,
+  "production_proof_versions_rejected": 65536,
+  "process_campaign": {
+    "passed": true,
+    "binary_sha256": "1a63af27ddaa7e153af7f5c34a1d457f03af3588959a85034142c83c4eb1e560",
+    "height": 704,
+    "restart_heights": [
+      576,
+      640,
+      704
+    ],
+    "seconds": 442.38626802499994
+  },
+  "final_workspace_release_storage_recovery": {
+    "passed": true,
+    "binary_sha256": "9ca4f3ebbf3920688f7f7db8b133120f0d94f72589f76f76c41b43df025ea43a",
+    "height": 704,
+    "all_four_states": [
+      {
+        "chain_id": "yamichain-local-0.2",
+        "height": 704,
+        "block": "a1e5d5d3197ece05625cb77cf1262c57f3bde1400b7994c2c3c1e320d1cc7615",
+        "state_root": "166d8abf7b593da9f87ff33ac18f50e1abb10c562067239d7d4cdb045467752f",
+        "test_tlds": 2816,
+        "payments_enabled": false,
+        "production_ready": false
+      },
+      {
+        "chain_id": "yamichain-local-0.2",
+        "height": 704,
+        "block": "a1e5d5d3197ece05625cb77cf1262c57f3bde1400b7994c2c3c1e320d1cc7615",
+        "state_root": "166d8abf7b593da9f87ff33ac18f50e1abb10c562067239d7d4cdb045467752f",
+        "test_tlds": 2816,
+        "payments_enabled": false,
+        "production_ready": false
+      },
+      {
+        "chain_id": "yamichain-local-0.2",
+        "height": 704,
+        "block": "a1e5d5d3197ece05625cb77cf1262c57f3bde1400b7994c2c3c1e320d1cc7615",
+        "state_root": "166d8abf7b593da9f87ff33ac18f50e1abb10c562067239d7d4cdb045467752f",
+        "test_tlds": 2816,
+        "payments_enabled": false,
+        "production_ready": false
+      },
+      {
+        "chain_id": "yamichain-local-0.2",
+        "height": 704,
+        "block": "a1e5d5d3197ece05625cb77cf1262c57f3bde1400b7994c2c3c1e320d1cc7615",
+        "state_root": "166d8abf7b593da9f87ff33ac18f50e1abb10c562067239d7d4cdb045467752f",
+        "test_tlds": 2816,
+        "payments_enabled": false,
+        "production_ready": false
+      }
+    ],
+    "safety_files_preserved": 1631,
+    "interrupted_prune_exit": 86,
+    "authenticated_recovery": true,
+    "completed_prune": true,
+    "repeated_process_pressure_refusals": 3,
+    "pressure_fixture_wal_unchanged": true
+  },
+  "benchmark": {
+    "passed": true,
+    "heights": [
+      1024,
+      4096,
+      8192
+    ],
+    "cpus": 2,
+    "memory_bytes": 2147483648,
+    "hard_20GB_volume_enforced": false
+  },
+  "no_safety_records_deleted": true,
+  "archive_default_preserved": true,
+  "indefinite_operation_demonstrated": false,
+  "public_deployment": false,
+  "log_sha256": {
+    "m10-clippy-final.log": "06f6e96805360a3df9bf1b0678a15bb153f98b36de3349f3593f274966fa1473",
+    "m10-workspace-tests.log": "3cd90ab1c445f673f57d813e399b60f7c0dd28522e3bc7c5f18c7f7aabf15b23",
+    "m10-workspace-release.log": "835a7f96d7bb3397bab1c54e03a79c285cab6f77ad4449290512f402b6e423fe",
+    "m10-bench-build.log": "8c08bd2ffb17929aaf7d70ba26f5745ae603355f2d61f9362a242cdf2c3ef87a",
+    "m10-python-tests.log": "81be4c4386c780bc3fa5cf089dd68f68b767d5d727944a5e7692e6aa48301916",
+    "m10-format.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  }
+}
