@@ -1,0 +1,732 @@
+{
+  "measured_at_utc": "2026-11-03T11:10:49.612467+00:00",
+  "architecture": "x86_64",
+  "kernel": "6.18.57",
+  "cpu_model": "AMD EPYC 7763 64-Core Processor",
+  "cpu_quota": "200000 100000",
+  "memory_limit_bytes": "8589934592",
+  "rustc": "rustc 1.90.0 (1159e78c4 2025-09-14)",
+  "timing_scope": "single-process native release CPU, three samples; not distributed execution",
+  "byte_scope": "canonical fixed-width payload formulas plus separately measured JSON packet bytes; excludes transport/framing/consensus replication",
+  "rss_scope": "whole child harness including wallets, both servers, proof and JSON; not client-only memory",
+  "sizes": [
+    {
+      "authentication_scope": "full snapshot hash vs externally pinned head and AEAD, not a consensus transition proof",
+      "canonical_public_packet_bytes": 288,
+      "canonical_shape_proof_bytes": 128,
+      "checkpoint_bytes": 80,
+      "client_dense_write_share_material_bytes": 384,
+      "client_proof_response_challenge_material_bytes": 128,
+      "full_download_two_snapshots_bytes": 272,
+      "per_server_cipher_share_storage_bytes_excluding_replay_set": 128,
+      "private_channel_total_bytes": 384,
+      "prover_announcements_compressed_equivalent_bytes": 64,
+      "prover_announcements_native_payload_bytes": 320,
+      "samples": [
+        {
+          "apply_including_reverification_us": 868,
+          "authenticated_recovery_us": 3,
+          "check_both_private_messages_us": 418,
+          "exposed_channels_observer_us": 0,
+          "json_both_private_messages_bytes": 1439,
+          "json_checkpoint_bytes": 258,
+          "json_download_both_snapshots_bytes": 965,
+          "json_packet_bytes": 1122,
+          "json_write_total_bytes": 2561,
+          "prepare_including_shape_proof_us": 608,
+          "verify_shape_us": 167
+        },
+        {
+          "apply_including_reverification_us": 585,
+          "authenticated_recovery_us": 2,
+          "check_both_private_messages_us": 440,
+          "exposed_channels_observer_us": 0,
+          "json_both_private_messages_bytes": 1444,
+          "json_checkpoint_bytes": 268,
+          "json_download_both_snapshots_bytes": 979,
+          "json_packet_bytes": 1136,
+          "json_write_total_bytes": 2580,
+          "prepare_including_shape_proof_us": 609,
+          "verify_shape_us": 191
+        },
+        {
+          "apply_including_reverification_us": 585,
+          "authenticated_recovery_us": 3,
+          "check_both_private_messages_us": 439,
+          "exposed_channels_observer_us": 0,
+          "json_both_private_messages_bytes": 1439,
+          "json_checkpoint_bytes": 260,
+          "json_download_both_snapshots_bytes": 977,
+          "json_packet_bytes": 1115,
+          "json_write_total_bytes": 2554,
+          "prepare_including_shape_proof_us": 655,
+          "verify_shape_us": 166
+        }
+      ],
+      "timings_scope": "single-process release CPU; not network/distributed consensus or payment proof timings",
+      "vaults": 2,
+      "wallet_persistent_bytes_key_index_checkpoint_cached_cell": 184,
+      "write_total_bytes_excluding_transport": 672,
+      "whole_harness_process_peak_rss_kib": 12160,
+      "median_us": {
+        "apply_including_reverification_us": 585,
+        "authenticated_recovery_us": 3,
+        "check_both_private_messages_us": 439,
+        "exposed_channels_observer_us": 0,
+        "prepare_including_shape_proof_us": 609,
+        "verify_shape_us": 167
+      }
+    },
+    {
+      "authentication_scope": "full snapshot hash vs externally pinned head and AEAD, not a consensus transition proof",
+      "canonical_public_packet_bytes": 800,
+      "canonical_shape_proof_bytes": 512,
+      "checkpoint_bytes": 80,
+      "client_dense_write_share_material_bytes": 768,
+      "client_proof_response_challenge_material_bytes": 512,
+      "full_download_two_snapshots_bytes": 528,
+      "per_server_cipher_share_storage_bytes_excluding_replay_set": 256,
+      "private_channel_total_bytes": 768,
+      "prover_announcements_compressed_equivalent_bytes": 384,
+      "prover_announcements_native_payload_bytes": 1920,
+      "samples": [
+        {
+          "apply_including_reverification_us": 1771,
+          "authenticated_recovery_us": 3,
+          "check_both_private_messages_us": 898,
+          "exposed_channels_observer_us": 0,
+          "json_both_private_messages_bytes": 2823,
+          "json_checkpoint_bytes": 251,
+          "json_download_both_snapshots_bytes": 1909,
+          "json_packet_bytes": 2948,
+          "json_write_total_bytes": 5771,
+          "prepare_including_shape_proof_us": 1746,
+          "verify_shape_us": 925
+        },
+        {
+          "apply_including_reverification_us": 1966,
+          "authenticated_recovery_us": 3,
+          "check_both_private_messages_us": 875,
+          "exposed_channels_observer_us": 0,
+          "json_both_private_messages_bytes": 2834,
+          "json_checkpoint_bytes": 261,
+          "json_download_both_snapshots_bytes": 1899,
+          "json_packet_bytes": 2954,
+          "json_write_total_bytes": 5788,
+          "prepare_including_shape_proof_us": 1708,
+          "verify_shape_us": 921
+        },
+        {
+          "apply_including_reverification_us": 1785,
+          "authenticated_recovery_us": 3,
+          "check_both_private_messages_us": 874,
+          "exposed_channels_observer_us": 0,
+          "json_both_private_messages_bytes": 2805,
+          "json_checkpoint_bytes": 265,
+          "json_download_both_snapshots_bytes": 1900,
+          "json_packet_bytes": 2954,
+          "json_write_total_bytes": 5759,
+          "prepare_including_shape_proof_us": 1707,
+          "verify_shape_us": 920
+        }
+      ],
+      "timings_scope": "single-process release CPU; not network/distributed consensus or payment proof timings",
+      "vaults": 4,
+      "wallet_persistent_bytes_key_index_checkpoint_cached_cell": 184,
+      "write_total_bytes_excluding_transport": 1568,
+      "whole_harness_process_peak_rss_kib": 12288,
+      "median_us": {
+        "apply_including_reverification_us": 1785,
+        "authenticated_recovery_us": 3,
+        "check_both_private_messages_us": 875,
+        "exposed_channels_observer_us": 0,
+        "prepare_including_shape_proof_us": 1708,
+        "verify_shape_us": 921
+      }
+    },
+    {
+      "authentication_scope": "full snapshot hash vs externally pinned head and AEAD, not a consensus transition proof",
+      "canonical_public_packet_bytes": 2592,
+      "canonical_shape_proof_bytes": 2048,
+      "checkpoint_bytes": 80,
+      "client_dense_write_share_material_bytes": 1536,
+      "client_proof_response_challenge_material_bytes": 2048,
+      "full_download_two_snapshots_bytes": 1040,
+      "per_server_cipher_share_storage_bytes_excluding_replay_set": 512,
+      "private_channel_total_bytes": 1536,
+      "prover_announcements_compressed_equivalent_bytes": 1792,
+      "prover_announcements_native_payload_bytes": 8960,
+      "samples": [
+        {
+          "apply_including_reverification_us": 5910,
+          "authenticated_recovery_us": 4,
+          "check_both_private_messages_us": 1980,
+          "exposed_channels_observer_us": 1,
+          "json_both_private_messages_bytes": 5622,
+          "json_checkpoint_bytes": 257,
+          "json_download_both_snapshots_bytes": 3725,
+          "json_packet_bytes": 9424,
+          "json_write_total_bytes": 15046,
+          "prepare_including_shape_proof_us": 5747,
+          "verify_shape_us": 4367
+        },
+        {
+          "apply_including_reverification_us": 5911,
+          "authenticated_recovery_us": 4,
+          "check_both_private_messages_us": 2007,
+          "exposed_channels_observer_us": 1,
+          "json_both_private_messages_bytes": 5615,
+          "json_checkpoint_bytes": 265,
+          "json_download_both_snapshots_bytes": 3751,
+          "json_packet_bytes": 9450,
+          "json_write_total_bytes": 15065,
+          "prepare_including_shape_proof_us": 5811,
+          "verify_shape_us": 4191
+        },
+        {
+          "apply_including_reverification_us": 5917,
+          "authenticated_recovery_us": 3,
+          "check_both_private_messages_us": 1983,
+          "exposed_channels_observer_us": 1,
+          "json_both_private_messages_bytes": 5613,
+          "json_checkpoint_bytes": 258,
+          "json_download_both_snapshots_bytes": 3749,
+          "json_packet_bytes": 9388,
+          "json_write_total_bytes": 15001,
+          "prepare_including_shape_proof_us": 5759,
+          "verify_shape_us": 4191
+        }
+      ],
+      "timings_scope": "single-process release CPU; not network/distributed consensus or payment proof timings",
+      "vaults": 8,
+      "wallet_persistent_bytes_key_index_checkpoint_cached_cell": 184,
+      "write_total_bytes_excluding_transport": 4128,
+      "whole_harness_process_peak_rss_kib": 12288,
+      "median_us": {
+        "apply_including_reverification_us": 5911,
+        "authenticated_recovery_us": 4,
+        "check_both_private_messages_us": 1983,
+        "exposed_channels_observer_us": 1,
+        "prepare_including_shape_proof_us": 5759,
+        "verify_shape_us": 4191
+      }
+    },
+    {
+      "authentication_scope": "full snapshot hash vs externally pinned head and AEAD, not a consensus transition proof",
+      "canonical_public_packet_bytes": 9248,
+      "canonical_shape_proof_bytes": 8192,
+      "checkpoint_bytes": 80,
+      "client_dense_write_share_material_bytes": 3072,
+      "client_proof_response_challenge_material_bytes": 8192,
+      "full_download_two_snapshots_bytes": 2064,
+      "per_server_cipher_share_storage_bytes_excluding_replay_set": 1024,
+      "private_channel_total_bytes": 3072,
+      "prover_announcements_compressed_equivalent_bytes": 7680,
+      "prover_announcements_native_payload_bytes": 38400,
+      "samples": [
+        {
+          "apply_including_reverification_us": 21415,
+          "authenticated_recovery_us": 5,
+          "check_both_private_messages_us": 3429,
+          "exposed_channels_observer_us": 2,
+          "json_both_private_messages_bytes": 11180,
+          "json_checkpoint_bytes": 251,
+          "json_download_both_snapshots_bytes": 7470,
+          "json_packet_bytes": 33366,
+          "json_write_total_bytes": 44546,
+          "prepare_including_shape_proof_us": 21370,
+          "verify_shape_us": 18080
+        },
+        {
+          "apply_including_reverification_us": 21596,
+          "authenticated_recovery_us": 5,
+          "check_both_private_messages_us": 3738,
+          "exposed_channels_observer_us": 2,
+          "json_both_private_messages_bytes": 11159,
+          "json_checkpoint_bytes": 264,
+          "json_download_both_snapshots_bytes": 7528,
+          "json_packet_bytes": 33396,
+          "json_write_total_bytes": 44555,
+          "prepare_including_shape_proof_us": 21082,
+          "verify_shape_us": 18042
+        },
+        {
+          "apply_including_reverification_us": 21677,
+          "authenticated_recovery_us": 5,
+          "check_both_private_messages_us": 3410,
+          "exposed_channels_observer_us": 2,
+          "json_both_private_messages_bytes": 11183,
+          "json_checkpoint_bytes": 260,
+          "json_download_both_snapshots_bytes": 7482,
+          "json_packet_bytes": 33384,
+          "json_write_total_bytes": 44567,
+          "prepare_including_shape_proof_us": 21283,
+          "verify_shape_us": 18238
+        }
+      ],
+      "timings_scope": "single-process release CPU; not network/distributed consensus or payment proof timings",
+      "vaults": 16,
+      "wallet_persistent_bytes_key_index_checkpoint_cached_cell": 184,
+      "write_total_bytes_excluding_transport": 12320,
+      "whole_harness_process_peak_rss_kib": 12288,
+      "median_us": {
+        "apply_including_reverification_us": 21596,
+        "authenticated_recovery_us": 5,
+        "check_both_private_messages_us": 3429,
+        "exposed_channels_observer_us": 2,
+        "prepare_including_shape_proof_us": 21283,
+        "verify_shape_us": 18080
+      }
+    },
+    {
+      "authentication_scope": "full snapshot hash vs externally pinned head and AEAD, not a consensus transition proof",
+      "canonical_public_packet_bytes": 34848,
+      "canonical_shape_proof_bytes": 32768,
+      "checkpoint_bytes": 80,
+      "client_dense_write_share_material_bytes": 6144,
+      "client_proof_response_challenge_material_bytes": 32768,
+      "full_download_two_snapshots_bytes": 4112,
+      "per_server_cipher_share_storage_bytes_excluding_replay_set": 2048,
+      "private_channel_total_bytes": 6144,
+      "prover_announcements_compressed_equivalent_bytes": 31744,
+      "prover_announcements_native_payload_bytes": 158720,
+      "samples": [
+        {
+          "apply_including_reverification_us": 80353,
+          "authenticated_recovery_us": 9,
+          "check_both_private_messages_us": 7003,
+          "exposed_channels_observer_us": 5,
+          "json_both_private_messages_bytes": 22290,
+          "json_checkpoint_bytes": 259,
+          "json_download_both_snapshots_bytes": 14879,
+          "json_packet_bytes": 125586,
+          "json_write_total_bytes": 147876,
+          "prepare_including_shape_proof_us": 81004,
+          "verify_shape_us": 73973
+        },
+        {
+          "apply_including_reverification_us": 80362,
+          "authenticated_recovery_us": 8,
+          "check_both_private_messages_us": 6796,
+          "exposed_channels_observer_us": 4,
+          "json_both_private_messages_bytes": 22208,
+          "json_checkpoint_bytes": 261,
+          "json_download_both_snapshots_bytes": 14947,
+          "json_packet_bytes": 125356,
+          "json_write_total_bytes": 147564,
+          "prepare_including_shape_proof_us": 80141,
+          "verify_shape_us": 73879
+        },
+        {
+          "apply_including_reverification_us": 80228,
+          "authenticated_recovery_us": 8,
+          "check_both_private_messages_us": 6792,
+          "exposed_channels_observer_us": 4,
+          "json_both_private_messages_bytes": 22284,
+          "json_checkpoint_bytes": 254,
+          "json_download_both_snapshots_bytes": 14910,
+          "json_packet_bytes": 125529,
+          "json_write_total_bytes": 147813,
+          "prepare_including_shape_proof_us": 79770,
+          "verify_shape_us": 74003
+        }
+      ],
+      "timings_scope": "single-process release CPU; not network/distributed consensus or payment proof timings",
+      "vaults": 32,
+      "wallet_persistent_bytes_key_index_checkpoint_cached_cell": 184,
+      "write_total_bytes_excluding_transport": 40992,
+      "whole_harness_process_peak_rss_kib": 12288,
+      "median_us": {
+        "apply_including_reverification_us": 80353,
+        "authenticated_recovery_us": 8,
+        "check_both_private_messages_us": 6796,
+        "exposed_channels_observer_us": 4,
+        "prepare_including_shape_proof_us": 80141,
+        "verify_shape_us": 73973
+      }
+    },
+    {
+      "authentication_scope": "full snapshot hash vs externally pinned head and AEAD, not a consensus transition proof",
+      "canonical_public_packet_bytes": 135200,
+      "canonical_shape_proof_bytes": 131072,
+      "checkpoint_bytes": 80,
+      "client_dense_write_share_material_bytes": 12288,
+      "client_proof_response_challenge_material_bytes": 131072,
+      "full_download_two_snapshots_bytes": 8208,
+      "per_server_cipher_share_storage_bytes_excluding_replay_set": 4096,
+      "private_channel_total_bytes": 12288,
+      "prover_announcements_compressed_equivalent_bytes": 129024,
+      "prover_announcements_native_payload_bytes": 645120,
+      "samples": [
+        {
+          "apply_including_reverification_us": 327847,
+          "authenticated_recovery_us": 11,
+          "check_both_private_messages_us": 17042,
+          "exposed_channels_observer_us": 9,
+          "json_both_private_messages_bytes": 44473,
+          "json_checkpoint_bytes": 266,
+          "json_download_both_snapshots_bytes": 29749,
+          "json_packet_bytes": 486543,
+          "json_write_total_bytes": 531016,
+          "prepare_including_shape_proof_us": 334659,
+          "verify_shape_us": 305400
+        },
+        {
+          "apply_including_reverification_us": 316336,
+          "authenticated_recovery_us": 11,
+          "check_both_private_messages_us": 16096,
+          "exposed_channels_observer_us": 9,
+          "json_both_private_messages_bytes": 44409,
+          "json_checkpoint_bytes": 261,
+          "json_download_both_snapshots_bytes": 29801,
+          "json_packet_bytes": 486712,
+          "json_write_total_bytes": 531121,
+          "prepare_including_shape_proof_us": 321300,
+          "verify_shape_us": 307798
+        },
+        {
+          "apply_including_reverification_us": 318261,
+          "authenticated_recovery_us": 12,
+          "check_both_private_messages_us": 14987,
+          "exposed_channels_observer_us": 9,
+          "json_both_private_messages_bytes": 44378,
+          "json_checkpoint_bytes": 264,
+          "json_download_both_snapshots_bytes": 29877,
+          "json_packet_bytes": 486269,
+          "json_write_total_bytes": 530647,
+          "prepare_including_shape_proof_us": 319204,
+          "verify_shape_us": 307594
+        }
+      ],
+      "timings_scope": "single-process release CPU; not network/distributed consensus or payment proof timings",
+      "vaults": 64,
+      "wallet_persistent_bytes_key_index_checkpoint_cached_cell": 184,
+      "write_total_bytes_excluding_transport": 147488,
+      "whole_harness_process_peak_rss_kib": 12288,
+      "median_us": {
+        "apply_including_reverification_us": 318261,
+        "authenticated_recovery_us": 11,
+        "check_both_private_messages_us": 16096,
+        "exposed_channels_observer_us": 9,
+        "prepare_including_shape_proof_us": 321300,
+        "verify_shape_us": 307594
+      }
+    },
+    {
+      "authentication_scope": "full snapshot hash vs externally pinned head and AEAD, not a consensus transition proof",
+      "canonical_public_packet_bytes": 532512,
+      "canonical_shape_proof_bytes": 524288,
+      "checkpoint_bytes": 80,
+      "client_dense_write_share_material_bytes": 24576,
+      "client_proof_response_challenge_material_bytes": 524288,
+      "full_download_two_snapshots_bytes": 16400,
+      "per_server_cipher_share_storage_bytes_excluding_replay_set": 8192,
+      "private_channel_total_bytes": 24576,
+      "prover_announcements_compressed_equivalent_bytes": 520192,
+      "prover_announcements_native_payload_bytes": 2600960,
+      "samples": [
+        {
+          "apply_including_reverification_us": 1240262,
+          "authenticated_recovery_us": 18,
+          "check_both_private_messages_us": 27274,
+          "exposed_channels_observer_us": 19,
+          "json_both_private_messages_bytes": 88930,
+          "json_checkpoint_bytes": 260,
+          "json_download_both_snapshots_bytes": 59435,
+          "json_packet_bytes": 1915530,
+          "json_write_total_bytes": 2004460,
+          "prepare_including_shape_proof_us": 1231469,
+          "verify_shape_us": 1206642
+        },
+        {
+          "apply_including_reverification_us": 1230574,
+          "authenticated_recovery_us": 17,
+          "check_both_private_messages_us": 27402,
+          "exposed_channels_observer_us": 19,
+          "json_both_private_messages_bytes": 89045,
+          "json_checkpoint_bytes": 265,
+          "json_download_both_snapshots_bytes": 59470,
+          "json_packet_bytes": 1915011,
+          "json_write_total_bytes": 2004056,
+          "prepare_including_shape_proof_us": 1238666,
+          "verify_shape_us": 1202020
+        },
+        {
+          "apply_including_reverification_us": 1256151,
+          "authenticated_recovery_us": 17,
+          "check_both_private_messages_us": 28003,
+          "exposed_channels_observer_us": 19,
+          "json_both_private_messages_bytes": 88896,
+          "json_checkpoint_bytes": 260,
+          "json_download_both_snapshots_bytes": 59459,
+          "json_packet_bytes": 1915429,
+          "json_write_total_bytes": 2004325,
+          "prepare_including_shape_proof_us": 1230316,
+          "verify_shape_us": 1201459
+        }
+      ],
+      "timings_scope": "single-process release CPU; not network/distributed consensus or payment proof timings",
+      "vaults": 128,
+      "wallet_persistent_bytes_key_index_checkpoint_cached_cell": 184,
+      "write_total_bytes_excluding_transport": 557088,
+      "whole_harness_process_peak_rss_kib": 12288,
+      "median_us": {
+        "apply_including_reverification_us": 1240262,
+        "authenticated_recovery_us": 17,
+        "check_both_private_messages_us": 27402,
+        "exposed_channels_observer_us": 19,
+        "prepare_including_shape_proof_us": 1231469,
+        "verify_shape_us": 1202020
+      }
+    },
+    {
+      "authentication_scope": "full snapshot hash vs externally pinned head and AEAD, not a consensus transition proof",
+      "canonical_public_packet_bytes": 2113568,
+      "canonical_shape_proof_bytes": 2097152,
+      "checkpoint_bytes": 80,
+      "client_dense_write_share_material_bytes": 49152,
+      "client_proof_response_challenge_material_bytes": 2097152,
+      "full_download_two_snapshots_bytes": 32784,
+      "per_server_cipher_share_storage_bytes_excluding_replay_set": 16384,
+      "private_channel_total_bytes": 49152,
+      "prover_announcements_compressed_equivalent_bytes": 2088960,
+      "prover_announcements_native_payload_bytes": 10444800,
+      "samples": [
+        {
+          "apply_including_reverification_us": 4868044,
+          "authenticated_recovery_us": 30,
+          "check_both_private_messages_us": 54700,
+          "exposed_channels_observer_us": 83,
+          "json_both_private_messages_bytes": 177637,
+          "json_checkpoint_bytes": 260,
+          "json_download_both_snapshots_bytes": 119001,
+          "json_packet_bytes": 7600361,
+          "json_write_total_bytes": 7777998,
+          "prepare_including_shape_proof_us": 4915616,
+          "verify_shape_us": 4851810
+        },
+        {
+          "apply_including_reverification_us": 5202424,
+          "authenticated_recovery_us": 29,
+          "check_both_private_messages_us": 57986,
+          "exposed_channels_observer_us": 37,
+          "json_both_private_messages_bytes": 177702,
+          "json_checkpoint_bytes": 260,
+          "json_download_both_snapshots_bytes": 118877,
+          "json_packet_bytes": 7601909,
+          "json_write_total_bytes": 7779611,
+          "prepare_including_shape_proof_us": 4948058,
+          "verify_shape_us": 4890437
+        },
+        {
+          "apply_including_reverification_us": 4983526,
+          "authenticated_recovery_us": 29,
+          "check_both_private_messages_us": 55734,
+          "exposed_channels_observer_us": 37,
+          "json_both_private_messages_bytes": 177848,
+          "json_checkpoint_bytes": 273,
+          "json_download_both_snapshots_bytes": 118973,
+          "json_packet_bytes": 7601038,
+          "json_write_total_bytes": 7778886,
+          "prepare_including_shape_proof_us": 4998139,
+          "verify_shape_us": 4917073
+        }
+      ],
+      "timings_scope": "single-process release CPU; not network/distributed consensus or payment proof timings",
+      "vaults": 256,
+      "wallet_persistent_bytes_key_index_checkpoint_cached_cell": 184,
+      "write_total_bytes_excluding_transport": 2162720,
+      "whole_harness_process_peak_rss_kib": 15704,
+      "median_us": {
+        "apply_including_reverification_us": 4983526,
+        "authenticated_recovery_us": 29,
+        "check_both_private_messages_us": 55734,
+        "exposed_channels_observer_us": 37,
+        "prepare_including_shape_proof_us": 4948058,
+        "verify_shape_us": 4890437
+      }
+    }
+  ],
+  "fresh_demo": {
+    "authenticated_unrelated_wallet_recovery": true,
+    "conflicting_cell_authentication_fails": true,
+    "conflicting_shape_valid_updates_both_accepted": true,
+    "decision": "REJECT tested two-server private-write composition",
+    "independent_update_order_independent": true,
+    "independent_updates_survive": true,
+    "no_financial_functionality": true,
+    "observer_labels_separate_from_inputs": [
+      2,
+      2,
+      0,
+      1,
+      0,
+      3,
+      3,
+      1
+    ],
+    "observer_predictions_from_downloadable_snapshots": [
+      [
+        2
+      ],
+      [
+        2
+      ],
+      [
+        0
+      ],
+      [
+        1
+      ],
+      [
+        0
+      ],
+      [
+        3
+      ],
+      [
+        3
+      ],
+      [
+        1
+      ]
+    ],
+    "observer_predictions_from_two_share_vectors": [
+      [
+        2
+      ],
+      [
+        2
+      ],
+      [
+        0
+      ],
+      [
+        1
+      ],
+      [
+        0
+      ],
+      [
+        3
+      ],
+      [
+        3
+      ],
+      [
+        1
+      ]
+    ],
+    "privacy_boundary": "packets.json contains hiding commitments; exposed-channels.json models public channel reconstruction or colluding servers",
+    "proof_scope": "write shape only, no owner/current-version/state-head authorization",
+    "repeated_update_pair_classification_correct": true,
+    "shape_proof_packets": 12,
+    "snapshot_attack_needs_colluding_servers": false,
+    "whole_harness_process_peak_rss_kib": 12288
+  },
+  "fresh_verifier": {
+    "downloadable_snapshot_positions": [
+      [
+        2
+      ],
+      [
+        2
+      ],
+      [
+        0
+      ],
+      [
+        1
+      ],
+      [
+        0
+      ],
+      [
+        3
+      ],
+      [
+        3
+      ],
+      [
+        1
+      ]
+    ],
+    "exposed_channel_positions": [
+      [
+        2
+      ],
+      [
+        2
+      ],
+      [
+        0
+      ],
+      [
+        1
+      ],
+      [
+        0
+      ],
+      [
+        3
+      ],
+      [
+        3
+      ],
+      [
+        1
+      ]
+    ],
+    "fixture_checkpoint_hashes_checked": 9,
+    "scope": "Checks hashes against fixture heads, not independent finality or ownership/state authorization",
+    "valid_shape_proofs": 12,
+    "whole_harness_process_peak_rss_kib": 12288
+  },
+  "independent_python_observer": {
+    "positions_from_downloadable_ciphertexts": [
+      [
+        2
+      ],
+      [
+        2
+      ],
+      [
+        0
+      ],
+      [
+        1
+      ],
+      [
+        0
+      ],
+      [
+        3
+      ],
+      [
+        3
+      ],
+      [
+        1
+      ]
+    ],
+    "same_slot_pairs": [
+      [
+        0,
+        1
+      ],
+      [
+        2,
+        4
+      ],
+      [
+        3,
+        7
+      ],
+      [
+        5,
+        6
+      ]
+    ],
+    "wallet_keys_or_target_labels_used": false
+  }
+}

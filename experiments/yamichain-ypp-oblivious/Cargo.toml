@@ -1,0 +1,27 @@
+[package]
+name = "yamichain-ypp-oblivious"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.90"
+license = "GPL-3.0-only"
+publish = false
+
+# Independent rejection harness. Never linked into the production workspace.
+[workspace]
+
+[dependencies]
+curve25519-dalek = { version = "=4.1.3", features = ["digest"] }
+rand_core = { version = "=0.6.4", features = ["getrandom"] }
+chacha20poly1305 = "=0.10.1"
+sha2 = "=0.10.9"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[dev-dependencies]
+yami-chain-privacy = { path = "../../crates/yami-chain-privacy" }
+
+[lints.rust]
+unsafe_code = "forbid"
+
+[profile.release]
+overflow-checks = true

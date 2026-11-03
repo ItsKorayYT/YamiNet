@@ -1,0 +1,76 @@
+{
+  "authenticated_unrelated_wallet_recovery": true,
+  "conflicting_cell_authentication_fails": true,
+  "conflicting_shape_valid_updates_both_accepted": true,
+  "decision": "REJECT tested two-server private-write composition",
+  "independent_update_order_independent": true,
+  "independent_updates_survive": true,
+  "no_financial_functionality": true,
+  "observer_labels_separate_from_inputs": [
+    2,
+    2,
+    0,
+    1,
+    0,
+    3,
+    3,
+    1
+  ],
+  "observer_predictions_from_downloadable_snapshots": [
+    [
+      2
+    ],
+    [
+      2
+    ],
+    [
+      0
+    ],
+    [
+      1
+    ],
+    [
+      0
+    ],
+    [
+      3
+    ],
+    [
+      3
+    ],
+    [
+      1
+    ]
+  ],
+  "observer_predictions_from_two_share_vectors": [
+    [
+      2
+    ],
+    [
+      2
+    ],
+    [
+      0
+    ],
+    [
+      1
+    ],
+    [
+      0
+    ],
+    [
+      3
+    ],
+    [
+      3
+    ],
+    [
+      1
+    ]
+  ],
+  "privacy_boundary": "packets.json contains hiding commitments; exposed-channels.json models public channel reconstruction or colluding servers",
+  "proof_scope": "write shape only, no owner/current-version/state-head authorization",
+  "repeated_update_pair_classification_correct": true,
+  "shape_proof_packets": 12,
+  "snapshot_attack_needs_colluding_servers": false
+}
