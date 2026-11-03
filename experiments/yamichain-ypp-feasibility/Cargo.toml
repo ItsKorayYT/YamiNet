@@ -1,0 +1,38 @@
+[package]
+name = "yamichain-ypp-feasibility"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.90"
+license = "GPL-3.0-only"
+publish = false
+
+[workspace]
+
+[dependencies]
+ark-bls12-381 = "=0.5.0"
+ark-ff = "=0.5.0"
+ark-ec = "=0.5.0"
+ark-poly = "=0.5.0"
+ark-poly-commit = "=0.5.0"
+ark-ed-on-bls12-381 = { version = "=0.5.0", features = ["r1cs"] }
+ark-groth16 = "=0.5.0"
+ark-relations = "=0.5.1"
+ark-r1cs-std = "=0.5.0"
+ark-crypto-primitives = { version = "=0.5.0", features = ["crh", "r1cs"] }
+ark-serialize = "=0.5.0"
+hmac = "=0.12.1"
+sha2 = "=0.10.9"
+rand = "=0.8.5"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+zeroize = "=1.8.2"
+age = { version = "=0.11.1", default-features = false }
+
+[dev-dependencies]
+yami-chain-privacy = { path = "../../crates/yami-chain-privacy" }
+
+[lints.rust]
+unsafe_code = "forbid"
+
+[profile.release]
+overflow-checks = true
