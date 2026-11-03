@@ -1,0 +1,137 @@
+{
+  "result": "PASS",
+  "scope": "isolated signed simulated backing/entropy; loopback development-key validators; no live PoS",
+  "generated_at": "2026-11-03T15:03:21.171011+00:00",
+  "indices": [
+    0,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7
+  ],
+  "committees": [
+    [
+      0,
+      3,
+      4,
+      5
+    ],
+    [
+      2,
+      3,
+      5,
+      6
+    ],
+    [
+      3,
+      5,
+      6,
+      7
+    ]
+  ],
+  "plan_hash": "8bf908228df0545b24ed145104e954844bbb660761ac98df5205d3f9f7e3f7cd",
+  "genesis": "6521f2866567ee4b01fe8c439e65fcb8f2f5a556193bca4cd43afbe7b3dd5aaa",
+  "binary_sha256": "f63ad646c09cd2f915ebd41770df330079b1e513aacc13c133b1bdda480771fe",
+  "driver_sha256": "b2728d8ed4a38b3c1efdbb0881003586495571b0c7069d29e3e8be8056f0b695",
+  "cgroup": {
+    "cpu.max": "200000 100000",
+    "memory.max": "8589934592"
+  },
+  "per_process_address_space_limit_bytes": 2147483648,
+  "memory_limit_scope": "RLIMIT_AS, not cgroup RSS",
+  "public_deployment": false,
+  "economically_secure_pos": false,
+  "adversarial": false,
+  "seconds_to_all_target": 7.892,
+  "final_height": 12,
+  "finalized_block": "69e65e3c8a59451d60742094ef4e4c2e9f36def9ae897465e925856f147993a0",
+  "finalized_state": "e8e62cfeaa35e8718801ce567e3ad3549e1339644201d992db03c77abd551813",
+  "discovered_nodes": [
+    0,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7
+  ],
+  "finalized_heights_observed": [
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10,
+    11,
+    12
+  ],
+  "validator_and_probe_cpu_seconds": 1.836,
+  "elapsed_seconds": 8.044,
+  "faults": [],
+  "sampled_per_node_peak_rss_bytes": {
+    "0": 19263488,
+    "2": 19210240,
+    "3": 19251200,
+    "4": 19218432,
+    "5": 19070976,
+    "6": 19111936,
+    "7": 19337216
+  },
+  "stores": {
+    "0": {
+      "logical_bytes": 12495,
+      "allocated_bytes": 163840,
+      "files": 41,
+      "wal_bytes": 12,
+      "signing_bytes": 1421
+    },
+    "2": {
+      "logical_bytes": 12495,
+      "allocated_bytes": 163840,
+      "files": 41,
+      "wal_bytes": 12,
+      "signing_bytes": 1421
+    },
+    "3": {
+      "logical_bytes": 17341,
+      "allocated_bytes": 237568,
+      "files": 59,
+      "wal_bytes": 2016,
+      "signing_bytes": 4263
+    },
+    "4": {
+      "logical_bytes": 12495,
+      "allocated_bytes": 163840,
+      "files": 41,
+      "wal_bytes": 12,
+      "signing_bytes": 1421
+    },
+    "5": {
+      "logical_bytes": 17341,
+      "allocated_bytes": 237568,
+      "files": 59,
+      "wal_bytes": 2016,
+      "signing_bytes": 4263
+    },
+    "6": {
+      "logical_bytes": 15725,
+      "allocated_bytes": 196608,
+      "files": 49,
+      "wal_bytes": 2016,
+      "signing_bytes": 2842
+    },
+    "7": {
+      "logical_bytes": 14499,
+      "allocated_bytes": 163840,
+      "files": 41,
+      "wal_bytes": 2016,
+      "signing_bytes": 1421
+    }
+  }
+}

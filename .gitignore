@@ -38,3 +38,4 @@ yns.tmp
 /fuzz/artifacts/
 /fuzz/coverage/
 /experiments/yamichain-privacy-lab/target/
+/experiments/yamichain-validator-lab/target/

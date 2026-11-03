@@ -1,0 +1,163 @@
+{
+  "result": "PASS",
+  "scope": "isolated signed simulated backing/entropy; loopback development-key validators; no live PoS",
+  "generated_at": "2026-11-03T15:04:44.795432+00:00",
+  "indices": [
+    1,
+    3,
+    4,
+    5,
+    6,
+    7
+  ],
+  "committees": [
+    [
+      1,
+      3,
+      4,
+      5
+    ],
+    [
+      3,
+      5,
+      6,
+      7
+    ],
+    [
+      3,
+      5,
+      6,
+      7
+    ]
+  ],
+  "plan_hash": "6f0cb1653e51b3775b399e81f253aff5ba6f25b1eadd52b4fd6cbc94ff4b99b7",
+  "genesis": "cc0738d42706c4dc730c09a6bf8550610dae201cae9d61dc1a3042b07c6c09ce",
+  "binary_sha256": "f63ad646c09cd2f915ebd41770df330079b1e513aacc13c133b1bdda480771fe",
+  "driver_sha256": "b2728d8ed4a38b3c1efdbb0881003586495571b0c7069d29e3e8be8056f0b695",
+  "cgroup": {
+    "cpu.max": "200000 100000",
+    "memory.max": "8589934592"
+  },
+  "per_process_address_space_limit_bytes": 2147483648,
+  "memory_limit_scope": "RLIMIT_AS, not cgroup RSS",
+  "public_deployment": false,
+  "economically_secure_pos": false,
+  "adversarial": true,
+  "seconds_to_all_target": 17.145,
+  "final_height": 12,
+  "finalized_block": "bd2dc8e88754cd7cd1111f47f9e82b96a81e9554a58c9f710b88b12ee89c0410",
+  "finalized_state": "f8d9cbd94af6e22dc9dcde8cdb96d573c26c065fdb91b887f58b295a65f107c4",
+  "discovered_nodes": [
+    1,
+    3,
+    4,
+    5,
+    6,
+    7
+  ],
+  "finalized_heights_observed": [
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10,
+    11,
+    12
+  ],
+  "validator_and_probe_cpu_seconds": 1.824,
+  "elapsed_seconds": 17.36,
+  "faults": [
+    {
+      "kind": "partition",
+      "seconds": 3.823
+    },
+    {
+      "kind": "oversized-length",
+      "rejected": true
+    },
+    {
+      "kind": "forged-signature",
+      "rejected": true
+    },
+    {
+      "kind": "idle-discovery-clients",
+      "clients": 16,
+      "service_recovered": true
+    },
+    {
+      "kind": "partition-healed-and-SIGKILL",
+      "height": 2,
+      "index": 1,
+      "seconds": 10.853
+    },
+    {
+      "kind": "restart-entire-store",
+      "seconds": 12.889
+    },
+    {
+      "kind": "conflicting-election-plan-restart",
+      "rejected_before_signing": true
+    },
+    {
+      "kind": "corrupt-discovery-restart",
+      "rejected_before_signing": true
+    }
+  ],
+  "sampled_per_node_peak_rss_bytes": {
+    "1": 19120128,
+    "3": 19853312,
+    "4": 20045824,
+    "5": 20168704,
+    "6": 19460096,
+    "7": 20365312
+  },
+  "stores": {
+    "1": {
+      "logical_bytes": 12495,
+      "allocated_bytes": 163840,
+      "files": 41,
+      "wal_bytes": 12,
+      "signing_bytes": 1421
+    },
+    "3": {
+      "logical_bytes": 17341,
+      "allocated_bytes": 237568,
+      "files": 59,
+      "wal_bytes": 2016,
+      "signing_bytes": 4263
+    },
+    "4": {
+      "logical_bytes": 12495,
+      "allocated_bytes": 163840,
+      "files": 41,
+      "wal_bytes": 12,
+      "signing_bytes": 1421
+    },
+    "5": {
+      "logical_bytes": 17341,
+      "allocated_bytes": 237568,
+      "files": 59,
+      "wal_bytes": 2016,
+      "signing_bytes": 4263
+    },
+    "6": {
+      "logical_bytes": 15725,
+      "allocated_bytes": 196608,
+      "files": 49,
+      "wal_bytes": 2016,
+      "signing_bytes": 2842
+    },
+    "7": {
+      "logical_bytes": 15920,
+      "allocated_bytes": 200704,
+      "files": 50,
+      "wal_bytes": 2016,
+      "signing_bytes": 2842
+    }
+  }
+}

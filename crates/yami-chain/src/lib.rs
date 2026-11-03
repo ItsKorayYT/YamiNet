@@ -2,6 +2,7 @@
 pub mod codec;
 pub mod committee;
 pub mod selection;
+pub mod validators;
 use codec::{Reader, Writer};
 pub use committee::{Epoch, Member, ValidatorSet};
 pub use ed25519_dalek::{Signer, SigningKey, VerifyingKey};

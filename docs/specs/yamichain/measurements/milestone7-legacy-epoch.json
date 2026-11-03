@@ -1,0 +1,30 @@
+{
+  "scope": "loopback only; public dev keys; no real money",
+  "generated_at": "2026-11-03T15:16:21.601515+00:00",
+  "binary_sha256": "bf8fec63bdbd52225f08c82e1b031387a275eec32e70df2063c8ffb9ea3791c5",
+  "driver_sha256": "f2cd22a9f44b3ebcc79de85fa93a14aab27c19b7f872edffe38a2ea34a9ea475",
+  "scenarios": {
+    "epoch": {
+      "result": "PASS",
+      "processes": 7,
+      "committee_plan": "1:4,4:7,7:5",
+      "crash": "epoch",
+      "injected_exit_86": true,
+      "exit_codes": {
+        "0": 0,
+        "1": 0,
+        "2": 0,
+        "3": 0,
+        "4": 0,
+        "5": 0,
+        "6": 0
+      },
+      "validated_synced_payloads": 1,
+      "certified_history_responses": 1,
+      "height": 10,
+      "state_root": "38ee7ce8c3e39017e41f9a292a83d6f59d81eb30d695f17b2dbb9d9bd171e8b3",
+      "block": "3ec6b27bc52cd0b47e345246f5ca380b8212b4ff132613c3b85b179b50689f21",
+      "elapsed_seconds": 13.479
+    }
+  }
+}
