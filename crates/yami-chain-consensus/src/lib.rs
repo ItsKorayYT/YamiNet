@@ -2,6 +2,7 @@
 mod candidates;
 mod checkpoint;
 pub use checkpoint::*;
+pub mod network;
 mod node;
 mod signing;
 mod types;

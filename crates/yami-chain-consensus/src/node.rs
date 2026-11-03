@@ -118,9 +118,10 @@ fn params(genesis: &Genesis, height: u64, timing: Duration) -> Result<m::HeightP
     ))
 }
 
-/// All defaults are local-only. No configurable public listen address or secret key input.
+/// Defaults are loopback-only; the explicit isolated profile accepts private IPv4 labs.
 pub struct NodeOptions {
     pub directory: PathBuf,
+    pub isolated_network: Option<crate::network::IsolatedNetwork>,
     pub genesis: Genesis,
     pub index: u8,
     pub base_port: u16,
@@ -151,6 +152,11 @@ pub async fn run_node(options: NodeOptions) -> Result<State> {
         tokio::time::Instant::now(),
     )?;
     options.genesis.validate()?;
+    if let Some(n) = &options.isolated_network {
+        if n.genesis != options.genesis || n.index != options.index {
+            return Err(eyre!("isolated identity/genesis/index mismatch"));
+        }
+    }
     let development_keys: std::collections::BTreeMap<_, _> = (0
         ..yami_chain::committee::MAX_VALIDATORS as u8)
         .map(|i| {
@@ -160,23 +166,25 @@ pub async fn run_node(options: NodeOptions) -> Result<State> {
             )
         })
         .collect();
-    if options
-        .genesis
-        .epochs
-        .iter()
-        .flat_map(|e| e.validators.members())
-        .any(|m| development_keys.get(&m.consensus_key) != Some(&m.transport_key))
+    if options.isolated_network.is_none()
+        && options
+            .genesis
+            .epochs
+            .iter()
+            .flat_map(|e| e.validators.members())
+            .any(|m| development_keys.get(&m.consensus_key) != Some(&m.transport_key))
     {
         return Err(eyre!(
             "local runner accepts only separate public development consensus/transport identities"
         ));
     }
     if options.index >= yami_chain::committee::MAX_VALIDATORS as u8
-        || !options.genesis.has_consensus_key(
-            &development_key("consensus", options.index)
-                .verifying_key()
-                .to_bytes(),
-        )
+        || (options.isolated_network.is_none()
+            && !options.genesis.has_consensus_key(
+                &development_key("consensus", options.index)
+                    .verifying_key()
+                    .to_bytes(),
+            ))
         || options.timeout < Duration::from_secs(1)
         || options.timeout > Duration::from_secs(3600)
         || options.linger > Duration::from_secs(60)
@@ -195,6 +203,9 @@ pub async fn run_node(options: NodeOptions) -> Result<State> {
         ));
     }
     let journal = Arc::new(Journal::open(&options.directory)?);
+    if let Some(n) = &options.isolated_network {
+        n.checkpoint(&journal)?;
+    }
     journal.write_once("validator-index.bin", &[options.index])?;
     let state = journal.replay(options.genesis.clone(), |record| {
         verify_record(&options.genesis, record)
@@ -211,7 +222,11 @@ pub async fn run_node(options: NodeOptions) -> Result<State> {
             "signing history exists but consensus WAL is missing; refusing restart"
         ));
     }
-    let key = development_key("consensus", options.index);
+    let key = options
+        .isolated_network
+        .as_ref()
+        .map(|n| n.consensus.clone())
+        .unwrap_or_else(|| development_key("consensus", options.index));
     let address = Address(Digest(key.verifying_key().to_bytes()));
     let signer = Arc::new(DurableSigner {
         genesis: options.genesis.clone(),
@@ -219,7 +234,14 @@ pub async fn run_node(options: NodeOptions) -> Result<State> {
         journal: journal.clone(),
         crash: options.crash,
     });
-    let keypair = transport(options.index)?;
+    let keypair = if let Some(n) = &options.isolated_network {
+        if n.genesis != options.genesis {
+            return Err(eyre!("isolated genesis mismatch"));
+        }
+        Keypair::ed25519_from_bytes(n.transport.to_bytes())?
+    } else {
+        transport(options.index)?
+    };
     use malachite_signing::Signer as _;
     let proof = signer
         .sign_validator_proof(
@@ -234,33 +256,54 @@ pub async fn run_node(options: NodeOptions) -> Result<State> {
         WireCodec::new(&options.genesis).encode(&proof)?,
     );
     std::fs::create_dir_all(options.directory.join("wal"))?;
-    let (mut channels, handle) = EngineBuilder::new(
-        Context,
-        config(
-            options.index,
-            options.base_port,
-            options.peer_base_port,
-            &options.genesis,
-            options.sparse_peers,
-        )?,
-    )
-    .with_default_wal(WalContext::new(
-        options.directory.join("wal/consensus.wal"),
-        WireCodec::new(&options.genesis),
-    ))
-    .with_default_network(NetworkContext::new(
-        identity,
-        WireCodec::new(&options.genesis),
-    ))
-    .with_default_consensus(ConsensusContext::new_validator(
-        address,
-        Box::new(SignatureVerifier(options.genesis.clone())),
-        Box::new((*signer).clone()),
-    ))
-    .with_default_sync(SyncContext::new(WireCodec::new(&options.genesis)))
-    .with_default_request(RequestContext::new(16))
-    .build()
-    .await?;
+    let mut network_config = config(
+        options.index,
+        options.base_port,
+        options.peer_base_port,
+        &options.genesis,
+        options.sparse_peers,
+    )?;
+    if let Some(n) = &options.isolated_network {
+        network_config.consensus.p2p.listen_addr =
+            format!("/ip4/{}/tcp/{}", n.listen.ip(), n.listen.port()).parse()?;
+        network_config.consensus.p2p.persistent_peers = n
+            .peers
+            .iter()
+            .map(|(a, key)| {
+                let peer = libp2p_identity::PublicKey::from(
+                    libp2p_identity::ed25519::PublicKey::try_from_bytes(key)?,
+                )
+                .to_peer_id();
+                Ok(format!("/ip4/{}/tcp/{}/p2p/{peer}", a.ip(), a.port()).parse()?)
+            })
+            .collect::<Result<_>>()?;
+        let d = &mut network_config.consensus.p2p.discovery;
+        d.num_inbound_peers = 8;
+        d.num_outbound_peers = 25;
+        d.max_connections_per_peer = 1;
+        d.max_connections_per_ip = 4;
+        d.ip_throttle_duration = Duration::from_secs(2);
+        d.ephemeral_connection_timeout = Duration::from_secs(5);
+        d.max_peers_per_response = 16;
+    }
+    let (mut channels, handle) = EngineBuilder::new(Context, network_config)
+        .with_default_wal(WalContext::new(
+            options.directory.join("wal/consensus.wal"),
+            WireCodec::new(&options.genesis),
+        ))
+        .with_default_network(NetworkContext::new(
+            identity,
+            WireCodec::new(&options.genesis),
+        ))
+        .with_default_consensus(ConsensusContext::new_validator(
+            address,
+            Box::new(SignatureVerifier(options.genesis.clone())),
+            Box::new((*signer).clone()),
+        ))
+        .with_default_sync(SyncContext::new(WireCodec::new(&options.genesis)))
+        .with_default_request(RequestContext::new(16))
+        .build()
+        .await?;
     // A monotonic deadline prevents wall-clock changes from extending this wait.
     if let Some(deadline) = start_deadline {
         tokio::time::sleep_until(deadline).await;
@@ -272,6 +315,51 @@ pub async fn run_node(options: NodeOptions) -> Result<State> {
     handle.actor.stop(None);
     let _ = tokio::time::timeout(Duration::from_secs(5), handle.handle).await;
     result
+}
+
+async fn apply_peer_update(
+    current: &crate::network::IsolatedNetwork,
+    updated: &crate::network::IsolatedNetwork,
+    channels: &Channels<Context>,
+    journal: &Journal,
+) -> Result<()> {
+    if updated.genesis != current.genesis || updated.listen != current.listen {
+        return Err(eyre!(
+            "discovery cannot change pinned genesis or active listener"
+        ));
+    }
+    // A stale/invalid update does not replace the last verified set.
+    updated.checkpoint(journal)?;
+    // Removing an endpoint clears upstream identity-level persistence, so remove first.
+    for peer in current.peers.iter().filter(|p| !updated.peers.contains(p)) {
+        tokio::time::timeout(
+            Duration::from_secs(1),
+            malachite::NetworkRequest::remove_persistent_peer(
+                &channels.net_requests,
+                peer_multiaddr(peer)?.parse()?,
+            ),
+        )
+        .await???;
+    }
+    for peer in updated.peers.iter().filter(|p| !current.peers.contains(p)) {
+        tokio::time::timeout(
+            Duration::from_secs(1),
+            malachite::NetworkRequest::add_persistent_peer(
+                &channels.net_requests,
+                peer_multiaddr(peer)?.parse()?,
+            ),
+        )
+        .await???;
+    }
+    Ok(())
+}
+
+fn peer_multiaddr(peer: &(std::net::SocketAddrV4, [u8; 32])) -> Result<String> {
+    let (a, key) = peer;
+    let id =
+        libp2p_identity::PublicKey::from(libp2p_identity::ed25519::PublicKey::try_from_bytes(key)?)
+            .to_peer_id();
+    Ok(format!("/ip4/{}/tcp/{}/p2p/{id}", a.ip(), a.port()))
 }
 
 async fn publish(
@@ -314,9 +402,68 @@ async fn app_loop(
     let consensus_deadline = tokio::time::Instant::now() + options.timeout;
     let mut serve_deadline = None;
     let mut _held_final_reply = None;
+    let mut discovery_tick = tokio::time::interval(Duration::from_secs(2));
+    discovery_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    let mut network_view = options.isolated_network.clone();
+    let discovery_socket = if let Some(n) = &network_view {
+        Some(
+            tokio::net::UdpSocket::bind(std::net::SocketAddrV4::new(
+                *n.listen.ip(),
+                n.listen.port() + 1,
+            ))
+            .await?,
+        )
+    } else {
+        None
+    };
+    let mut packet_budget = 4;
+    let mut packet = [0u8; 1762];
+    let mut page_cursor = 0usize;
     loop {
         let deadline = serve_deadline.unwrap_or(consensus_deadline);
-        let msg = match tokio::time::timeout_at(deadline, channels.consensus.recv()).await {
+        let received = tokio::select! {
+            result = tokio::time::timeout_at(deadline, channels.consensus.recv()) => result,
+            _ = discovery_tick.tick(), if network_view.is_some() => {
+                let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)?.as_secs();
+                let n = network_view.as_ref().expect("isolated profile");
+                if let Ok(updated) = n.refresh(None, now) {
+                    if updated.checkpoint(&journal).is_ok() {
+                        apply_peer_update(n, &updated, channels, &journal).await?;
+                        network_view = Some(updated);
+                    }
+                }
+                let n = network_view.as_ref().expect("isolated profile");
+                if n.hints.values().any(|h| now >= h.0) { return Err(eyre!("authenticated discovery hints expired; stopping isolated listener")); }
+                let page = n.page(page_cursor); page_cursor = page_cursor.wrapping_add(16);
+                for (address, _) in &n.peers {
+                    let target = std::net::SocketAddrV4::new(*address.ip(), address.port()+1);
+                    let _ = discovery_socket.as_ref().expect("isolated socket").send_to(&page, target).await;
+                }
+                packet_budget = 4;
+                continue;
+            }
+            result = async {
+                match &discovery_socket { Some(socket) => socket.recv_from(&mut packet).await, None => std::future::pending().await }
+            }, if network_view.is_some() && packet_budget > 0 => {
+                packet_budget -= 1;
+                if let Ok((len, source)) = result {
+                    let n = network_view.as_ref().expect("isolated profile");
+                    // Bootstrap IPs are only an inexpensive ingress filter. Every
+                    // supplied endpoint still needs a pinned identity's signature.
+                    if n.peers.iter().any(|(a, _)| std::net::IpAddr::V4(*a.ip()) == source.ip()) {
+                        let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)?.as_secs();
+                        if let Ok(updated) = n.refresh(Some(&packet[..len]), now) {
+                            if updated.checkpoint(&journal).is_ok() {
+                                apply_peer_update(n, &updated, channels, &journal).await?;
+                                network_view = Some(updated);
+                            }
+                        }
+                    }
+                }
+                continue;
+            }
+        };
+        let msg = match received {
             Ok(msg) => msg,
             Err(_) if state.height() >= options.target_height => return Ok(state),
             Err(_) => {
@@ -693,6 +840,7 @@ mod startup_tests {
                 index: 0,
                 base_port: 28100,
                 peer_base_port: 28100,
+                isolated_network: None,
                 test_transactions: 0,
                 sparse_peers: false,
                 start_at: barrier,

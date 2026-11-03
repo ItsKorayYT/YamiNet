@@ -20,7 +20,7 @@ async-trait = "0.1"
 bytes = "1"
 bytesize = "2"
 eyre = "0.6"
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "signal"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "signal", "net"] }
 
 [features]
 fuzzing = []

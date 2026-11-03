@@ -1,7 +1,7 @@
 use eyre::{eyre, Result};
 use std::{path::PathBuf, time::Duration};
 use yami_chain_consensus::{inspect_with_genesis, run_node, status_json, CrashPoint, NodeOptions};
-const HELP:&str="yami-validator 0.2 — NOT production-ready; no real money\n\nIsolated configurable-committee Malachite prototype. Public development keys; loopback only.\nAll YAMI payments and value-bearing protocol actions are disabled.\n\nUsage:\n  yami-validator run --dir PATH --index N [--base-port 28100] [--height 10] [--timeout 60]\n  yami-validator status --dir PATH\n  yami-validator inspect --dir PATH\n\nrun starts one independent process, binding only 127.0.0.1:base-port+index.\nLaunch the scheduled public development identities with separate stores.\n--committee-plan 1:4,5:7,9:5 pins sizes at activation heights; default 1:4.\nSupply the same plan for run/status/inspect; changing it refuses the existing store.\nstatus/inspect replay and authenticate durable finalized history under an exclusive\nstore lock; stop that validator before inspecting it. No wallet, public RPC or mint.\n\nTest workloads: --test-transactions 0..64; zero preserves the original workload.\nLab timing: --start-at-ms UNIX_MS (at most 60s ahead); --round-timeout-ms 800..60000.\nLocal topology: --sparse-peers true uses authenticated ring/chord neighbors.\nLoopback fault proxy: --peer-base-port PORT changes only outbound loopback ports.\nOptional --linger SECONDS serves certified history at the terminal demo height.\nTest fault injection: --crash-after proposal|vote|before-commit|epoch (run only).\nThe process exits 86 once per directory at the selected durable boundary.\nPreserve the entire directory, including signing records and WAL, when restarting.\n";
+const HELP:&str="yami-validator 0.2 — NOT production-ready; no real money\n\nIsolated configurable-committee Malachite prototype. Public development keys; loopback only.\nAll YAMI payments and value-bearing protocol actions are disabled.\n\nUsage:\n  yami-validator run --dir PATH --index N [--base-port 28100] [--height 10] [--timeout 60]\n  yami-validator status --dir PATH\n  yami-validator inspect --dir PATH\n\nrun starts one independent process, binding only 127.0.0.1:base-port+index.\nLaunch the scheduled public development identities with separate stores.\n--committee-plan 1:4,5:7,9:5 pins sizes at activation heights; default 1:4.\nSupply the same plan for run/status/inspect; changing it refuses the existing store.\nstatus/inspect replay and authenticate durable finalized history under an exclusive\nstore lock; stop that validator before inspecting it. No wallet, public RPC or mint.\n\nTest workloads: --test-transactions 0..64; zero preserves the original workload.\nLab timing: --start-at-ms UNIX_MS (at most 60s ahead); --round-timeout-ms 800..60000.\nLocal topology: --sparse-peers true uses authenticated ring/chord neighbors.\nLoopback fault proxy: --peer-base-port PORT changes only outbound loopback ports.\nIsolated labs: init-isolated --dir NEW_PATH --endpoints PRIVATE_IP:PORT,...\nUse --isolated-network PATH for run/status/inspect. Roster is pinned locally;\nonly signed, short-lived private IPv4 endpoint hints become dial targets.\nMount only the own identity-N.bin and public roster/bootstrap files per node.\nNever expose lab listeners or development keys to public networks.\nOptional --linger SECONDS serves certified history at the terminal demo height.\nTest fault injection: --crash-after proposal|vote|before-commit|epoch (run only).\nThe process exits 86 once per directory at the selected durable boundary.\nPreserve the entire directory, including signing records and WAL, when restarting.\n";
 #[tokio::main(flavor = "multi_thread", worker_threads = 2)]
 async fn main() {
     // Diagnostics are opt-in to keep benchmark stdout machine-readable.
@@ -24,10 +24,45 @@ async fn run() -> Result<()> {
         return Ok(());
     }
     let command = args[0].as_str();
+    if command == "announce-isolated" {
+        if args.len() != 7 || args[1] != "--dir" || args[3] != "--index" || args[5] != "--endpoint"
+        {
+            return Err(eyre!(
+                "announce-isolated --dir CONFIG --index N --endpoint PRIVATE_IP:PORT"
+            ));
+        }
+        return yami_chain_consensus::network::announce_isolated_endpoint(
+            std::path::Path::new(&args[2]),
+            args[4].parse()?,
+            args[6].parse()?,
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)?
+                .as_secs(),
+        );
+    }
+    if command == "init-isolated" {
+        if args.len() != 5 || args[1] != "--dir" || args[3] != "--endpoints" {
+            return Err(eyre!(
+                "init-isolated --dir NEW_PATH --endpoints PRIVATE_IP:PORT,..."
+            ));
+        }
+        let endpoints = args[4]
+            .split(',')
+            .map(str::parse)
+            .collect::<std::result::Result<Vec<std::net::SocketAddrV4>, _>>()?;
+        return yami_chain_consensus::network::initialize_isolated_network(
+            std::path::Path::new(&args[2]),
+            &endpoints,
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)?
+                .as_secs(),
+        );
+    }
     if !["run", "status", "inspect"].contains(&command) {
         return Err(eyre!("unknown command; use --help"));
     }
     let mut dir = None;
+    let mut isolated = None;
     let mut index = None;
     let mut base_port = 28100;
     let mut height = 10;
@@ -48,6 +83,7 @@ async fn run() -> Result<()> {
         let value = &pair[1];
         match pair[0].as_str() {
             "--dir" => dir = Some(PathBuf::from(value)),
+            "--isolated-network" => isolated = Some(PathBuf::from(value)),
             "--committee-plan" => {
                 plan = value
                     .split(',')
@@ -96,14 +132,41 @@ async fn run() -> Result<()> {
         }
     }
     let directory = dir.ok_or_else(|| eyre!("--dir is required"))?;
-    let genesis = yami_chain::Genesis::development_schedule(&plan)?;
+    let isolated_network = isolated
+        .as_ref()
+        .map(|path| {
+            if plan != [(1, 4)] {
+                return Err(eyre!(
+                    "isolated roster cannot be combined with committee-plan"
+                ));
+            }
+            yami_chain_consensus::network::IsolatedNetwork::load_with_store(
+                path,
+                index.unwrap_or_else(|| {
+                    std::fs::read(directory.join("validator-index.bin"))
+                        .ok()
+                        .and_then(|b| b.first().copied())
+                        .unwrap_or(0)
+                }),
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)?
+                    .as_secs(),
+                &directory,
+            )
+        })
+        .transpose()?;
+    let genesis = isolated_network
+        .as_ref()
+        .map(|n| n.genesis().clone())
+        .unwrap_or(yami_chain::Genesis::development_schedule(&plan)?);
     let state = if command == "run" {
         if timeout == 0 || timeout > 3600 || linger > 60 {
             return Err(eyre!("timeout must be 1..3600 seconds and linger 0..60"));
         }
-        eprintln!("NOT production-ready; no real money. Public development keys; loopback only.");
+        eprintln!("NOT production-ready; no real money. Isolated test networks only; no public deployment.");
         run_node(NodeOptions {
             directory,
+            isolated_network,
             genesis,
             index: index.ok_or_else(|| eyre!("--index is required"))?,
             base_port,

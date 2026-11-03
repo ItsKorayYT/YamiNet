@@ -1,0 +1,124 @@
+{
+  "base": "52c7c785cab02927ba5d1932d1d4339d205bf3dd",
+  "branch": "development/yamichain",
+  "rust": "1.90.0",
+  "checks": {
+    "cargo fmt --all -- --check": "passed",
+    "cargo clippy --workspace --all-targets -- -D warnings": "passed",
+    "cargo test --workspace": {
+      "passed": 503,
+      "failed": 0,
+      "ignored": 10,
+      "suites": 95
+    },
+    "cargo build --release --workspace": "passed",
+    "python3 -m py_compile tools/yamichain-p2p-lab.py": "passed",
+    "non_test_production_ypp_boundary": "all 65536 proof versions rejected for payments and public protocol actions"
+  },
+  "environment_note": "ALSA and libudev development packages matching installed Debian runtime libraries extracted outside the repository; PKG_CONFIG_PATH and PKG_CONFIG_SYSROOT_DIR pointed there. No repository dependencies or system credentials changed.",
+  "ignored_tests": [
+    "test model::tests::browser_opens_owned_remote_site_over_pinned_tls ... ignored, requires an owned reachable public endpoint in YAMINET_TEST_REMOTE_URL",
+    "test desktop::tests::capture_discovery ... ignored, writes a manual visual QA screenshot under target/screenshots",
+    "test desktop::tests::capture_screenshots ... ignored, manual visual QA screenshots under target/screenshots",
+    "test desktop::tests::capture_sites ... ignored, binds 127.0.0.1:7301 and 7302 and writes PNGs to target/screenshots",
+    "test desktop::tests::capture_verified ... ignored, writes target/screenshots/desktop-verified.png",
+    "test desktop::tests::discovered_node_opens_via_verified_tls_and_preserves_navigation ... ignored, uses selected private interface and multicast; set YAMINET_TEST_LAN_ADDRESS",
+    "test desktop::tests::measure_native_game_rendering ... ignored, manual software rendering benchmark",
+    "test tests::scale_stress_authenticated_core ... ignored, manual 4/25/100-validator authenticated Malachite schedules; run in release as documented",
+    "test two_discoverable_nodes_an_undiscoverable_node_and_authenticated_fetch ... ignored, uses selected private interface and multicast; set YAMINET_TEST_LAN_ADDRESS",
+    "test owned_remote_node_authenticates_and_serves_a_document ... ignored, requires an explicitly owned remote public ynps:// endpoint in YAMINET_TEST_REMOTE_URL"
+  ],
+  "campaigns": [
+    {
+      "name": "gossip",
+      "passed": true,
+      "height": 96,
+      "elapsed_seconds": 112.8673807529999,
+      "metrics": [
+        {
+          "index": 0,
+          "peak_sampled_cgroup_cpu_percent_of_one_core": 3.98,
+          "peak_sampled_rss_or_hwm_kib": 20212,
+          "peak_sampled_process_fds": 17,
+          "max_observed_pid1_cpu_seconds": 1.92,
+          "last_nonzero_network_counters_rx_tx": "2.16MB / 2.02MB"
+        },
+        {
+          "index": 1,
+          "peak_sampled_cgroup_cpu_percent_of_one_core": 4.21,
+          "peak_sampled_rss_or_hwm_kib": 20324,
+          "peak_sampled_process_fds": 16,
+          "max_observed_pid1_cpu_seconds": 1.96,
+          "last_nonzero_network_counters_rx_tx": "2.01MB / 1.99MB"
+        },
+        {
+          "index": 2,
+          "peak_sampled_cgroup_cpu_percent_of_one_core": 4.22,
+          "peak_sampled_rss_or_hwm_kib": 20172,
+          "peak_sampled_process_fds": 17,
+          "max_observed_pid1_cpu_seconds": 1.95,
+          "last_nonzero_network_counters_rx_tx": "1.97MB / 2MB"
+        },
+        {
+          "index": 3,
+          "peak_sampled_cgroup_cpu_percent_of_one_core": 3.68,
+          "peak_sampled_rss_or_hwm_kib": 18972,
+          "peak_sampled_process_fds": 16,
+          "max_observed_pid1_cpu_seconds": 1.56,
+          "last_nonzero_network_counters_rx_tx": "1.68MB / 1.65MB"
+        }
+      ]
+    },
+    {
+      "name": "quorum",
+      "passed": true,
+      "height": 96,
+      "elapsed_seconds": 116.13282617899995,
+      "metrics": [
+        {
+          "index": 0,
+          "peak_sampled_cgroup_cpu_percent_of_one_core": 4.94,
+          "peak_sampled_rss_or_hwm_kib": 20952,
+          "peak_sampled_process_fds": 17,
+          "max_observed_pid1_cpu_seconds": 2.2,
+          "last_nonzero_network_counters_rx_tx": "6.36MB / 2.65MB"
+        },
+        {
+          "index": 1,
+          "peak_sampled_cgroup_cpu_percent_of_one_core": 4.89,
+          "peak_sampled_rss_or_hwm_kib": 20016,
+          "peak_sampled_process_fds": 17,
+          "max_observed_pid1_cpu_seconds": 2.17,
+          "last_nonzero_network_counters_rx_tx": "2.59MB / 2.36MB"
+        },
+        {
+          "index": 2,
+          "peak_sampled_cgroup_cpu_percent_of_one_core": 5.14,
+          "peak_sampled_rss_or_hwm_kib": 20356,
+          "peak_sampled_process_fds": 16,
+          "max_observed_pid1_cpu_seconds": 2.19,
+          "last_nonzero_network_counters_rx_tx": "2.08MB / 2.09MB"
+        },
+        {
+          "index": 3,
+          "peak_sampled_cgroup_cpu_percent_of_one_core": 4.93,
+          "peak_sampled_rss_or_hwm_kib": 19436,
+          "peak_sampled_process_fds": 16,
+          "max_observed_pid1_cpu_seconds": 1.81,
+          "last_nonzero_network_counters_rx_tx": "2.05MB / 2.06MB"
+        }
+      ]
+    }
+  ],
+  "measurement_limits": "Docker CPU samples include telemetry exec processes; PID1 CPU counters are separate. Counter samples are rounded; node 3 counters restart with its new namespace/interface. Recovery time is bounded by sampling cadence. Four nodes share a two-core host; these are not 100-validator or public Internet capacity measurements.",
+  "initial_candidate_experiment": {
+    "passed": false,
+    "final_observed_heights": [
+      48,
+      48,
+      48,
+      16
+    ],
+    "note": "Initial candidate did not establish IP-migration catch-up within its harness window. Retained under work/p2p-lab-first; signed gossip and durable signed hint recovery were subsequently completed and the stronger final campaigns passed."
+  }
+}
