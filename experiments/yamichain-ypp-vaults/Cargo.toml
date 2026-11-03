@@ -1,0 +1,32 @@
+[package]
+name = "yamichain-ypp-vaults"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.90"
+license = "GPL-3.0-only"
+publish = false
+
+# No production dependency edge, workspace membership, or consensus registration.
+[workspace]
+
+[dependencies]
+ark-bls12-381 = "=0.5.0"
+ark-ff = "=0.5.0"
+ark-groth16 = "=0.5.0"
+ark-relations = "=0.5.1"
+ark-r1cs-std = "=0.5.0"
+ark-crypto-primitives = { version = "=0.5.0", features = ["crh", "r1cs"] }
+ark-serialize = "=0.5.0"
+rand = "=0.8.5"
+sha2 = "=0.10.9"
+age = { version = "=0.11.1", default-features = false }
+zeroize = { version = "=1.8.2", features = ["derive"] }
+
+[dev-dependencies]
+yami-chain-privacy = { path = "../../crates/yami-chain-privacy" }
+
+[lints.rust]
+unsafe_code = "forbid"
+
+[profile.release]
+overflow-checks = true

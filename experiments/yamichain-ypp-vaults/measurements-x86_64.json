@@ -1,0 +1,85 @@
+{
+  "measured_at_utc": "2026-11-02T20:07:13.961903+00:00",
+  "architecture": "x86_64",
+  "kernel": "6.18.57",
+  "cpu_model": "AMD EPYC 9V74 80-Core Processor",
+  "cpu_quota": "200000 100000",
+  "memory_limit_bytes": "8589934592",
+  "rayon_threads": 2,
+  "verifier_virtual_address_limit_bytes": 2147483648,
+  "rustc": "rustc 1.90.0 (1159e78c4 2025-09-14)",
+  "prover_and_recovery": {
+    "phase": "prover_and_recovery",
+    "rounds": 3,
+    "constraints": 405110,
+    "setup_ms": 22512.730534,
+    "proving_ms": [
+      8682.231129,
+      8262.444283,
+      8370.784962,
+      8256.682448,
+      7964.417746,
+      8898.831011
+    ],
+    "verification_ms": [
+      3.5723909999999997,
+      3.9563,
+      3.511069,
+      3.224487,
+      3.576176,
+      4.280009000000001
+    ],
+    "proof_bytes": [
+      192,
+      192,
+      192,
+      192,
+      192,
+      192
+    ],
+    "scan_record_ms": [
+      3.6358070000000002,
+      3.612652,
+      3.808868,
+      3.5154650000000003,
+      3.932695,
+      5.895327
+    ],
+    "backup_restore_ms": 0.14017200000000002,
+    "recovery_ms": 26.165799,
+    "history_transaction_bytes": 6811,
+    "record_overhead_bytes": 384,
+    "genesis_ciphertext_bytes": 887,
+    "live_root_bytes": 32,
+    "live_leaf_bytes": 64,
+    "retained_credit_marker_bytes": 96,
+    "peak_rss_kib": 1425256
+  },
+  "verifier_only": {
+    "phase": "verifier_only",
+    "load_ms": 21.590234,
+    "verification_ms": [
+      4.951893,
+      5.787794,
+      4.5970580000000005,
+      3.507554,
+      3.5591009999999996,
+      3.577929,
+      3.8023890000000002,
+      3.806936,
+      4.005585,
+      4.035038999999999,
+      3.594515,
+      4.456576,
+      5.018934,
+      3.900566,
+      3.284287,
+      3.304007,
+      4.337716,
+      3.678622,
+      3.534274,
+      3.469617
+    ],
+    "peak_rss_kib": 3124
+  }
+}
