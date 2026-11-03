@@ -44,8 +44,10 @@ changes. Neither the UDP sender's IP nor the page's contents confer authority.
 Only known bootstrap/learned peer IPs reach signature processing; all records
 still need a pinned key's valid signature. Numeric addresses prevent DNS rebinding.
 
-The application handles at most four datagrams per two-second tick, using a fixed
-1,762-byte receive buffer. Larger datagrams are rejected after truncation. Pages
+The application verifies at most four pages per two-second tick, using a fixed
+1,762-byte receive buffer. Milestone 9 additionally bounds cheap queue draining
+to 64 datagrams per tick so a finite forged burst cannot leave a long FIFO
+backlog; the signature-verification budget remains four. Larger datagrams are rejected after truncation. Pages
 rotate through the bounded roster. At most 100 signed hints and their signatures
 are retained. Unrestricted upstream Kademlia/peer exchange remains disabled.
 
@@ -78,7 +80,8 @@ discovery is disabled. In upstream 0.8.2 the connection multiplier is four:
 | Reconnect throttle for non-persistent IPs | 2 seconds |
 | Ephemeral connection retention | 5 seconds |
 | Discovery records per page / retained identities | 16 / 100 |
-| Accepted discovery datagrams per tick | 4 per 2 seconds |
+| Signature-checked discovery pages per tick | 4 per 2 seconds |
+| Cheap receive/drain budget (Milestone 9) | 64 per 2 seconds |
 | Bootstrap/cache file size | 32 KiB |
 | Gossip message / RPC response size | 128 KiB / 1 MiB |
 | Sync batch / parallel requests | 8 / 1 |

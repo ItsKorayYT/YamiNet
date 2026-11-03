@@ -6349,6 +6349,7 @@ version = "0.1.0"
 name = "yami-chain-storage"
 version = "0.1.0"
 dependencies = [
+ "rustix 1.1.6",
  "yami-chain",
 ]
 

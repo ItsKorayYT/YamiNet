@@ -143,9 +143,17 @@ pub fn inspect_with_genesis(directory: &Path, genesis: Genesis) -> Result<State>
         return Err(eyre!("no initialized local chain store"));
     }
     let journal = Journal::open(directory)?;
-    Ok(journal.replay(genesis.clone(), |record| verify_record(&genesis, record))?)
+    crate::replay_certified(&journal, &genesis)
+}
+#[derive(Clone, Copy, Debug, Default)]
+pub struct StorageOptions {
+    pub checkpoint_interval: Option<u64>,
+    pub storage_limits: yami_chain_storage::StorageLimits,
 }
 pub async fn run_node(options: NodeOptions) -> Result<State> {
+    run_node_with_storage(options, StorageOptions::default()).await
+}
+pub async fn run_node_with_storage(options: NodeOptions, storage: StorageOptions) -> Result<State> {
     let start_deadline = startup_deadline(
         options.start_at,
         std::time::SystemTime::now(),
@@ -202,14 +210,27 @@ pub async fn run_node(options: NodeOptions) -> Result<State> {
             "invalid local options: scheduled identity, ports 1024..65436, height 1..100000, timeout 1..3600s, linger 0..60s, round timeout 800..60000ms"
         ));
     }
-    let journal = Arc::new(Journal::open(&options.directory)?);
+    if storage
+        .checkpoint_interval
+        .is_some_and(|n| n == 0 || n > 100_000)
+    {
+        return Err(eyre!("checkpoint interval must be 1..100000"));
+    }
+    let journal = Arc::new(Journal::open_with_limits(
+        &options.directory,
+        yami_chain_storage::DEFAULT_ENTRY_BUDGET,
+        storage.storage_limits,
+    )?);
     if let Some(n) = &options.isolated_network {
         n.checkpoint(&journal)?;
     }
     journal.write_once("validator-index.bin", &[options.index])?;
-    let state = journal.replay(options.genesis.clone(), |record| {
-        verify_record(&options.genesis, record)
-    })?;
+    if storage.checkpoint_interval.is_none() && journal.path().join("compact-base.bin").exists() {
+        return Err(eyre!(
+            "archive mode cannot reopen a pruned store; select pruned mode"
+        ));
+    }
+    let state = crate::replay_certified(&journal, &options.genesis)?;
     if state.height() >= options.target_height {
         return Ok(state);
     }
@@ -309,8 +330,8 @@ pub async fn run_node(options: NodeOptions) -> Result<State> {
         tokio::time::sleep_until(deadline).await;
     }
     let result = tokio::select! {
-        result=app_loop(state,journal.clone(),&mut channels,&options,signer.clone())=>result,
-        signal=tokio::signal::ctrl_c()=>{signal.map_err(eyre::Report::from).and_then(|()|journal.replay(options.genesis.clone(),|record| verify_record(&options.genesis,record)).map_err(Into::into))},
+        result=app_loop(state,journal.clone(),&mut channels,&options,&storage,signer.clone())=>result,
+        signal=tokio::signal::ctrl_c()=>{signal.map_err(eyre::Report::from).and_then(|()|crate::replay_certified(&journal,&options.genesis))},
     };
     handle.actor.stop(None);
     let _ = tokio::time::timeout(Duration::from_secs(5), handle.handle).await;
@@ -395,9 +416,12 @@ async fn app_loop(
     journal: Arc<Journal>,
     channels: &mut Channels<Context>,
     options: &NodeOptions,
+    storage: &StorageOptions,
     signer: Arc<DurableSigner>,
 ) -> Result<State> {
     let mut candidates = Candidates::new(journal.clone());
+    let mut history_min = crate::history_min_height(&journal, state.genesis())?;
+    let mut storage_tick = tokio::time::interval(Duration::from_secs(2));
     let mut active_round = m::Round::Nil;
     let consensus_deadline = tokio::time::Instant::now() + options.timeout;
     let mut serve_deadline = None;
@@ -417,12 +441,14 @@ async fn app_loop(
         None
     };
     let mut packet_budget = 4;
+    let mut receive_budget = 64;
     let mut packet = [0u8; 1762];
     let mut page_cursor = 0usize;
     loop {
         let deadline = serve_deadline.unwrap_or(consensus_deadline);
         let received = tokio::select! {
             result = tokio::time::timeout_at(deadline, channels.consensus.recv()) => result,
+            _ = storage_tick.tick() => { journal.ensure_capacity(0)?; continue; },
             _ = discovery_tick.tick(), if network_view.is_some() => {
                 let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)?.as_secs();
                 let n = network_view.as_ref().expect("isolated profile");
@@ -440,17 +466,22 @@ async fn app_loop(
                     let _ = discovery_socket.as_ref().expect("isolated socket").send_to(&page, target).await;
                 }
                 packet_budget = 4;
+                receive_budget = 64;
                 continue;
             }
             result = async {
                 match &discovery_socket { Some(socket) => socket.recv_from(&mut packet).await, None => std::future::pending().await }
-            }, if network_view.is_some() && packet_budget > 0 => {
-                packet_budget -= 1;
+            }, if network_view.is_some() && receive_budget > 0 => {
+                // Drain a bounded number cheaply, but verify only four pages.
+                // Otherwise a finite forged burst can occupy the kernel queue
+                // for minutes and delay authenticated endpoint replacement.
+                receive_budget -= 1;
                 if let Ok((len, source)) = result {
                     let n = network_view.as_ref().expect("isolated profile");
                     // Bootstrap IPs are only an inexpensive ingress filter. Every
                     // supplied endpoint still needs a pinned identity's signature.
-                    if n.peers.iter().any(|(a, _)| std::net::IpAddr::V4(*a.ip()) == source.ip()) {
+                    if packet_budget > 0 && n.peers.iter().any(|(a, _)| std::net::IpAddr::V4(*a.ip()) == source.ip()) {
+                        packet_budget -= 1;
                         let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)?.as_secs();
                         if let Ok(updated) = n.refresh(Some(&packet[..len]), now) {
                             if updated.checkpoint(&journal).is_ok() {
@@ -617,6 +648,21 @@ async fn app_loop(
                 {
                     maybe_crash(&journal, options.crash, CrashPoint::BeforeEpoch)?;
                 }
+                journal.ensure_capacity(0)?;
+                if storage
+                    .checkpoint_interval
+                    .is_some_and(|n| state.height() > n && state.height().is_multiple_of(n))
+                {
+                    let compacted = crate::prune_certified_before(
+                        &journal,
+                        state.genesis(),
+                        state.height() - storage.checkpoint_interval.expect("pruned mode"),
+                    )?;
+                    if compacted != state {
+                        return Err(eyre!("compaction changed finalized state"));
+                    }
+                    history_min = crate::history_min_height(&journal, state.genesis())?;
+                }
                 println!("{}", status_json(&state));
                 if state.height() >= options.target_height {
                     if options.linger.is_zero() {
@@ -637,7 +683,7 @@ async fn app_loop(
                 ));
             }
             AppMsg::GetHistoryMinHeight { reply } => {
-                let _ = reply.send(Height(1));
+                let _ = reply.send(Height(history_min));
             }
             AppMsg::GetDecidedValues { range, reply } => {
                 let mut values = Vec::new();

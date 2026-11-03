@@ -11,6 +11,8 @@ use yami_chain::{
     Block, Digest, Genesis, State, MAX_BLOCK_BYTES, MAX_CERTIFICATE_BYTES,
 };
 
+mod limits;
+pub use limits::*;
 pub const DEFAULT_ENTRY_BUDGET: u64 = 4_000_000;
 pub const MAX_RECORD_BYTES: usize = MAX_BLOCK_BYTES + MAX_CERTIFICATE_BYTES + 32;
 const RECEIPT_BYTES: usize = 32;
@@ -92,6 +94,7 @@ pub struct Journal {
     path: PathBuf,
     _lock: File,
     write_lock: Mutex<()>,
+    limits: StorageLimits,
 }
 impl Journal {
     pub fn open(path: &Path) -> io::Result<Self> {
@@ -100,6 +103,13 @@ impl Journal {
     /// Refuse oversized recovery before deleting any uncommitted temporary file.
     /// This is a work limit, never a retention or safety-record deletion policy.
     pub fn open_with_entry_budget(path: &Path, max_entries: u64) -> io::Result<Self> {
+        Self::open_with_limits(path, max_entries, StorageLimits::default())
+    }
+    pub fn open_with_limits(
+        path: &Path,
+        max_entries: u64,
+        limits: StorageLimits,
+    ) -> io::Result<Self> {
         fs::create_dir_all(path)?;
         if fs::symlink_metadata(path)?.file_type().is_symlink() {
             return Err(invalid("symlinked store"));
@@ -120,6 +130,7 @@ impl Journal {
             path: path.to_owned(),
             _lock: lock,
             write_lock: Mutex::new(()),
+            limits,
         };
         journal.check_entry_budget(max_entries)?;
         // Only this process can mutate these files now. Unrenamed records were
@@ -185,7 +196,9 @@ impl Journal {
         {
             return Err(invalid("invalid record name"));
         }
-        let limit = if name == "genesis.bin" {
+        let limit = if name == "compact-base.bin" {
+            MAX_COMPACT_BASE_BYTES
+        } else if name == "genesis.bin" {
             yami_chain::committee::MAX_GENESIS_BYTES
         } else {
             MAX_RECORD_BYTES
@@ -213,6 +226,7 @@ impl Journal {
             Err(error) if error.kind() == io::ErrorKind::NotFound => {}
             Err(error) => return Err(error),
         }
+        self.ensure_capacity(bytes.len() as u64)?;
         let temp = self.path.join(format!(".pending-{name}"));
         let mut file = OpenOptions::new()
             .write(true)
@@ -273,9 +287,23 @@ impl Journal {
         budget: ReplayBudget,
         verify: impl Fn(&FinalizedRecord) -> io::Result<()>,
     ) -> io::Result<State> {
+        if self.path.join("compact-base.bin").exists() || self.path.join("compacted.bin").exists() {
+            return Err(invalid(
+                "compact store requires authenticated checkpoint replay",
+            ));
+        }
+        self.replay_from_state(State::new(genesis).map_err(invalid)?, budget, verify)
+    }
+    /// The caller must authenticate this seed against an independent checkpoint.
+    pub fn replay_from_state(
+        &self,
+        mut state: State,
+        budget: ReplayBudget,
+        verify: impl Fn(&FinalizedRecord) -> io::Result<()>,
+    ) -> io::Result<State> {
         self.check_entry_budget(budget.max_directory_entries)?;
-        let mut state = State::new(genesis.clone()).map_err(invalid)?;
-        self.write_once("genesis.bin", &genesis.canonical())?;
+        let floor = state.height();
+        self.write_once("genesis.bin", &state.genesis().canonical())?;
         let mut remaining = budget.max_bytes;
         // Replay in height order with constant history-index memory. A second
         // streaming directory pass rejects gaps and noncanonical filenames.
@@ -285,7 +313,7 @@ impl Journal {
                 .checked_add(1)
                 .ok_or_else(|| invalid("height overflow"))?,
         )? {
-            if state.height() >= budget.max_records {
+            if state.height() - floor >= budget.max_records {
                 return Err(invalid("replay record budget exceeded"));
             }
             remaining = remaining
@@ -336,7 +364,7 @@ impl Journal {
         }
         // Upgrade old stores only after every certificate, transition and
         // directory entry has passed. Never authenticate a partial replay.
-        if state.height() > 0 {
+        if state.height() > floor {
             let record = self
                 .record(state.height())?
                 .ok_or_else(|| invalid("missing replay tip"))?;

@@ -2,6 +2,7 @@
 pub mod codec;
 pub mod committee;
 pub mod selection;
+pub mod snapshot;
 pub mod validators;
 use codec::{Reader, Writer};
 pub use committee::{Epoch, Member, ValidatorSet};

@@ -10,3 +10,6 @@ workspace = true
 
 [dependencies]
 yami-chain = { path = "../yami-chain" }
+
+[target.'cfg(unix)'.dependencies]
+rustix = { version = "1.1.6", features = ["fs"] }

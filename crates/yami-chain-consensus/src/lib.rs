@@ -1,7 +1,9 @@
 //! Height-specific local Malachite adapter. NOT production-ready; no real money.
 mod candidates;
 mod checkpoint;
+mod compact;
 pub use checkpoint::*;
+pub use compact::*;
 pub mod network;
 mod node;
 mod signing;
