@@ -1,0 +1,98 @@
+{
+  "base": "b25d124",
+  "branch": "development/yamichain",
+  "rust": "1.90.0",
+  "build_profiles": {
+    "debug_symbols": false,
+    "incremental": false
+  },
+  "rust_passed": 546,
+  "rust_failed": 0,
+  "existing_ignored": 10,
+  "python_passed": 6,
+  "logs": {
+    "format": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "clippy": {
+      "sha256": "1416a169829ad39ff4a04adf8e050de6064f82888e76334d9563ff5e86cc0aea",
+      "bytes": 150
+    },
+    "rust_tests": {
+      "sha256": "419a8da49c34725bacecdd4edaa772a5ed85a83a48cc8668a8550b4d5db5cd5d",
+      "bytes": 71141
+    },
+    "release": {
+      "sha256": "7e12c12248b7d5d98d6db5bf7d5d9372a06b0f1618e8456ce27acd3a3996ff0a",
+      "bytes": 124
+    },
+    "python_tests": {
+      "sha256": "484819fc6115ded4f95980c301dc1cb3bd42b75d97061c070633332d47142c79",
+      "bytes": 104
+    },
+    "benchmark_build": {
+      "sha256": "9cffa36514c32c8386bee3679cb7019715e423bb2ab7ef695253346b0dbb7da9",
+      "bytes": 152
+    }
+  },
+  "binaries": {
+    "m11_validator": {
+      "sha256": "eb4c7f6076dc6650b0e649e953f61f5ea8e6e372b1892caa0db1bb030b08fe78",
+      "bytes": 25719592
+    },
+    "m11_benchmark": {
+      "sha256": "b4da1a353cb91f4648f768fea8fba372607a8cf9453e238faabb484fed96ea3c",
+      "bytes": 1658832
+    },
+    "m12_validator": {
+      "sha256": "171d268160ff4fde5c0526a3600f5041b68b0fc145a38bc6df2cbb14af3b02ba",
+      "bytes": 25912600
+    },
+    "m12_benchmark": {
+      "sha256": "16afb2de588be5655a62fc239b78ad1f453ff3107097d0524a5de5ca45ea2087",
+      "bytes": 1781992
+    }
+  },
+  "process": {
+    "passed": true,
+    "sha256": "c1ff80687ac697b56ef3cd56f21c06279c27b3bf83758e142eed910aa6f883d8"
+  },
+  "filesystem_faults": {
+    "passed": true,
+    "sha256": "119fee158035095d6ee7e5a9b0ebbca22757f17fa0e9e0698dc3162d26aa53e7"
+  },
+  "benchmarks": {
+    "m11_exact": {
+      "passed": true,
+      "cases": 2,
+      "sha256": "50c20abbc823ba4d0ca00889560b4e70ea2e98d32902fc2fc40fd9ca602f70c9"
+    },
+    "m12_fresh": {
+      "passed": true,
+      "cases": 2,
+      "sha256": "13516cc209ec2feffb17bf106d9f7a18ff378579d503228e56ad6e184960b78c"
+    },
+    "m12_migrate_halfway": {
+      "passed": true,
+      "cases": 2,
+      "sha256": "772fd7d7653eafd4ffa2d121243de35423d8b7b3e436766ba667ed16118a93ff"
+    },
+    "m12_legacy_reader_control": {
+      "passed": true,
+      "cases": 1,
+      "sha256": "d737debbbe632e3c84e3ef45534f71b369f7d82de687f72598f5d48752ae4544"
+    }
+  },
+  "production_binary_unchanged_after_benchmark_fixture_fix": true,
+  "source_hashes": {
+    "crates/yami-chain-storage/src/archive.rs": "e80d8d9d5e5f2f2af39a7007e1ffd48b7b2caeef4efee88e1d9db7e3b5a97e64",
+    "crates/yami-chain-storage/src/lib.rs": "7197272cabcd07e5ed5942aad7bc83d145da49634139f6863fe4197a01becc11",
+    "crates/yami-chain-storage/src/limits.rs": "b17c98e9448fea307ba967832202212c44d070535d403e90af5813a9646bc4a4",
+    "crates/yami-chain-consensus/src/checkpoint.rs": "b868a55d2ee0c323114f6d2ecd0ef7722b1567f53d0e1f110647d2ffa7fbb11b",
+    "crates/yami-chain-consensus/src/compact.rs": "fcfbd26c7d2059585cadeb4e124ac8c929c590a6f8b64cb04c0303a91963911b",
+    "crates/yami-chain-consensus/src/node.rs": "3bbfb1a1c15b7df66a202354575f37e8457f4ae0b1cc0b9eeea816c30b7d7022",
+    "apps/yami-validator/src/main.rs": "d0f9e7e64352b65ff4691ba7a194f294590bcc6ab8e591d7dfe1adff0c4130b7",
+    "crates/yami-chain-consensus/examples/storage-bench.rs": "db05d11bc075f61b2b88099938c98a39f52b91661b0957b398dc556f997c0046"
+  }
+}

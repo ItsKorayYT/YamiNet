@@ -235,7 +235,8 @@ pub fn import_compact_checkpoint_observed(
     for entry in std::fs::read_dir(journal.path())? {
         let name = entry?.file_name();
         let name = name.to_string_lossy();
-        if name.starts_with("signed-")
+        if name.starts_with("archive-")
+            || name.starts_with("signed-")
             || name.starts_with("signing-")
             || name.starts_with("equivocation-")
             || name == "wal"
@@ -275,6 +276,11 @@ pub fn prune_certified_before_observed(
     floor: u64,
     mut observe: impl FnMut(CompactStage),
 ) -> Result<State> {
+    if journal.is_segmented_archive() {
+        return Err(eyre!(
+            "segmented archive retains finalized history; export to a fresh pruned store"
+        ));
+    }
     let seed = local_base(journal, genesis)?.map_or(State::new(genesis.clone())?, |b| b.state);
     if floor < seed.height() {
         return Err(eyre!("checkpoint rollback below local base"));
@@ -388,6 +394,80 @@ mod tests {
         fn drop(&mut self) {
             let _ = std::fs::remove_dir_all(&self.path);
         }
+    }
+    #[test]
+    fn segmented_history_preserves_authenticated_exports_sync_and_pruned_interoperability() {
+        let f = Fixture::new();
+        let before = export_compact_checkpoint(&f.journal, &f.genesis).unwrap();
+        let state = replay_certified(&f.journal, &f.genesis).unwrap();
+        f.journal
+            .migrate_archive(f.genesis.clone(), |r| verify_record(&f.genesis, r))
+            .unwrap();
+        let after = export_compact_checkpoint(&f.journal, &f.genesis).unwrap();
+        assert_eq!(before.bytes(), after.bytes());
+        assert_eq!(history_min_height(&f.journal, &f.genesis).unwrap(), 1);
+        assert!(prune_certified_before(&f.journal, &f.genesis, 8).is_err());
+        assert!(!f.path.join("compact-base.bin").exists());
+        let cp = crate::authenticate_checkpoint(&f.journal, &f.genesis, 8, 12).unwrap();
+        assert_eq!(cp.height(), 8);
+        let target = Journal::open(&f.path.with_extension("pruned-peer")).unwrap();
+        target.replay(f.genesis.clone(), |_| Ok(())).unwrap();
+        for h in 1..=8 {
+            target
+                .append(&f.journal.record(h).unwrap().unwrap())
+                .unwrap();
+        }
+        prune_certified_before(&target, &f.genesis, 8).unwrap();
+        for h in 9..=12 {
+            let record = f.journal.record(h).unwrap().unwrap();
+            verify_record(&f.genesis, &record).unwrap();
+            target.append(&record).unwrap();
+        }
+        assert_eq!(replay_certified(&target, &f.genesis).unwrap(), state);
+        let fresh_path = f.path.with_extension("compact-peer");
+        let fresh = Journal::open(&fresh_path).unwrap();
+        let mut hostile = after.bytes().to_vec();
+        let last = hostile.len() - 1;
+        hostile[last] ^= 1;
+        assert!(import_compact_checkpoint(&fresh, &f.genesis, &hostile, after.anchor()).is_err());
+        assert_eq!(
+            import_compact_checkpoint(&fresh, &f.genesis, after.bytes(), after.anchor()).unwrap(),
+            state
+        );
+        let history = crate::export_history_snapshot(&f.journal, &f.genesis, 12).unwrap();
+        let sync_path = f.path.with_extension("segmented-sync");
+        let mut sync = Journal::open(&sync_path).unwrap();
+        sync.migrate_archive(f.genesis.clone(), |r| verify_record(&f.genesis, r))
+            .unwrap();
+        let mut hostile_history = history.clone();
+        let last = hostile_history.len() - 1;
+        hostile_history[last] ^= 1;
+        let hostile_digest = crate::history_snapshot_digest(&hostile_history);
+        assert!(crate::restore_history_snapshot(
+            &mut sync,
+            &f.genesis,
+            &hostile_history,
+            hostile_digest
+        )
+        .is_err());
+        assert!(sync.record(1).unwrap().is_none());
+        assert_eq!(
+            crate::restore_history_snapshot(
+                &mut sync,
+                &f.genesis,
+                &history,
+                crate::history_snapshot_digest(&history)
+            )
+            .unwrap(),
+            state
+        );
+        drop(sync);
+        std::fs::remove_dir_all(sync_path).unwrap();
+        let target_path = target.path().to_owned();
+        drop(target);
+        drop(fresh);
+        std::fs::remove_dir_all(target_path).unwrap();
+        std::fs::remove_dir_all(fresh_path).unwrap();
     }
     #[test]
     fn periodic_pruning_waits_for_unaligned_checkpoint_without_rolling_it_back() {

@@ -18,6 +18,7 @@ def main():
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--binary', type=Path, default=Path('target/release/yami-validator'))
     parser.add_argument('--legacy-binary', type=Path)
+    parser.add_argument('--segmented-archive', action='store_true')
     parser.add_argument('--height', type=int, default=128)
     parser.add_argument('--restart-count', type=int, default=1)
     parser.add_argument('--restart-step', type=int, default=32)
@@ -55,6 +56,11 @@ def main():
         return json.loads(result.stdout.splitlines()[-1]) if expected == 0 else None
 
     def height(i):
+        tip = root/f'store-{i}'/'archive-tip.bin'
+        if tip.exists():
+            data = tip.read_bytes()
+            if len(data) >= 24:
+                return int.from_bytes(data[16:24], 'big')
         records = list((root/f'store-{i}').glob('finalized-*.bin'))
         return max([int(f.stem.split('-')[1]) for f in records], default=0)
 
@@ -62,6 +68,9 @@ def main():
         executable = legacy_binary if legacy else binary
         anchor = None if legacy else observed_anchor(root/f'store-{i}')
         minimum = ['--signing-anchor', anchor] if anchor else []
+        if args.segmented_archive and i == 0 and 'archive_migration' in report and not legacy:
+            a = report['archive_migration']
+            minimum += ['--archive-anchor', f"{a['height']}:{a['root']}"]
         docker('run', '-d', '--name', names[i], '--network', tag, '--ip', f'10.83.0.{i+2}',
                '--cpus', '2', '--memory', '2g', '--memory-swap', '2g', '--pids-limit', '256',
                '--ulimit', 'nofile=512:512', '--cap-drop', 'ALL', '--security-opt', 'no-new-privileges',
@@ -132,14 +141,30 @@ def main():
         if fresh['height'] != export['height'] or list((root/'store-3').glob('finalized-*.bin')):
             raise RuntimeError('fresh bootstrap downloaded history or changed state')
         report['events'].append(dict(at=time.monotonic()-started, event='fresh_identity_bootstrapped_without_prefix_history', height=fresh['height']))
-        docker('start', names[0])
+        if args.segmented_archive:
+            shutil.copytree(root/'store-0', root/'original-archive')
+            report['initial_archive_state'] = local('inspect')
+            report['archive_migration'] = local('migrate-archive')
+            report['initial_archive_migration'] = report['archive_migration']
+            docker('rm', names[0])
+            launch(0, args.height, 30)
+            # The fresh identity has never signed. Delay its first launch until
+            # the segmented source is ahead of its independently anchored base.
+            deadline = time.monotonic()+min(3600, max(240, args.height*3))
+            while height(0) < args.height:
+                if time.monotonic() > deadline:
+                    raise RuntimeError('segmented archive did not advance')
+                time.sleep(.3)
+            report['events'].append(dict(event='fresh_pruned_peer_requests_segmented_history', source_height=height(0), imported_height=fresh['height']))
+        else:
+            docker('start', names[0])
         launch(3, args.height, 30)
         wait_all('first_convergence', args.height)
         preserve_logs('phase1')
         report['phase1_storage'] = [local('storage-info', i) for i in range(4)]
         report['safety_before_restart'] = [safety(root/f'store-{i}', False) for i in range(4)]
         report['migrations'] = []
-        if legacy_binary:
+        if legacy_binary and not args.segmented_archive:
             for i in range(4):
                 store = root/f'store-{i}'
                 before = {str(p.relative_to(store)):hashlib.sha256(p.read_bytes()).hexdigest()
@@ -153,6 +178,29 @@ def main():
                 if result.returncode == 0 or 'conflicting durable record' not in result.stderr:
                     raise RuntimeError(f'old validator did not respect format fence: {result.stderr}')
                 report['migrations'].append(dict(index=i, signing=info, historical_files_preserved=len(before), downgrade_refused=True))
+        if args.segmented_archive:
+            before = {p.name: hashlib.sha256(p.read_bytes()).hexdigest()
+                      for p in (root/'store-0').iterdir() if p.is_file() and p.name != 'genesis.bin'}
+            info = local('migrate-archive')
+            if any(not (root/'store-0'/name).is_file() or hashlib.sha256((root/'store-0'/name).read_bytes()).hexdigest() != digest for name, digest in before.items()):
+                raise RuntimeError('archive migration changed historical or safety bytes')
+            report['archive_migration'] = info
+            if legacy_binary:
+                refused = root/'archive-downgrade'
+                shutil.copytree(root/'store-0', refused)
+                result = subprocess.run([str(legacy_binary), 'inspect', '--dir', str(refused), '--isolated-network', str(root/'config-0'), '--index', '0'], capture_output=True, text=True, timeout=30)
+                if result.returncode == 0 or 'conflicting durable record' not in result.stderr:
+                    raise RuntimeError(f'archive downgrade did not refuse: {result.stderr}')
+                report['archive_downgrade_refused'] = True
+            report['archive_migration_crashes'] = []
+            for stage in ['manifest', 'segment', 'tip', 'active', 'fence']:
+                store = root/f'archive-crash-{stage}'
+                shutil.copytree(root/'original-archive', store)
+                local('migrate-archive', store=store, extra=['--storage-crash', f'archive-{stage}'], expected=86)
+                local('migrate-archive', store=store)
+                if local('inspect', store=store) != report['initial_archive_state']:
+                    raise RuntimeError('interrupted archive migration changed certified state')
+                report['archive_migration_crashes'].append(dict(stage=stage, resumed=True))
         report['post_migration_storage'] = [local('storage-info', i) for i in range(4)]
         report['post_migration_signing'] = [local('signing-info', i) for i in range(4)]
 
@@ -178,22 +226,23 @@ def main():
         report['storage_crashes'] = []
         for stage in ['base', 'unlink', 'export-temp']:
             store = root/f'crash-{stage}'
-            shutil.copytree(root/'store-0', store)
+            crash_index = 1 if args.segmented_archive else 0
+            shutil.copytree(root/f'store-{crash_index}', store)
             before = safety(store)
             command = 'export-checkpoint' if stage == 'export-temp' else 'prune'
             extra = ['--storage-crash', stage]
             if command == 'export-checkpoint':
                 extra += ['--out', store/'test-export.bin']
-            local(command, store=store, extra=extra, expected=86)
-            restored = local('inspect', store=store)
+            local(command, i=crash_index, store=store, extra=extra, expected=86)
+            restored = local('inspect', i=crash_index, store=store)
             if restored != report['restart_convergence'][0] or safety(store) != before:
                 raise RuntimeError(f'{stage}: interrupted operation damaged state/safety data')
             if command == 'export-checkpoint':
                 if (store/'test-export.bin').exists():
                     raise RuntimeError('partial export published')
-                local(command, store=store, extra=['--out', store/'test-export.bin'])
+                local(command, i=crash_index, store=store, extra=['--out', store/'test-export.bin'])
             else:
-                local('prune', store=store)
+                local('prune', i=crash_index, store=store)
             report['storage_crashes'].append(dict(stage=stage, exit=86, authenticated_recovery=True, safety_preserved=True))
         final_export = local('export-checkpoint', extra=['--out', root/'final-bootstrap.bin'])
         destination = root/'crash-import'

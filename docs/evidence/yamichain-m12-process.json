@@ -1,0 +1,1776 @@
+{
+  "passed": true,
+  "binary_sha256": "171d268160ff4fde5c0526a3600f5041b68b0fc145a38bc6df2cbb14af3b02ba",
+  "samples": [
+    {
+      "at": 93.11461791399984,
+      "nodes": [
+        {
+          "BlockIO": "0B / 19.6MB",
+          "CPUPerc": "5.90%",
+          "Container": "yami-storage-42933-0",
+          "ID": "617175e50431",
+          "MemPerc": "0.31%",
+          "MemUsage": "6.305MiB / 2GiB",
+          "Name": "yami-storage-42933-0",
+          "NetIO": "818kB / 834kB",
+          "PIDs": "5"
+        },
+        {
+          "BlockIO": "0B / 41.5MB",
+          "CPUPerc": "0.83%",
+          "Container": "yami-storage-42933-1",
+          "ID": "a7e9efa9ce3e",
+          "MemPerc": "0.35%",
+          "MemUsage": "7.188MiB / 2GiB",
+          "Name": "yami-storage-42933-1",
+          "NetIO": "1.41MB / 1.5MB",
+          "PIDs": "5"
+        },
+        {
+          "BlockIO": "0B / 39.5MB",
+          "CPUPerc": "0.63%",
+          "Container": "yami-storage-42933-2",
+          "ID": "076a42645920",
+          "MemPerc": "0.34%",
+          "MemUsage": "7.008MiB / 2GiB",
+          "Name": "yami-storage-42933-2",
+          "NetIO": "1.54MB / 1.43MB",
+          "PIDs": "5"
+        },
+        {
+          "BlockIO": "0B / 7.08MB",
+          "CPUPerc": "0.80%",
+          "Container": "yami-storage-42933-3",
+          "ID": "c44fa1fbe79b",
+          "MemPerc": "0.30%",
+          "MemUsage": "6.188MiB / 2GiB",
+          "Name": "yami-storage-42933-3",
+          "NetIO": "128kB / 145kB",
+          "PIDs": "5"
+        }
+      ]
+    },
+    {
+      "at": 96.21024504899992,
+      "nodes": [
+        {
+          "BlockIO": "0B / 19.6MB",
+          "CPUPerc": "0.82%",
+          "Container": "yami-storage-42933-0",
+          "ID": "617175e50431",
+          "MemPerc": "0.32%",
+          "MemUsage": "6.543MiB / 2GiB",
+          "Name": "yami-storage-42933-0",
+          "NetIO": "858kB / 877kB",
+          "PIDs": "5"
+        },
+        {
+          "BlockIO": "0B / 41.5MB",
+          "CPUPerc": "0.82%",
+          "Container": "yami-storage-42933-1",
+          "ID": "a7e9efa9ce3e",
+          "MemPerc": "0.36%",
+          "MemUsage": "7.418MiB / 2GiB",
+          "Name": "yami-storage-42933-1",
+          "NetIO": "1.45MB / 1.54MB",
+          "PIDs": "5"
+        },
+        {
+          "BlockIO": "0B / 39.5MB",
+          "CPUPerc": "0.89%",
+          "Container": "yami-storage-42933-2",
+          "ID": "076a42645920",
+          "MemPerc": "0.35%",
+          "MemUsage": "7.258MiB / 2GiB",
+          "Name": "yami-storage-42933-2",
+          "NetIO": "1.57MB / 1.46MB",
+          "PIDs": "5"
+        },
+        {
+          "BlockIO": "0B / 7.08MB",
+          "CPUPerc": "0.88%",
+          "Container": "yami-storage-42933-3",
+          "ID": "c44fa1fbe79b",
+          "MemPerc": "0.30%",
+          "MemUsage": "6.168MiB / 2GiB",
+          "Name": "yami-storage-42933-3",
+          "NetIO": "167kB / 178kB",
+          "PIDs": "5"
+        }
+      ]
+    },
+    {
+      "at": 99.30296468399979,
+      "nodes": [
+        {
+          "BlockIO": "0B / 19.6MB",
+          "CPUPerc": "0.97%",
+          "Container": "yami-storage-42933-0",
+          "ID": "617175e50431",
+          "MemPerc": "0.32%",
+          "MemUsage": "6.527MiB / 2GiB",
+          "Name": "yami-storage-42933-0",
+          "NetIO": "884kB / 903kB",
+          "PIDs": "5"
+        },
+        {
+          "BlockIO": "0B / 41.5MB",
+          "CPUPerc": "0.86%",
+          "Container": "yami-storage-42933-1",
+          "ID": "a7e9efa9ce3e",
+          "MemPerc": "0.36%",
+          "MemUsage": "7.418MiB / 2GiB",
+          "Name": "yami-storage-42933-1",
+          "NetIO": "1.48MB / 1.57MB",
+          "PIDs": "5"
+        },
+        {
+          "BlockIO": "0B / 39.5MB",
+          "CPUPerc": "0.89%",
+          "Container": "yami-storage-42933-2",
+          "ID": "076a42645920",
+          "MemPerc": "0.35%",
+          "MemUsage": "7.258MiB / 2GiB",
+          "Name": "yami-storage-42933-2",
+          "NetIO": "1.61MB / 1.5MB",
+          "PIDs": "5"
+        },
+        {
+          "BlockIO": "0B / 7.08MB",
+          "CPUPerc": "0.82%",
+          "Container": "yami-storage-42933-3",
+          "ID": "c44fa1fbe79b",
+          "MemPerc": "0.30%",
+          "MemUsage": "6.168MiB / 2GiB",
+          "Name": "yami-storage-42933-3",
+          "NetIO": "202kB / 210kB",
+          "PIDs": "5"
+        }
+      ]
+    },
+    {
+      "at": 102.39682326599996,
+      "nodes": [
+        {
+          "BlockIO": "0B / 19.6MB",
+          "CPUPerc": "1.19%",
+          "Container": "yami-storage-42933-0",
+          "ID": "617175e50431",
+          "MemPerc": "0.31%",
+          "MemUsage": "6.262MiB / 2GiB",
+          "Name": "yami-storage-42933-0",
+          "NetIO": "919kB / 936kB",
+          "PIDs": "5"
+        },
+        {
+          "BlockIO": "0B / 41.5MB",
+          "CPUPerc": "0.72%",
+          "Container": "yami-storage-42933-1",
+          "ID": "a7e9efa9ce3e",
+          "MemPerc": "0.35%",
+          "MemUsage": "7.164MiB / 2GiB",
+          "Name": "yami-storage-42933-1",
+          "NetIO": "1.51MB / 1.61MB",
+          "PIDs": "5"
+        },
+        {
+          "BlockIO": "0B / 39.5MB",
+          "CPUPerc": "0.95%",
+          "Container": "yami-storage-42933-2",
+          "ID": "076a42645920",
+          "MemPerc": "0.34%",
+          "MemUsage": "6.988MiB / 2GiB",
+          "Name": "yami-storage-42933-2",
+          "NetIO": "1.63MB / 1.53MB",
+          "PIDs": "5"
+        },
+        {
+          "BlockIO": "0B / 7.08MB",
+          "CPUPerc": "1.10%",
+          "Container": "yami-storage-42933-3",
+          "ID": "c44fa1fbe79b",
+          "MemPerc": "0.30%",
+          "MemUsage": "6.18MiB / 2GiB",
+          "Name": "yami-storage-42933-3",
+          "NetIO": "234kB / 236kB",
+          "PIDs": "5"
+        }
+      ]
+    },
+    {
+      "at": 105.4828564049999,
+      "nodes": [
+        {
+          "BlockIO": "0B / 19.6MB",
+          "CPUPerc": "0.99%",
+          "Container": "yami-storage-42933-0",
+          "ID": "617175e50431",
+          "MemPerc": "0.31%",
+          "MemUsage": "6.262MiB / 2GiB",
+          "Name": "yami-storage-42933-0",
+          "NetIO": "960kB / 978kB",
+          "PIDs": "5"
+        },
+        {
+          "BlockIO": "0B / 41.5MB",
+          "CPUPerc": "1.07%",
+          "Container": "yami-storage-42933-1",
+          "ID": "a7e9efa9ce3e",
+          "MemPerc": "0.35%",
+          "MemUsage": "7.164MiB / 2GiB",
+          "Name": "yami-storage-42933-1",
+          "NetIO": "1.54MB / 1.64MB",
+          "PIDs": "5"
+        },
+        {
+          "BlockIO": "0B / 39.5MB",
+          "CPUPerc": "0.92%",
+          "Container": "yami-storage-42933-2",
+          "ID": "076a42645920",
+          "MemPerc": "0.35%",
+          "MemUsage": "7.234MiB / 2GiB",
+          "Name": "yami-storage-42933-2",
+          "NetIO": "1.67MB / 1.57MB",
+          "PIDs": "5"
+        },
+        {
+          "BlockIO": "0B / 7.08MB",
+          "CPUPerc": "0.78%",
+          "Container": "yami-storage-42933-3",
+          "ID": "c44fa1fbe79b",
+          "MemPerc": "0.30%",
+          "MemUsage": "6.18MiB / 2GiB",
+          "Name": "yami-storage-42933-3",
+          "NetIO": "263kB / 262kB",
+          "PIDs": "5"
+        }
+      ]
+    },
+    {
+      "at": 108.58109108399981,
+      "nodes": [
+        {
+          "BlockIO": "0B / 19.6MB",
+          "CPUPerc": "1.03%",
+          "Container": "yami-storage-42933-0",
+          "ID": "617175e50431",
+          "MemPerc": "0.31%",
+          "MemUsage": "6.258MiB / 2GiB",
+          "Name": "yami-storage-42933-0",
+          "NetIO": "996kB / 1.01MB",
+          "PIDs": "5"
+        },
+        {
+          "BlockIO": "0B / 41.5MB",
+          "CPUPerc": "0.95%",
+          "Container": "yami-storage-42933-1",
+          "ID": "a7e9efa9ce3e",
+          "MemPerc": "0.36%",
+          "MemUsage": "7.402MiB / 2GiB",
+          "Name": "yami-storage-42933-1",
+          "NetIO": "1.58MB / 1.68MB",
+          "PIDs": "5"
+        },
+        {
+          "BlockIO": "0B / 39.5MB",
+          "CPUPerc": "0.91%",
+          "Container": "yami-storage-42933-2",
+          "ID": "076a42645920",
+          "MemPerc": "0.35%",
+          "MemUsage": "7.234MiB / 2GiB",
+          "Name": "yami-storage-42933-2",
+          "NetIO": "1.71MB / 1.61MB",
+          "PIDs": "5"
+        },
+        {
+          "BlockIO": "0B / 7.08MB",
+          "CPUPerc": "0.84%",
+          "Container": "yami-storage-42933-3",
+          "ID": "c44fa1fbe79b",
+          "MemPerc": "0.30%",
+          "MemUsage": "6.18MiB / 2GiB",
+          "Name": "yami-storage-42933-3",
+          "NetIO": "302kB / 298kB",
+          "PIDs": "5"
+        }
+      ]
+    },
+    {
+      "at": 111.68235250399994,
+      "nodes": [
+        {
+          "BlockIO": "0B / 19.6MB",
+          "CPUPerc": "0.85%",
+          "Container": "yami-storage-42933-0",
+          "ID": "617175e50431",
+          "MemPerc": "0.31%",
+          "MemUsage": "6.258MiB / 2GiB",
+          "Name": "yami-storage-42933-0",
+          "NetIO": "1.02MB / 1.04MB",
+          "PIDs": "5"
+        },
+        {
+          "BlockIO": "0B / 41.5MB",
+          "CPUPerc": "1.07%",
+          "Container": "yami-storage-42933-1",
+          "ID": "a7e9efa9ce3e",
+          "MemPerc": "0.36%",
+          "MemUsage": "7.383MiB / 2GiB",
+          "Name": "yami-storage-42933-1",
+          "NetIO": "1.61MB / 1.72MB",
+          "PIDs": "5"
+        },
+        {
+          "BlockIO": "0B / 39.5MB",
+          "CPUPerc": "0.95%",
+          "Container": "yami-storage-42933-2",
+          "ID": "076a42645920",
+          "MemPerc": "0.34%",
+          "MemUsage": "6.98MiB / 2GiB",
+          "Name": "yami-storage-42933-2",
+          "NetIO": "1.74MB / 1.64MB",
+          "PIDs": "5"
+        },
+        {
+          "BlockIO": "0B / 7.08MB",
+          "CPUPerc": "1.34%",
+          "Container": "yami-storage-42933-3",
+          "ID": "c44fa1fbe79b",
+          "MemPerc": "0.30%",
+          "MemUsage": "6.18MiB / 2GiB",
+          "Name": "yami-storage-42933-3",
+          "NetIO": "356kB / 345kB",
+          "PIDs": "5"
+        }
+      ]
+    },
+    {
+      "at": 114.76900889199987,
+      "nodes": [
+        {
+          "BlockIO": "0B / 19.6MB",
+          "CPUPerc": "0.97%",
+          "Container": "yami-storage-42933-0",
+          "ID": "617175e50431",
+          "MemPerc": "0.31%",
+          "MemUsage": "6.258MiB / 2GiB",
+          "Name": "yami-storage-42933-0",
+          "NetIO": "1.06MB / 1.08MB",
+          "PIDs": "5"
+        },
+        {
+          "BlockIO": "0B / 41.5MB",
+          "CPUPerc": "1.23%",
+          "Container": "yami-storage-42933-1",
+          "ID": "a7e9efa9ce3e",
+          "MemPerc": "0.36%",
+          "MemUsage": "7.355MiB / 2GiB",
+          "Name": "yami-storage-42933-1",
+          "NetIO": "1.65MB / 1.75MB",
+          "PIDs": "5"
+        },
+        {
+          "BlockIO": "0B / 39.5MB",
+          "CPUPerc": "1.11%",
+          "Container": "yami-storage-42933-2",
+          "ID": "076a42645920",
+          "MemPerc": "0.34%",
+          "MemUsage": "6.98MiB / 2GiB",
+          "Name": "yami-storage-42933-2",
+          "NetIO": "1.77MB / 1.68MB",
+          "PIDs": "5"
+        },
+        {
+          "BlockIO": "0B / 7.08MB",
+          "CPUPerc": "0.79%",
+          "Container": "yami-storage-42933-3",
+          "ID": "c44fa1fbe79b",
+          "MemPerc": "0.30%",
+          "MemUsage": "6.18MiB / 2GiB",
+          "Name": "yami-storage-42933-3",
+          "NetIO": "379kB / 365kB",
+          "PIDs": "5"
+        }
+      ]
+    },
+    {
+      "at": 117.8615296349999,
+      "nodes": [
+        {
+          "BlockIO": "0B / 19.6MB",
+          "CPUPerc": "0.74%",
+          "Container": "yami-storage-42933-0",
+          "ID": "617175e50431",
+          "MemPerc": "0.32%",
+          "MemUsage": "6.504MiB / 2GiB",
+          "Name": "yami-storage-42933-0",
+          "NetIO": "1.08MB / 1.11MB",
+          "PIDs": "5"
+        },
+        {
+          "BlockIO": "0B / 41.5MB",
+          "CPUPerc": "0.76%",
+          "Container": "yami-storage-42933-1",
+          "ID": "a7e9efa9ce3e",
+          "MemPerc": "0.36%",
+          "MemUsage": "7.352MiB / 2GiB",
+          "Name": "yami-storage-42933-1",
+          "NetIO": "1.67MB / 1.77MB",
+          "PIDs": "5"
+        },
+        {
+          "BlockIO": "0B / 39.5MB",
+          "CPUPerc": "1.25%",
+          "Container": "yami-storage-42933-2",
+          "ID": "076a42645920",
+          "MemPerc": "0.35%",
+          "MemUsage": "7.23MiB / 2GiB",
+          "Name": "yami-storage-42933-2",
+          "NetIO": "1.81MB / 1.71MB",
+          "PIDs": "5"
+        },
+        {
+          "BlockIO": "0B / 7.08MB",
+          "CPUPerc": "1.23%",
+          "Container": "yami-storage-42933-3",
+          "ID": "c44fa1fbe79b",
+          "MemPerc": "0.30%",
+          "MemUsage": "6.18MiB / 2GiB",
+          "Name": "yami-storage-42933-3",
+          "NetIO": "433kB / 408kB",
+          "PIDs": "5"
+        }
+      ]
+    },
+    {
+      "at": 120.94431350499985,
+      "nodes": [
+        {
+          "BlockIO": "0B / 0B",
+          "CPUPerc": "0.00%",
+          "Container": "yami-storage-42933-0",
+          "ID": "617175e50431",
+          "MemPerc": "0.00%",
+          "MemUsage": "0B / 0B",
+          "Name": "yami-storage-42933-0",
+          "NetIO": "0B / 0B",
+          "PIDs": "0"
+        },
+        {
+          "BlockIO": "0B / 0B",
+          "CPUPerc": "0.00%",
+          "Container": "yami-storage-42933-1",
+          "ID": "a7e9efa9ce3e",
+          "MemPerc": "0.00%",
+          "MemUsage": "0B / 0B",
+          "Name": "yami-storage-42933-1",
+          "NetIO": "0B / 0B",
+          "PIDs": "0"
+        },
+        {
+          "BlockIO": "0B / 39.5MB",
+          "CPUPerc": "1.33%",
+          "Container": "yami-storage-42933-2",
+          "ID": "076a42645920",
+          "MemPerc": "0.35%",
+          "MemUsage": "7.23MiB / 2GiB",
+          "Name": "yami-storage-42933-2",
+          "NetIO": "1.83MB / 1.73MB",
+          "PIDs": "5"
+        },
+        {
+          "BlockIO": "0B / 7.08MB",
+          "CPUPerc": "0.91%",
+          "Container": "yami-storage-42933-3",
+          "ID": "c44fa1fbe79b",
+          "MemPerc": "0.20%",
+          "MemUsage": "4.125MiB / 2GiB",
+          "Name": "yami-storage-42933-3",
+          "NetIO": "465kB / 436kB",
+          "PIDs": "5"
+        }
+      ]
+    },
+    {
+      "at": 122.029109242,
+      "nodes": [
+        {
+          "BlockIO": "0B / 0B",
+          "CPUPerc": "0.00%",
+          "Container": "yami-storage-42933-0",
+          "ID": "617175e50431",
+          "MemPerc": "0.00%",
+          "MemUsage": "0B / 0B",
+          "Name": "yami-storage-42933-0",
+          "NetIO": "0B / 0B",
+          "PIDs": "0"
+        },
+        {
+          "BlockIO": "0B / 0B",
+          "CPUPerc": "0.00%",
+          "Container": "yami-storage-42933-1",
+          "ID": "a7e9efa9ce3e",
+          "MemPerc": "0.00%",
+          "MemUsage": "0B / 0B",
+          "Name": "yami-storage-42933-1",
+          "NetIO": "0B / 0B",
+          "PIDs": "0"
+        },
+        {
+          "BlockIO": "0B / 0B",
+          "CPUPerc": "0.00%",
+          "Container": "yami-storage-42933-2",
+          "ID": "076a42645920",
+          "MemPerc": "0.00%",
+          "MemUsage": "0B / 0B",
+          "Name": "yami-storage-42933-2",
+          "NetIO": "0B / 0B",
+          "PIDs": "0"
+        },
+        {
+          "BlockIO": "0B / 0B",
+          "CPUPerc": "0.00%",
+          "Container": "yami-storage-42933-3",
+          "ID": "c44fa1fbe79b",
+          "MemPerc": "0.00%",
+          "MemUsage": "0B / 0B",
+          "Name": "yami-storage-42933-3",
+          "NetIO": "0B / 0B",
+          "PIDs": "0"
+        }
+      ]
+    },
+    {
+      "at": 135.0885029269998,
+      "nodes": [
+        {
+          "BlockIO": "0B / 877kB",
+          "CPUPerc": "3.87%",
+          "Container": "yami-storage-42933-0",
+          "ID": "977b7c0557d7",
+          "MemPerc": "0.27%",
+          "MemUsage": "5.473MiB / 2GiB",
+          "Name": "yami-storage-42933-0",
+          "NetIO": "112kB / 99.2kB",
+          "PIDs": "5"
+        },
+        {
+          "BlockIO": "0B / 946kB",
+          "CPUPerc": "3.92%",
+          "Container": "yami-storage-42933-1",
+          "ID": "15c0b7878bdd",
+          "MemPerc": "0.27%",
+          "MemUsage": "5.438MiB / 2GiB",
+          "Name": "yami-storage-42933-1",
+          "NetIO": "99.5kB / 101kB",
+          "PIDs": "5"
+        },
+        {
+          "BlockIO": "0B / 852kB",
+          "CPUPerc": "3.89%",
+          "Container": "yami-storage-42933-2",
+          "ID": "25ea494e06bc",
+          "MemPerc": "0.26%",
+          "MemUsage": "5.379MiB / 2GiB",
+          "Name": "yami-storage-42933-2",
+          "NetIO": "97.6kB / 94.3kB",
+          "PIDs": "5"
+        },
+        {
+          "BlockIO": "0B / 152kB",
+          "CPUPerc": "5.44%",
+          "Container": "yami-storage-42933-3",
+          "ID": "7a88b1e14f35",
+          "MemPerc": "0.25%",
+          "MemUsage": "5.051MiB / 2GiB",
+          "Name": "yami-storage-42933-3",
+          "NetIO": "36.5kB / 35.9kB",
+          "PIDs": "5"
+        }
+      ]
+    },
+    {
+      "at": 138.19319656599987,
+      "nodes": [
+        {
+          "BlockIO": "0B / 2.17MB",
+          "CPUPerc": "3.38%",
+          "Container": "yami-storage-42933-0",
+          "ID": "977b7c0557d7",
+          "MemPerc": "0.28%",
+          "MemUsage": "5.805MiB / 2GiB",
+          "Name": "yami-storage-42933-0",
+          "NetIO": "179kB / 173kB",
+          "PIDs": "5"
+        },
+        {
+          "BlockIO": "0B / 2.9MB",
+          "CPUPerc": "4.51%",
+          "Container": "yami-storage-42933-1",
+          "ID": "15c0b7878bdd",
+          "MemPerc": "0.28%",
+          "MemUsage": "5.664MiB / 2GiB",
+          "Name": "yami-storage-42933-1",
+          "NetIO": "215kB / 216kB",
+          "PIDs": "5"
+        },
+        {
+          "BlockIO": "0B / 2.74MB",
+          "CPUPerc": "4.45%",
+          "Container": "yami-storage-42933-2",
+          "ID": "25ea494e06bc",
+          "MemPerc": "0.27%",
+          "MemUsage": "5.602MiB / 2GiB",
+          "Name": "yami-storage-42933-2",
+          "NetIO": "218kB / 209kB",
+          "PIDs": "5"
+        },
+        {
+          "BlockIO": "0B / 2.89MB",
+          "CPUPerc": "4.49%",
+          "Container": "yami-storage-42933-3",
+          "ID": "7a88b1e14f35",
+          "MemPerc": "0.29%",
+          "MemUsage": "5.934MiB / 2GiB",
+          "Name": "yami-storage-42933-3",
+          "NetIO": "186kB / 199kB",
+          "PIDs": "5"
+        }
+      ]
+    },
+    {
+      "at": 141.28013116399984,
+      "nodes": [
+        {
+          "BlockIO": "0B / 5.1MB",
+          "CPUPerc": "4.72%",
+          "Container": "yami-storage-42933-0",
+          "ID": "977b7c0557d7",
+          "MemPerc": "0.29%",
+          "MemUsage": "5.93MiB / 2GiB",
+          "Name": "yami-storage-42933-0",
+          "NetIO": "337kB / 327kB",
+          "PIDs": "5"
+        },
+        {
+          "BlockIO": "0B / 4.13MB",
+          "CPUPerc": "3.75%",
+          "Container": "yami-storage-42933-1",
+          "ID": "15c0b7878bdd",
+          "MemPerc": "0.28%",
+          "MemUsage": "5.73MiB / 2GiB",
+          "Name": "yami-storage-42933-1",
+          "NetIO": "288kB / 289kB",
+          "PIDs": "5"
+        },
+        {
+          "BlockIO": "0B / 4.8MB",
+          "CPUPerc": "4.62%",
+          "Container": "yami-storage-42933-2",
+          "ID": "25ea494e06bc",
+          "MemPerc": "0.28%",
+          "MemUsage": "5.828MiB / 2GiB",
+          "Name": "yami-storage-42933-2",
+          "NetIO": "332kB / 321kB",
+          "PIDs": "5"
+        },
+        {
+          "BlockIO": "0B / 4.95MB",
+          "CPUPerc": "4.30%",
+          "Container": "yami-storage-42933-3",
+          "ID": "7a88b1e14f35",
+          "MemPerc": "0.28%",
+          "MemUsage": "5.664MiB / 2GiB",
+          "Name": "yami-storage-42933-3",
+          "NetIO": "299kB / 315kB",
+          "PIDs": "5"
+        }
+      ]
+    },
+    {
+      "at": 144.3797571529999,
+      "nodes": [
+        {
+          "BlockIO": "0B / 6.53MB",
+          "CPUPerc": "4.55%",
+          "Container": "yami-storage-42933-0",
+          "ID": "977b7c0557d7",
+          "MemPerc": "0.29%",
+          "MemUsage": "6.004MiB / 2GiB",
+          "Name": "yami-storage-42933-0",
+          "NetIO": "401kB / 400kB",
+          "PIDs": "5"
+        },
+        {
+          "BlockIO": "0B / 6.71MB",
+          "CPUPerc": "3.25%",
+          "Container": "yami-storage-42933-1",
+          "ID": "15c0b7878bdd",
+          "MemPerc": "0.29%",
+          "MemUsage": "5.906MiB / 2GiB",
+          "Name": "yami-storage-42933-1",
+          "NetIO": "434kB / 431kB",
+          "PIDs": "5"
+        },
+        {
+          "BlockIO": "0B / 6.65MB",
+          "CPUPerc": "3.31%",
+          "Container": "yami-storage-42933-2",
+          "ID": "25ea494e06bc",
+          "MemPerc": "0.30%",
+          "MemUsage": "6.09MiB / 2GiB",
+          "Name": "yami-storage-42933-2",
+          "NetIO": "432kB / 423kB",
+          "PIDs": "5"
+        },
+        {
+          "BlockIO": "0B / 6.28MB",
+          "CPUPerc": "4.19%",
+          "Container": "yami-storage-42933-3",
+          "ID": "7a88b1e14f35",
+          "MemPerc": "0.29%",
+          "MemUsage": "5.996MiB / 2GiB",
+          "Name": "yami-storage-42933-3",
+          "NetIO": "375kB / 385kB",
+          "PIDs": "5"
+        }
+      ]
+    },
+    {
+      "at": 147.48221594799998,
+      "nodes": [
+        {
+          "BlockIO": "0B / 8.72MB",
+          "CPUPerc": "2.30%",
+          "Container": "yami-storage-42933-0",
+          "ID": "977b7c0557d7",
+          "MemPerc": "0.29%",
+          "MemUsage": "5.98MiB / 2GiB",
+          "Name": "yami-storage-42933-0",
+          "NetIO": "522kB / 522kB",
+          "PIDs": "5"
+        },
+        {
+          "BlockIO": "0B / 8.4MB",
+          "CPUPerc": "6.88%",
+          "Container": "yami-storage-42933-1",
+          "ID": "15c0b7878bdd",
+          "MemPerc": "0.31%",
+          "MemUsage": "6.34MiB / 2GiB",
+          "Name": "yami-storage-42933-1",
+          "NetIO": "522kB / 524kB",
+          "PIDs": "5"
+        },
+        {
+          "BlockIO": "0B / 8.26MB",
+          "CPUPerc": "7.92%",
+          "Container": "yami-storage-42933-2",
+          "ID": "25ea494e06bc",
+          "MemPerc": "0.32%",
+          "MemUsage": "6.516MiB / 2GiB",
+          "Name": "yami-storage-42933-2",
+          "NetIO": "524kB / 512kB",
+          "PIDs": "5"
+        },
+        {
+          "BlockIO": "0B / 8.13MB",
+          "CPUPerc": "3.47%",
+          "Container": "yami-storage-42933-3",
+          "ID": "7a88b1e14f35",
+          "MemPerc": "0.30%",
+          "MemUsage": "6.23MiB / 2GiB",
+          "Name": "yami-storage-42933-3",
+          "NetIO": "476kB / 485kB",
+          "PIDs": "5"
+        }
+      ]
+    },
+    {
+      "at": 150.58212364999986,
+      "nodes": [
+        {
+          "BlockIO": "0B / 8.72MB",
+          "CPUPerc": "0.76%",
+          "Container": "yami-storage-42933-0",
+          "ID": "977b7c0557d7",
+          "MemPerc": "0.29%",
+          "MemUsage": "5.98MiB / 2GiB",
+          "Name": "yami-storage-42933-0",
+          "NetIO": "546kB / 543kB",
+          "PIDs": "5"
+        },
+        {
+          "BlockIO": "0B / 8.4MB",
+          "CPUPerc": "0.91%",
+          "Container": "yami-storage-42933-1",
+          "ID": "15c0b7878bdd",
+          "MemPerc": "0.31%",
+          "MemUsage": "6.34MiB / 2GiB",
+          "Name": "yami-storage-42933-1",
+          "NetIO": "560kB / 563kB",
+          "PIDs": "5"
+        },
+        {
+          "BlockIO": "0B / 8.26MB",
+          "CPUPerc": "0.97%",
+          "Container": "yami-storage-42933-2",
+          "ID": "25ea494e06bc",
+          "MemPerc": "0.31%",
+          "MemUsage": "6.262MiB / 2GiB",
+          "Name": "yami-storage-42933-2",
+          "NetIO": "561kB / 551kB",
+          "PIDs": "5"
+        },
+        {
+          "BlockIO": "0B / 8.47MB",
+          "CPUPerc": "0.92%",
+          "Container": "yami-storage-42933-3",
+          "ID": "7a88b1e14f35",
+          "MemPerc": "0.32%",
+          "MemUsage": "6.57MiB / 2GiB",
+          "Name": "yami-storage-42933-3",
+          "NetIO": "534kB / 542kB",
+          "PIDs": "5"
+        }
+      ]
+    },
+    {
+      "at": 153.657946133,
+      "nodes": [
+        {
+          "BlockIO": "0B / 0B",
+          "CPUPerc": "0.00%",
+          "Container": "yami-storage-42933-0",
+          "ID": "977b7c0557d7",
+          "MemPerc": "0.00%",
+          "MemUsage": "0B / 0B",
+          "Name": "yami-storage-42933-0",
+          "NetIO": "0B / 0B",
+          "PIDs": "0"
+        },
+        {
+          "BlockIO": "0B / 0B",
+          "CPUPerc": "0.00%",
+          "Container": "yami-storage-42933-1",
+          "ID": "15c0b7878bdd",
+          "MemPerc": "0.00%",
+          "MemUsage": "0B / 0B",
+          "Name": "yami-storage-42933-1",
+          "NetIO": "0B / 0B",
+          "PIDs": "0"
+        },
+        {
+          "BlockIO": "0B / 0B",
+          "CPUPerc": "0.00%",
+          "Container": "yami-storage-42933-2",
+          "ID": "25ea494e06bc",
+          "MemPerc": "0.00%",
+          "MemUsage": "0B / 0B",
+          "Name": "yami-storage-42933-2",
+          "NetIO": "0B / 0B",
+          "PIDs": "0"
+        },
+        {
+          "BlockIO": "0B / 0B",
+          "CPUPerc": "0.00%",
+          "Container": "yami-storage-42933-3",
+          "ID": "7a88b1e14f35",
+          "MemPerc": "0.00%",
+          "MemUsage": "0B / 0B",
+          "Name": "yami-storage-42933-3",
+          "NetIO": "0B / 0B",
+          "PIDs": "0"
+        }
+      ]
+    },
+    {
+      "at": 164.4086790849999,
+      "nodes": [
+        {
+          "BlockIO": "0B / 1.15MB",
+          "CPUPerc": "3.03%",
+          "Container": "yami-storage-42933-0",
+          "ID": "fbe6dbc2d9d0",
+          "MemPerc": "0.28%",
+          "MemUsage": "5.664MiB / 2GiB",
+          "Name": "yami-storage-42933-0",
+          "NetIO": "117kB / 117kB",
+          "PIDs": "5"
+        },
+        {
+          "BlockIO": "0B / 1.15MB",
+          "CPUPerc": "2.99%",
+          "Container": "yami-storage-42933-1",
+          "ID": "b72a91ddc1c0",
+          "MemPerc": "0.26%",
+          "MemUsage": "5.34MiB / 2GiB",
+          "Name": "yami-storage-42933-1",
+          "NetIO": "113kB / 117kB",
+          "PIDs": "5"
+        },
+        {
+          "BlockIO": "0B / 692kB",
+          "CPUPerc": "5.47%",
+          "Container": "yami-storage-42933-2",
+          "ID": "c3f11ca282b8",
+          "MemPerc": "0.27%",
+          "MemUsage": "5.562MiB / 2GiB",
+          "Name": "yami-storage-42933-2",
+          "NetIO": "82kB / 80.6kB",
+          "PIDs": "5"
+        },
+        {
+          "BlockIO": "0B / 1.17MB",
+          "CPUPerc": "2.88%",
+          "Container": "yami-storage-42933-3",
+          "ID": "d14b716d8b41",
+          "MemPerc": "0.26%",
+          "MemUsage": "5.258MiB / 2GiB",
+          "Name": "yami-storage-42933-3",
+          "NetIO": "87.7kB / 88.2kB",
+          "PIDs": "5"
+        }
+      ]
+    },
+    {
+      "at": 167.5247095939999,
+      "nodes": [
+        {
+          "BlockIO": "0B / 2.37MB",
+          "CPUPerc": "3.69%",
+          "Container": "yami-storage-42933-0",
+          "ID": "fbe6dbc2d9d0",
+          "MemPerc": "0.28%",
+          "MemUsage": "5.75MiB / 2GiB",
+          "Name": "yami-storage-42933-0",
+          "NetIO": "194kB / 192kB",
+          "PIDs": "5"
+        },
+        {
+          "BlockIO": "0B / 3.21MB",
+          "CPUPerc": "4.91%",
+          "Container": "yami-storage-42933-1",
+          "ID": "b72a91ddc1c0",
+          "MemPerc": "0.28%",
+          "MemUsage": "5.805MiB / 2GiB",
+          "Name": "yami-storage-42933-1",
+          "NetIO": "228kB / 226kB",
+          "PIDs": "5"
+        },
+        {
+          "BlockIO": "0B / 3.13MB",
+          "CPUPerc": "4.90%",
+          "Container": "yami-storage-42933-2",
+          "ID": "c3f11ca282b8",
+          "MemPerc": "0.29%",
+          "MemUsage": "5.957MiB / 2GiB",
+          "Name": "yami-storage-42933-2",
+          "NetIO": "228kB / 222kB",
+          "PIDs": "5"
+        },
+        {
+          "BlockIO": "0B / 3.27MB",
+          "CPUPerc": "5.11%",
+          "Container": "yami-storage-42933-3",
+          "ID": "d14b716d8b41",
+          "MemPerc": "0.28%",
+          "MemUsage": "5.719MiB / 2GiB",
+          "Name": "yami-storage-42933-3",
+          "NetIO": "202kB / 205kB",
+          "PIDs": "5"
+        }
+      ]
+    },
+    {
+      "at": 170.63741392499992,
+      "nodes": [
+        {
+          "BlockIO": "0B / 5.25MB",
+          "CPUPerc": "4.30%",
+          "Container": "yami-storage-42933-0",
+          "ID": "fbe6dbc2d9d0",
+          "MemPerc": "0.29%",
+          "MemUsage": "5.887MiB / 2GiB",
+          "Name": "yami-storage-42933-0",
+          "NetIO": "346kB / 342kB",
+          "PIDs": "5"
+        },
+        {
+          "BlockIO": "0B / 4.5MB",
+          "CPUPerc": "3.38%",
+          "Container": "yami-storage-42933-1",
+          "ID": "b72a91ddc1c0",
+          "MemPerc": "0.29%",
+          "MemUsage": "5.859MiB / 2GiB",
+          "Name": "yami-storage-42933-1",
+          "NetIO": "303kB / 297kB",
+          "PIDs": "5"
+        },
+        {
+          "BlockIO": "0B / 5MB",
+          "CPUPerc": "4.09%",
+          "Container": "yami-storage-42933-2",
+          "ID": "c3f11ca282b8",
+          "MemPerc": "0.29%",
+          "MemUsage": "5.949MiB / 2GiB",
+          "Name": "yami-storage-42933-2",
+          "NetIO": "340kB / 333kB",
+          "PIDs": "5"
+        },
+        {
+          "BlockIO": "0B / 5.29MB",
+          "CPUPerc": "4.12%",
+          "Container": "yami-storage-42933-3",
+          "ID": "d14b716d8b41",
+          "MemPerc": "0.29%",
+          "MemUsage": "5.953MiB / 2GiB",
+          "Name": "yami-storage-42933-3",
+          "NetIO": "307kB / 317kB",
+          "PIDs": "5"
+        }
+      ]
+    },
+    {
+      "at": 173.7181468209999,
+      "nodes": [
+        {
+          "BlockIO": "0B / 7.27MB",
+          "CPUPerc": "3.01%",
+          "Container": "yami-storage-42933-0",
+          "ID": "fbe6dbc2d9d0",
+          "MemPerc": "0.30%",
+          "MemUsage": "6.145MiB / 2GiB",
+          "Name": "yami-storage-42933-0",
+          "NetIO": "453kB / 450kB",
+          "PIDs": "5"
+        },
+        {
+          "BlockIO": "0B / 6.58MB",
+          "CPUPerc": "4.93%",
+          "Container": "yami-storage-42933-1",
+          "ID": "b72a91ddc1c0",
+          "MemPerc": "0.30%",
+          "MemUsage": "6.082MiB / 2GiB",
+          "Name": "yami-storage-42933-1",
+          "NetIO": "419kB / 409kB",
+          "PIDs": "5"
+        },
+        {
+          "BlockIO": "0B / 6.35MB",
+          "CPUPerc": "4.81%",
+          "Container": "yami-storage-42933-2",
+          "ID": "c3f11ca282b8",
+          "MemPerc": "0.29%",
+          "MemUsage": "6.027MiB / 2GiB",
+          "Name": "yami-storage-42933-2",
+          "NetIO": "410kB / 409kB",
+          "PIDs": "5"
+        },
+        {
+          "BlockIO": "0B / 7.26MB",
+          "CPUPerc": "2.81%",
+          "Container": "yami-storage-42933-3",
+          "ID": "d14b716d8b41",
+          "MemPerc": "0.30%",
+          "MemUsage": "6.203MiB / 2GiB",
+          "Name": "yami-storage-42933-3",
+          "NetIO": "413kB / 426kB",
+          "PIDs": "5"
+        }
+      ]
+    },
+    {
+      "at": 176.82058421199986,
+      "nodes": [
+        {
+          "BlockIO": "0B / 8.72MB",
+          "CPUPerc": "1.40%",
+          "Container": "yami-storage-42933-0",
+          "ID": "fbe6dbc2d9d0",
+          "MemPerc": "0.29%",
+          "MemUsage": "5.949MiB / 2GiB",
+          "Name": "yami-storage-42933-0",
+          "NetIO": "529kB / 531kB",
+          "PIDs": "5"
+        },
+        {
+          "BlockIO": "0B / 8.47MB",
+          "CPUPerc": "7.31%",
+          "Container": "yami-storage-42933-1",
+          "ID": "b72a91ddc1c0",
+          "MemPerc": "0.33%",
+          "MemUsage": "6.699MiB / 2GiB",
+          "Name": "yami-storage-42933-1",
+          "NetIO": "531kB / 519kB",
+          "PIDs": "5"
+        },
+        {
+          "BlockIO": "0B / 8.07MB",
+          "CPUPerc": "3.14%",
+          "Container": "yami-storage-42933-2",
+          "ID": "c3f11ca282b8",
+          "MemPerc": "0.30%",
+          "MemUsage": "6.055MiB / 2GiB",
+          "Name": "yami-storage-42933-2",
+          "NetIO": "518kB / 511kB",
+          "PIDs": "5"
+        },
+        {
+          "BlockIO": "0B / 8.66MB",
+          "CPUPerc": "6.97%",
+          "Container": "yami-storage-42933-3",
+          "ID": "d14b716d8b41",
+          "MemPerc": "0.32%",
+          "MemUsage": "6.613MiB / 2GiB",
+          "Name": "yami-storage-42933-3",
+          "NetIO": "494kB / 508kB",
+          "PIDs": "5"
+        }
+      ]
+    },
+    {
+      "at": 179.90332096499992,
+      "nodes": [
+        {
+          "BlockIO": "0B / 8.72MB",
+          "CPUPerc": "1.43%",
+          "Container": "yami-storage-42933-0",
+          "ID": "fbe6dbc2d9d0",
+          "MemPerc": "0.29%",
+          "MemUsage": "5.949MiB / 2GiB",
+          "Name": "yami-storage-42933-0",
+          "NetIO": "562kB / 560kB",
+          "PIDs": "5"
+        },
+        {
+          "BlockIO": "0B / 8.47MB",
+          "CPUPerc": "0.51%",
+          "Container": "yami-storage-42933-1",
+          "ID": "b72a91ddc1c0",
+          "MemPerc": "0.33%",
+          "MemUsage": "6.68MiB / 2GiB",
+          "Name": "yami-storage-42933-1",
+          "NetIO": "569kB / 558kB",
+          "PIDs": "5"
+        },
+        {
+          "BlockIO": "0B / 8.18MB",
+          "CPUPerc": "0.74%",
+          "Container": "yami-storage-42933-2",
+          "ID": "c3f11ca282b8",
+          "MemPerc": "0.32%",
+          "MemUsage": "6.617MiB / 2GiB",
+          "Name": "yami-storage-42933-2",
+          "NetIO": "560kB / 557kB",
+          "PIDs": "5"
+        },
+        {
+          "BlockIO": "0B / 8.66MB",
+          "CPUPerc": "0.50%",
+          "Container": "yami-storage-42933-3",
+          "ID": "d14b716d8b41",
+          "MemPerc": "0.31%",
+          "MemUsage": "6.324MiB / 2GiB",
+          "Name": "yami-storage-42933-3",
+          "NetIO": "535kB / 546kB",
+          "PIDs": "5"
+        }
+      ]
+    },
+    {
+      "at": 181.1117519689999,
+      "nodes": [
+        {
+          "BlockIO": "0B / 0B",
+          "CPUPerc": "0.00%",
+          "Container": "yami-storage-42933-0",
+          "ID": "fbe6dbc2d9d0",
+          "MemPerc": "0.00%",
+          "MemUsage": "0B / 0B",
+          "Name": "yami-storage-42933-0",
+          "NetIO": "0B / 0B",
+          "PIDs": "0"
+        },
+        {
+          "BlockIO": "0B / 0B",
+          "CPUPerc": "0.00%",
+          "Container": "yami-storage-42933-1",
+          "ID": "b72a91ddc1c0",
+          "MemPerc": "0.00%",
+          "MemUsage": "0B / 0B",
+          "Name": "yami-storage-42933-1",
+          "NetIO": "0B / 0B",
+          "PIDs": "0"
+        },
+        {
+          "BlockIO": "0B / 0B",
+          "CPUPerc": "0.00%",
+          "Container": "yami-storage-42933-2",
+          "ID": "c3f11ca282b8",
+          "MemPerc": "0.00%",
+          "MemUsage": "0B / 0B",
+          "Name": "yami-storage-42933-2",
+          "NetIO": "0B / 0B",
+          "PIDs": "0"
+        },
+        {
+          "BlockIO": "0B / 0B",
+          "CPUPerc": "0.00%",
+          "Container": "yami-storage-42933-3",
+          "ID": "d14b716d8b41",
+          "MemPerc": "0.00%",
+          "MemUsage": "0B / 0B",
+          "Name": "yami-storage-42933-3",
+          "NetIO": "0B / 0B",
+          "PIDs": "0"
+        }
+      ]
+    }
+  ],
+  "events": [
+    {
+      "at": 48.17965710699991,
+      "event": "fresh_identity_bootstrapped_without_prefix_history",
+      "height": 65
+    },
+    {
+      "event": "fresh_pruned_peer_requests_segmented_history",
+      "source_height": 128,
+      "imported_height": 65
+    }
+  ],
+  "legacy_binary_sha256": "eb4c7f6076dc6650b0e649e953f61f5ea8e6e372b1892caa0db1bb030b08fe78",
+  "bootstrap": {
+    "height": 65,
+    "block": "6bd302dfecd8baa619d05c9e6447e78b564867b4fa6ebfeede8dee45b05f71e6",
+    "state_root": "5c1403ac9023969982c3af17ed8823677cf9a7e2c00832366e92b521f06dbdee",
+    "anchor": "65:6bd302dfecd8baa619d05c9e6447e78b564867b4fa6ebfeede8dee45b05f71e6:5c1403ac9023969982c3af17ed8823677cf9a7e2c00832366e92b521f06dbdee",
+    "bytes": 14530,
+    "trust": "obtain anchor independently; peer-provided metadata is not authority"
+  },
+  "bootstrap_trust": "anchor obtained from controlled authenticated archive independently of transferred snapshot payload",
+  "initial_archive_state": {
+    "chain_id": "yamichain-local-0.2",
+    "height": 65,
+    "block": "6bd302dfecd8baa619d05c9e6447e78b564867b4fa6ebfeede8dee45b05f71e6",
+    "state_root": "5c1403ac9023969982c3af17ed8823677cf9a7e2c00832366e92b521f06dbdee",
+    "test_tlds": 260,
+    "payments_enabled": false,
+    "production_ready": false
+  },
+  "archive_migration": {
+    "format": "segmented-archive-v1",
+    "height": 128,
+    "root": "1fbe5bc07bf28fd504a582b75e668a8446d43833cbabba4c2151d5913bf156b7",
+    "segments": 1,
+    "legacy_height_retained": 65
+  },
+  "initial_archive_migration": {
+    "format": "segmented-archive-v1",
+    "height": 65,
+    "root": "1037d79828e7b4c1e6ad955849151601d0215b111f35224e919f91709030e5ed",
+    "segments": 1,
+    "legacy_height_retained": 65
+  },
+  "first_convergence": [
+    {
+      "chain_id": "yamichain-local-0.2",
+      "height": 128,
+      "block": "aef6976b9435b2af108c9ddaa227eba49ffc1b930cb822dadc972c88b02e4ddc",
+      "state_root": "c69670bf7f93fa2d617503609e45c041c78df237d55f06c83e6d1b980ac6548e",
+      "test_tlds": 512,
+      "payments_enabled": false,
+      "production_ready": false
+    },
+    {
+      "chain_id": "yamichain-local-0.2",
+      "height": 128,
+      "block": "aef6976b9435b2af108c9ddaa227eba49ffc1b930cb822dadc972c88b02e4ddc",
+      "state_root": "c69670bf7f93fa2d617503609e45c041c78df237d55f06c83e6d1b980ac6548e",
+      "test_tlds": 512,
+      "payments_enabled": false,
+      "production_ready": false
+    },
+    {
+      "chain_id": "yamichain-local-0.2",
+      "height": 128,
+      "block": "aef6976b9435b2af108c9ddaa227eba49ffc1b930cb822dadc972c88b02e4ddc",
+      "state_root": "c69670bf7f93fa2d617503609e45c041c78df237d55f06c83e6d1b980ac6548e",
+      "test_tlds": 512,
+      "payments_enabled": false,
+      "production_ready": false
+    },
+    {
+      "chain_id": "yamichain-local-0.2",
+      "height": 128,
+      "block": "aef6976b9435b2af108c9ddaa227eba49ffc1b930cb822dadc972c88b02e4ddc",
+      "state_root": "c69670bf7f93fa2d617503609e45c041c78df237d55f06c83e6d1b980ac6548e",
+      "test_tlds": 512,
+      "payments_enabled": false,
+      "production_ready": false
+    }
+  ],
+  "phase1_storage": [
+    {
+      "height": 128,
+      "history_min": 1,
+      "bytes": 352008,
+      "entries": 146,
+      "allocated_bytes": 856064,
+      "signing_bytes": 93082,
+      "evidence_bytes": 0,
+      "wal_bytes": 1602,
+      "default_max_bytes": 18000000000
+    },
+    {
+      "height": 128,
+      "history_min": 97,
+      "bytes": 168342,
+      "entries": 79,
+      "allocated_bytes": 442368,
+      "signing_bytes": 101860,
+      "evidence_bytes": 0,
+      "wal_bytes": 1602,
+      "default_max_bytes": 18000000000
+    },
+    {
+      "height": 128,
+      "history_min": 97,
+      "bytes": 159596,
+      "entries": 79,
+      "allocated_bytes": 434176,
+      "signing_bytes": 93114,
+      "evidence_bytes": 0,
+      "wal_bytes": 1602,
+      "default_max_bytes": 18000000000
+    },
+    {
+      "height": 128,
+      "history_min": 97,
+      "bytes": 70267,
+      "entries": 78,
+      "allocated_bytes": 331776,
+      "signing_bytes": 4761,
+      "evidence_bytes": 0,
+      "wal_bytes": 821,
+      "default_max_bytes": 18000000000
+    }
+  ],
+  "safety_before_restart": [
+    {
+      "signing-migration.bin": {
+        "length": 53,
+        "sha256": "1a13693a5075944024c0ef8d98ff0b611a7d239ca54f82b4fd300714757c1644",
+        "append": false
+      },
+      "signing-commits.bin": {
+        "length": 31377,
+        "sha256": "f5db34aca4295b2d21adbe209ba174523cd9d8a5e43bfb5f02835626b346e11f",
+        "append": true
+      },
+      "signing-active.bin": {
+        "length": 48,
+        "sha256": "b4f906376a5acaa35ad33028570e115aff360c9acf737fec8f9e1a06ba5a2db3",
+        "append": false
+      },
+      "signing-segment-00000000.bin": {
+        "length": 61516,
+        "sha256": "2159bb31fd0996b5f5e3c00965037f39c3e638dd6a667f6a4eb71f57212e303d",
+        "append": true
+      }
+    },
+    {
+      "signing-migration.bin": {
+        "length": 53,
+        "sha256": "9cba17ef666744ee6a424b35777bee4812e976f8fb234b014c748160518498e8",
+        "append": false
+      },
+      "signing-commits.bin": {
+        "length": 34281,
+        "sha256": "ccba00c310a7e8e2cd61fd6a4f0f7cbe16f7f6fab15e4376f3e6c494ffa35bc4",
+        "append": true
+      },
+      "signing-active.bin": {
+        "length": 48,
+        "sha256": "0fa236bc82c2ec89072d04575c922c622f4e9796f7eaff0856501b7749eb2728",
+        "append": false
+      },
+      "signing-segment-00000000.bin": {
+        "length": 67390,
+        "sha256": "a1d64094cde61b8499fbf1211b4da2a1b69087034173d74e0ac4bc2c88152700",
+        "append": true
+      }
+    },
+    {
+      "signing-migration.bin": {
+        "length": 53,
+        "sha256": "110e9d364735977117f4a19ec75a86f5ef7ecbd6f6ccbdfea3f4718923008b2d",
+        "append": false
+      },
+      "signing-commits.bin": {
+        "length": 31377,
+        "sha256": "df6266850490bf98a3e6700423963a036d9e925b6ea8678caac33fd0a6a0ef23",
+        "append": true
+      },
+      "signing-active.bin": {
+        "length": 48,
+        "sha256": "a82a86bc8b778ab4a3aebb9daca8ad8bfb8fe86134898c34a775c1e56c9cc42a",
+        "append": false
+      },
+      "signing-segment-00000000.bin": {
+        "length": 61548,
+        "sha256": "71584927cc488ec2ce9ad929678204b64c7a2d6bc3e743c33b9de521075f8c39",
+        "append": true
+      }
+    },
+    {
+      "signing-migration.bin": {
+        "length": 53,
+        "sha256": "99cda1d53e20cedb8842397cad9795ab6aea72142d82290f8aee9585b39e1cce",
+        "append": false
+      },
+      "signing-commits.bin": {
+        "length": 1545,
+        "sha256": "0f84e7f8259f9b73c9e42487489e70a4a586ad6d190575d14789b24115e47a2f",
+        "append": true
+      },
+      "signing-active.bin": {
+        "length": 48,
+        "sha256": "6f1fd683aa9bd6ee19c20b78a35c60c0e20d40592b740caf42f8812502bb3073",
+        "append": false
+      },
+      "signing-segment-00000000.bin": {
+        "length": 3027,
+        "sha256": "5480d89b45183d9a1b30cb8bf8377d406c1cf47d6e73bfa161202398a52dc981",
+        "append": true
+      }
+    }
+  ],
+  "migrations": [],
+  "archive_downgrade_refused": true,
+  "archive_migration_crashes": [
+    {
+      "stage": "manifest",
+      "resumed": true
+    },
+    {
+      "stage": "segment",
+      "resumed": true
+    },
+    {
+      "stage": "tip",
+      "resumed": true
+    },
+    {
+      "stage": "active",
+      "resumed": true
+    },
+    {
+      "stage": "fence",
+      "resumed": true
+    }
+  ],
+  "post_migration_storage": [
+    {
+      "height": 128,
+      "history_min": 1,
+      "bytes": 352008,
+      "entries": 146,
+      "allocated_bytes": 856064,
+      "signing_bytes": 93082,
+      "evidence_bytes": 0,
+      "wal_bytes": 1602,
+      "default_max_bytes": 18000000000
+    },
+    {
+      "height": 128,
+      "history_min": 97,
+      "bytes": 168342,
+      "entries": 79,
+      "allocated_bytes": 442368,
+      "signing_bytes": 101860,
+      "evidence_bytes": 0,
+      "wal_bytes": 1602,
+      "default_max_bytes": 18000000000
+    },
+    {
+      "height": 128,
+      "history_min": 97,
+      "bytes": 159596,
+      "entries": 79,
+      "allocated_bytes": 434176,
+      "signing_bytes": 93114,
+      "evidence_bytes": 0,
+      "wal_bytes": 1602,
+      "default_max_bytes": 18000000000
+    },
+    {
+      "height": 128,
+      "history_min": 97,
+      "bytes": 70267,
+      "entries": 78,
+      "allocated_bytes": 331776,
+      "signing_bytes": 4761,
+      "evidence_bytes": 0,
+      "wal_bytes": 821,
+      "default_max_bytes": 18000000000
+    }
+  ],
+  "post_migration_signing": [
+    {
+      "format": "segmented-v1",
+      "reservations": 356,
+      "root": "56c6775b84f438f494d4f74f74be34ffd2b54e41ad70add567119bc2e8b0717d",
+      "preimage_bytes": 54040,
+      "segments": 1,
+      "legacy_files_retained": 0
+    },
+    {
+      "format": "segmented-v1",
+      "reservations": 389,
+      "root": "8c401b59d704287441cb711268a32117cefeaaff3dcb98772aab8a17b9293a78",
+      "preimage_bytes": 59221,
+      "segments": 1,
+      "legacy_files_retained": 0
+    },
+    {
+      "format": "segmented-v1",
+      "reservations": 356,
+      "root": "49417af8816b118a8a9a12eed3333e5f93da256a10a634e866f1a86c6be71ac2",
+      "preimage_bytes": 54072,
+      "segments": 1,
+      "legacy_files_retained": 0
+    },
+    {
+      "format": "segmented-v1",
+      "reservations": 17,
+      "root": "bd404e0916011adbb052d92f3db8aceeef5ecf680bcb23d26b0aec87edb51c00",
+      "preimage_bytes": 2670,
+      "segments": 1,
+      "legacy_files_retained": 0
+    }
+  ],
+  "restarts": [
+    [
+      {
+        "chain_id": "yamichain-local-0.2",
+        "height": 160,
+        "block": "ba9bc32dea04c9a11c05d7d0fa251294d9c53f76f0393356c249c606ed0a7f8f",
+        "state_root": "074d9018194db630e24848e3bf2331832e8273cba8493702f8a3080a53c1ab2e",
+        "test_tlds": 640,
+        "payments_enabled": false,
+        "production_ready": false
+      },
+      {
+        "chain_id": "yamichain-local-0.2",
+        "height": 160,
+        "block": "ba9bc32dea04c9a11c05d7d0fa251294d9c53f76f0393356c249c606ed0a7f8f",
+        "state_root": "074d9018194db630e24848e3bf2331832e8273cba8493702f8a3080a53c1ab2e",
+        "test_tlds": 640,
+        "payments_enabled": false,
+        "production_ready": false
+      },
+      {
+        "chain_id": "yamichain-local-0.2",
+        "height": 160,
+        "block": "ba9bc32dea04c9a11c05d7d0fa251294d9c53f76f0393356c249c606ed0a7f8f",
+        "state_root": "074d9018194db630e24848e3bf2331832e8273cba8493702f8a3080a53c1ab2e",
+        "test_tlds": 640,
+        "payments_enabled": false,
+        "production_ready": false
+      },
+      {
+        "chain_id": "yamichain-local-0.2",
+        "height": 160,
+        "block": "ba9bc32dea04c9a11c05d7d0fa251294d9c53f76f0393356c249c606ed0a7f8f",
+        "state_root": "074d9018194db630e24848e3bf2331832e8273cba8493702f8a3080a53c1ab2e",
+        "test_tlds": 640,
+        "payments_enabled": false,
+        "production_ready": false
+      }
+    ],
+    [
+      {
+        "chain_id": "yamichain-local-0.2",
+        "height": 192,
+        "block": "3065bc7411f81b7708c5d8b210fc032482b581bd34e8fd0613513f2dd76f954f",
+        "state_root": "d8832cbdb565d61379144366de732e2f2eb15f863f3375adea9d21acfac597a7",
+        "test_tlds": 768,
+        "payments_enabled": false,
+        "production_ready": false
+      },
+      {
+        "chain_id": "yamichain-local-0.2",
+        "height": 192,
+        "block": "3065bc7411f81b7708c5d8b210fc032482b581bd34e8fd0613513f2dd76f954f",
+        "state_root": "d8832cbdb565d61379144366de732e2f2eb15f863f3375adea9d21acfac597a7",
+        "test_tlds": 768,
+        "payments_enabled": false,
+        "production_ready": false
+      },
+      {
+        "chain_id": "yamichain-local-0.2",
+        "height": 192,
+        "block": "3065bc7411f81b7708c5d8b210fc032482b581bd34e8fd0613513f2dd76f954f",
+        "state_root": "d8832cbdb565d61379144366de732e2f2eb15f863f3375adea9d21acfac597a7",
+        "test_tlds": 768,
+        "payments_enabled": false,
+        "production_ready": false
+      },
+      {
+        "chain_id": "yamichain-local-0.2",
+        "height": 192,
+        "block": "3065bc7411f81b7708c5d8b210fc032482b581bd34e8fd0613513f2dd76f954f",
+        "state_root": "d8832cbdb565d61379144366de732e2f2eb15f863f3375adea9d21acfac597a7",
+        "test_tlds": 768,
+        "payments_enabled": false,
+        "production_ready": false
+      }
+    ]
+  ],
+  "restart_convergence": [
+    {
+      "chain_id": "yamichain-local-0.2",
+      "height": 192,
+      "block": "3065bc7411f81b7708c5d8b210fc032482b581bd34e8fd0613513f2dd76f954f",
+      "state_root": "d8832cbdb565d61379144366de732e2f2eb15f863f3375adea9d21acfac597a7",
+      "test_tlds": 768,
+      "payments_enabled": false,
+      "production_ready": false
+    },
+    {
+      "chain_id": "yamichain-local-0.2",
+      "height": 192,
+      "block": "3065bc7411f81b7708c5d8b210fc032482b581bd34e8fd0613513f2dd76f954f",
+      "state_root": "d8832cbdb565d61379144366de732e2f2eb15f863f3375adea9d21acfac597a7",
+      "test_tlds": 768,
+      "payments_enabled": false,
+      "production_ready": false
+    },
+    {
+      "chain_id": "yamichain-local-0.2",
+      "height": 192,
+      "block": "3065bc7411f81b7708c5d8b210fc032482b581bd34e8fd0613513f2dd76f954f",
+      "state_root": "d8832cbdb565d61379144366de732e2f2eb15f863f3375adea9d21acfac597a7",
+      "test_tlds": 768,
+      "payments_enabled": false,
+      "production_ready": false
+    },
+    {
+      "chain_id": "yamichain-local-0.2",
+      "height": 192,
+      "block": "3065bc7411f81b7708c5d8b210fc032482b581bd34e8fd0613513f2dd76f954f",
+      "state_root": "d8832cbdb565d61379144366de732e2f2eb15f863f3375adea9d21acfac597a7",
+      "test_tlds": 768,
+      "payments_enabled": false,
+      "production_ready": false
+    }
+  ],
+  "final_storage": [
+    {
+      "height": 192,
+      "history_min": 1,
+      "bytes": 476786,
+      "entries": 146,
+      "allocated_bytes": 983040,
+      "signing_bytes": 132454,
+      "evidence_bytes": 0,
+      "wal_bytes": 2016,
+      "default_max_bytes": 18000000000
+    },
+    {
+      "height": 192,
+      "history_min": 161,
+      "bytes": 221188,
+      "entries": 79,
+      "allocated_bytes": 491520,
+      "signing_bytes": 141232,
+      "evidence_bytes": 0,
+      "wal_bytes": 2016,
+      "default_max_bytes": 18000000000
+    },
+    {
+      "height": 192,
+      "history_min": 161,
+      "bytes": 212506,
+      "entries": 79,
+      "allocated_bytes": 483328,
+      "signing_bytes": 132550,
+      "evidence_bytes": 0,
+      "wal_bytes": 2016,
+      "default_max_bytes": 18000000000
+    },
+    {
+      "height": 192,
+      "history_min": 161,
+      "bytes": 124621,
+      "entries": 79,
+      "allocated_bytes": 393216,
+      "signing_bytes": 44665,
+      "evidence_bytes": 0,
+      "wal_bytes": 2016,
+      "default_max_bytes": 18000000000
+    }
+  ],
+  "final_signing": [
+    {
+      "format": "segmented-v1",
+      "reservations": 504,
+      "root": "3fe5a1097cddcf073725d6c5575ff2e6a6376e884049b5eb0188f10a8af71fb5",
+      "preimage_bytes": 77280,
+      "segments": 1,
+      "legacy_files_retained": 0
+    },
+    {
+      "format": "segmented-v1",
+      "reservations": 537,
+      "root": "dd39c78e9f413c1e5125c05f37a62d0b19327feb996d55e70d78559ce4e1eb45",
+      "preimage_bytes": 82461,
+      "segments": 1,
+      "legacy_files_retained": 0
+    },
+    {
+      "format": "segmented-v1",
+      "reservations": 504,
+      "root": "361a6d5dee49ad9d3d60645b57f73c8505dc839af776346290f7e78f0cbc18f4",
+      "preimage_bytes": 77376,
+      "segments": 1,
+      "legacy_files_retained": 0
+    },
+    {
+      "format": "segmented-v1",
+      "reservations": 167,
+      "root": "80bc5dca44303baacebd25723b0bd6a95fa5438c9839ddc07235c0b5b5edc274",
+      "preimage_bytes": 26224,
+      "segments": 1,
+      "legacy_files_retained": 0
+    }
+  ],
+  "storage_crashes": [
+    {
+      "stage": "base",
+      "exit": 86,
+      "authenticated_recovery": true,
+      "safety_preserved": true
+    },
+    {
+      "stage": "unlink",
+      "exit": 86,
+      "authenticated_recovery": true,
+      "safety_preserved": true
+    },
+    {
+      "stage": "export-temp",
+      "exit": 86,
+      "authenticated_recovery": true,
+      "safety_preserved": true
+    },
+    {
+      "stage": "import-base",
+      "exit": 86,
+      "authenticated_recovery": true
+    }
+  ],
+  "elapsed_seconds": 182.20173673199997
+}

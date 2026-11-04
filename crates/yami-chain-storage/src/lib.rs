@@ -11,8 +11,10 @@ use yami_chain::{
     Block, Digest, Genesis, State, MAX_BLOCK_BYTES, MAX_CERTIFICATE_BYTES,
 };
 
+mod archive;
 mod limits;
 mod signing;
+pub use archive::{ArchiveAnchor, ArchiveStage, ArchiveStats, ARCHIVE_SEGMENT_BYTES};
 pub use limits::*;
 pub use signing::{
     validator_index_at, SigningAnchor, SigningStage, SigningStats, MAX_SIGNING_RESERVATIONS,
@@ -102,6 +104,8 @@ pub struct Journal {
     limits: StorageLimits,
     signing: Mutex<Option<signing::SigningState>>,
     accounting: Mutex<limits::Accounting>,
+    archive: Mutex<Option<archive::ArchiveState>>,
+    candidates: Mutex<std::collections::BTreeMap<u64, std::collections::BTreeSet<String>>>,
 }
 impl Journal {
     pub fn open(path: &Path) -> io::Result<Self> {
@@ -140,6 +144,8 @@ impl Journal {
             limits,
             signing: Mutex::new(None),
             accounting: Mutex::new(limits::Accounting::default()),
+            archive: Mutex::new(None),
+            candidates: Mutex::new(std::collections::BTreeMap::new()),
         };
         journal.check_entry_budget(max_entries)?;
         // Only this process can mutate these files now. Unrenamed records were
@@ -162,6 +168,13 @@ impl Journal {
             File::open(parent)?.sync_all()?;
         }
         journal.recover_signing()?;
+        journal.recover_archive()?;
+        for entry in fs::read_dir(path)? {
+            let name = entry?.file_name();
+            if let Some(name) = name.to_str() {
+                journal.track_candidate(name)?;
+            }
+        }
         Ok(journal)
     }
     fn check_entry_budget(&self, max_entries: u64) -> io::Result<()> {
@@ -207,6 +220,11 @@ impl Journal {
             return Err(invalid("invalid record name"));
         }
         if name.starts_with("signing-")
+            || name.starts_with("archive-")
+            || (["genesis.bin", "compact-base.bin", "compacted.bin"].contains(&name)
+                && self.is_segmented_archive())
+            || ((name.starts_with("finalized-") || name.starts_with("receipt-"))
+                && self.is_segmented_archive())
             || (name.starts_with("signed-") && self.path.join("signing-active.bin").exists())
         {
             return Err(invalid("reserved signing storage namespace"));
@@ -221,6 +239,7 @@ impl Journal {
         if bytes.len() > limit {
             return Err(invalid("record cap"));
         }
+        self.track_candidate(name)?;
         let final_path = self.path.join(name);
         match fs::symlink_metadata(&final_path) {
             Ok(_) => {
@@ -265,6 +284,9 @@ impl Journal {
         result
     }
     pub fn record(&self, height: u64) -> io::Result<Option<FinalizedRecord>> {
+        if let Some(result) = self.archive_record(height)? {
+            return Ok(result);
+        }
         let path = self.path.join(format!("finalized-{height:020}.bin"));
         match read_bounded(&path, MAX_RECORD_BYTES) {
             Ok(bytes) => FinalizedRecord::decode(&bytes).map(Some),
@@ -273,6 +295,9 @@ impl Journal {
         }
     }
     pub fn append(&self, record: &FinalizedRecord) -> io::Result<()> {
+        if self.is_segmented_archive() {
+            return self.append_archive(record);
+        }
         let bytes = record.canonical()?;
         self.write_once(
             &format!("finalized-{:020}.bin", record.block.header.height),
@@ -331,7 +356,7 @@ impl Journal {
     ) -> io::Result<State> {
         self.check_entry_budget(budget.max_directory_entries)?;
         let floor = state.height();
-        self.write_once("genesis.bin", &state.genesis().canonical())?;
+        self.ensure_genesis(state.genesis())?;
         let mut remaining = budget.max_bytes;
         observe(&state);
         // Replay in height order with constant history-index memory. A second
@@ -395,7 +420,7 @@ impl Journal {
         }
         // Upgrade old stores only after every certificate, transition and
         // directory entry has passed. Never authenticate a partial replay.
-        if state.height() > floor {
+        if state.height() > floor && !self.is_segmented_archive() {
             let record = self
                 .record(state.height())?
                 .ok_or_else(|| invalid("missing replay tip"))?;
@@ -405,22 +430,43 @@ impl Journal {
     }
     /// Delete only reproducible payloads at already authenticated finalized heights.
     /// Signing records, evidence, WAL and certified history are never removed.
+    fn track_candidate(&self, name: &str) -> io::Result<()> {
+        if let Some(height) = name
+            .strip_prefix("candidate-")
+            .or_else(|| name.strip_prefix("proposal-"))
+            .and_then(|s| s.split('-').next())
+            .and_then(|s| s.parse::<u64>().ok())
+        {
+            self.candidates
+                .lock()
+                .map_err(|_| invalid("candidate index lock"))?
+                .entry(height)
+                .or_default()
+                .insert(name.to_owned());
+        }
+        Ok(())
+    }
     pub fn remove_finalized_candidates(&self, finalized: u64) -> io::Result<()> {
-        for entry in fs::read_dir(&self.path)? {
-            let entry = entry?;
-            let name = entry.file_name();
-            let Some(name) = name.to_str() else { continue };
-            let tail = name
-                .strip_prefix("candidate-")
-                .or_else(|| name.strip_prefix("proposal-"));
-            if let Some(height) = tail
-                .and_then(|s| s.split('-').next())
-                .and_then(|s| s.parse::<u64>().ok())
-            {
-                if height <= finalized {
-                    fs::remove_file(entry.path())?;
+        let _guard = self
+            .write_lock
+            .lock()
+            .map_err(|_| invalid("poisoned store lock"))?;
+        let mut index = self
+            .candidates
+            .lock()
+            .map_err(|_| invalid("candidate index lock"))?;
+        while let Some((&height, names)) = index.first_key_value() {
+            if height > finalized {
+                break;
+            }
+            for name in names {
+                match fs::remove_file(self.path.join(name)) {
+                    Ok(()) => (),
+                    Err(e) if e.kind() == io::ErrorKind::NotFound => (),
+                    Err(e) => return Err(e),
                 }
             }
+            index.remove(&height);
         }
         self.sync_dir()
     }

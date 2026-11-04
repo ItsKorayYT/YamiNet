@@ -6,7 +6,7 @@ use yami_chain::{
     codec::{Reader, Writer},
     Digest, Genesis, State,
 };
-use yami_chain_storage::{read_bounded, FinalizedRecord, Journal, MAX_RECORD_BYTES};
+use yami_chain_storage::{FinalizedRecord, Journal, MAX_RECORD_BYTES};
 #[derive(Debug)]
 pub struct AuthenticatedCheckpoint {
     genesis: Digest,
@@ -65,9 +65,7 @@ pub fn authenticate_checkpoint(
     if height == 0 || height > max_records || height > 1_000_000 {
         return Err(eyre!("checkpoint replay budget"));
     }
-    if read_bounded(&journal.path().join("genesis.bin"), 1_048_576)? != genesis.canonical() {
-        return Err(eyre!("checkpoint genesis mismatch"));
-    }
+    journal.verify_genesis(genesis)?;
     let mut state = State::new(genesis.clone())?;
     let mut certificate = Vec::new();
     for h in 1..=height {

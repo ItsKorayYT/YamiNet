@@ -149,6 +149,7 @@ pub fn inspect_with_genesis(directory: &Path, genesis: Genesis) -> Result<State>
 pub struct StorageOptions {
     pub checkpoint_interval: Option<u64>,
     pub storage_limits: yami_chain_storage::StorageLimits,
+    pub minimum_archive_anchor: Option<yami_chain_storage::ArchiveAnchor>,
     pub minimum_signing_anchor: Option<yami_chain_storage::SigningAnchor>,
 }
 pub async fn run_node(options: NodeOptions) -> Result<State> {
@@ -225,7 +226,15 @@ pub async fn run_node_with_storage(options: NodeOptions, storage: StorageOptions
     if let Some(n) = &options.isolated_network {
         n.checkpoint(&journal)?;
     }
+    if journal.is_segmented_archive() && journal.archive_stats()?.is_none() {
+        return Err(eyre!(
+            "archive migration incomplete; resume migrate-archive before running"
+        ));
+    }
     journal.bind_validator_index(options.index)?;
+    if let Some(anchor) = storage.minimum_archive_anchor {
+        journal.verify_archive_anchor(anchor)?;
+    }
     if let Some(anchor) = storage.minimum_signing_anchor {
         journal.verify_signing_anchor(anchor)?;
     }
@@ -654,7 +663,7 @@ async fn app_loop(
                 {
                     maybe_crash(&journal, options.crash, CrashPoint::BeforeEpoch)?;
                 }
-                journal.ensure_capacity(0)?;
+                journal.check_cached_capacity()?;
                 if let Some(floor) = storage.checkpoint_interval.and_then(|n| {
                     crate::compact::periodic_prune_floor(state.height(), n, history_min)
                 }) {
@@ -940,6 +949,7 @@ mod startup_tests {
                 StorageOptions {
                     checkpoint_interval: None,
                     minimum_signing_anchor: None,
+                    minimum_archive_anchor: None,
                     storage_limits: yami_chain_storage::StorageLimits {
                         max_bytes: 1,
                         reserve_bytes: 0,
@@ -1009,6 +1019,69 @@ mod startup_tests {
         .unwrap_err();
         assert!(
             error.to_string().contains("signing anchor rollback"),
+            "{error}"
+        );
+        let journal = Journal::open(&directory).unwrap();
+        assert_eq!(
+            journal.signature_reservation(1, 0, 1).unwrap().unwrap(),
+            b"retained"
+        );
+        assert_eq!(
+            std::fs::read(directory.join("wal/consensus.wal")).unwrap(),
+            b"unread WAL"
+        );
+        drop(journal);
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+    #[tokio::test]
+    async fn independent_archive_anchor_is_checked_before_wal_or_new_work() {
+        let directory = std::env::temp_dir().join(format!(
+            "yami-archive-anchor-startup-{}",
+            std::process::id()
+        ));
+        let genesis = Genesis::development_schedule(&[(1, 4)]).unwrap();
+        let journal = Journal::open(&directory).unwrap();
+        journal.bind_validator_index(0).unwrap();
+        journal.replay(genesis.clone(), |_| Ok(())).unwrap();
+        journal.reserve_signature(1, 0, 1, b"retained").unwrap();
+        journal
+            .migrate_archive(genesis.clone(), |_| Ok(()))
+            .unwrap();
+        std::fs::create_dir(directory.join("wal")).unwrap();
+        std::fs::write(directory.join("wal/consensus.wal"), b"unread WAL").unwrap();
+        drop(journal);
+        let options = NodeOptions {
+            directory: directory.clone(),
+            genesis,
+            index: 0,
+            base_port: 28100,
+            peer_base_port: 28100,
+            isolated_network: None,
+            test_transactions: 0,
+            sparse_peers: false,
+            start_at: None,
+            round_timeout: Duration::from_millis(800),
+            target_height: 1,
+            timeout: Duration::from_secs(1),
+            linger: Duration::ZERO,
+            crash: None,
+        };
+        let error = run_node_with_storage(
+            options,
+            StorageOptions {
+                minimum_archive_anchor: Some(yami_chain_storage::ArchiveAnchor {
+                    height: 2,
+                    root: Digest([42; 32]),
+                }),
+                ..StorageOptions::default()
+            },
+        )
+        .await
+        .unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("archive below independent anchor"),
             "{error}"
         );
         let journal = Journal::open(&directory).unwrap();

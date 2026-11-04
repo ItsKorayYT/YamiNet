@@ -14,6 +14,8 @@ IMAGE = 'python:3.13-slim-trixie@sha256:ae14d4ce8771606477a81446e7ef429edd676230
 def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument('--output', type=Path, required=True)
+    p.add_argument('--binary', type=Path)
+    p.add_argument('--format', choices=['legacy', 'fresh', 'migrate'], default='legacy')
     p.add_argument('--process-lab-output', type=Path)
     p.add_argument('--heights', type=int, nargs='+', default=[64, 256, 1024])
     args = p.parse_args()
@@ -25,18 +27,20 @@ def main():
     cli = ['docker', '--host=unix:///var/run/docker.sock']
     repo = Path(__file__).resolve().parent.parent
     binary = root/'bench'
-    shutil.copy2(repo/'target/release/examples/storage-bench', binary)
+    shutil.copy2(args.binary or repo/'target/release/examples/storage-bench', binary)
     validator = root/'validator'
     if args.process_lab_output:
         shutil.copy2(repo/'target/release/yami-validator', validator)
-    report = dict(binary_sha256=hashlib.sha256(binary.read_bytes()).hexdigest(), passed=False, cpus=2, memory_bytes=2147483648, target_ssd_bytes=20000000000, store_refusal_bytes=18000000000, target_ssd_enforced=False, cases=[])
+    report = dict(binary_sha256=hashlib.sha256(binary.read_bytes()).hexdigest(), passed=False, cpus=2, memory_bytes=2147483648, target_ssd_bytes=20000000000, store_refusal_bytes=18000000000, target_ssd_enforced=False, archive_format=args.format, cases=[])
     common = ['run', '--rm', '--network', 'none', '--cpus', '2', '--memory', '2g', '--memory-swap', '2g',
               '--pids-limit', '128', '--cap-drop', 'ALL', '--security-opt', 'no-new-privileges', '--read-only',
               '--user', f'{os.getuid()}:{os.getgid()}']
     measure = """import json,os,resource,subprocess,sys,time
 from pathlib import Path
 started=time.monotonic()
-r=subprocess.run(['/bench','/results/chain-'+sys.argv[1],sys.argv[1],'8'],capture_output=True,text=True,timeout=7200)
+command=['/bench','/results/chain-'+sys.argv[1],sys.argv[1],'8']
+if sys.argv[2]!='legacy':command.append(sys.argv[2])
+r=subprocess.run(command,capture_output=True,text=True,timeout=7200)
 if r.returncode: print(r.stderr,file=sys.stderr);sys.exit(r.returncode)
 d=json.loads(r.stdout);u=resource.getrusage(resource.RUSAGE_CHILDREN)
 d.update(cgroup_cpu_max=Path('/sys/fs/cgroup/cpu.max').read_text().strip(),cgroup_memory_max=Path('/sys/fs/cgroup/memory.max').read_text().strip(),filesystem_fragment_bytes=os.statvfs('/results').f_frsize,wall_seconds=time.monotonic()-started,cpu_user_seconds=u.ru_utime,cpu_system_seconds=u.ru_stime,peak_rss_kib=u.ru_maxrss)
@@ -45,7 +49,7 @@ print(json.dumps(d))
     try:
         for height in args.heights:
             command = cli+common+['--mount', f'type=bind,src={binary},dst=/bench,readonly',
-                                 '--mount', f'type=bind,src={root},dst=/results', IMAGE, 'python', '-c', measure, str(height)]
+                                 '--mount', f'type=bind,src={root},dst=/results', IMAGE, 'python', '-c', measure, str(height), args.format]
             result = subprocess.run(command, env=env, capture_output=True, text=True, timeout=7300)
             if result.returncode:
                 raise RuntimeError(result.stderr)

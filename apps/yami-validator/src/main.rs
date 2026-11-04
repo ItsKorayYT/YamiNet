@@ -4,7 +4,7 @@ use yami_chain_consensus::{
     inspect_with_genesis, run_node_with_storage, status_json, CrashPoint, NodeOptions,
     StorageOptions,
 };
-const HELP:&str="yami-validator 0.2 — NOT production-ready; no real money\n\nIsolated configurable-committee Malachite prototype. Public development keys; loopback only.\nAll YAMI payments and value-bearing protocol actions are disabled.\n\nUsage:\n  yami-validator run --dir PATH --index N [--base-port 28100] [--height 10] [--timeout 60]\n  yami-validator status --dir PATH\n  yami-validator inspect --dir PATH\n\nrun starts one independent process, binding only 127.0.0.1:base-port+index.\nLaunch the scheduled public development identities with separate stores.\n--committee-plan 1:4,5:7,9:5 pins sizes at activation heights; default 1:4.\nSupply the same plan for run/status/inspect; changing it refuses the existing store.\nstatus/inspect replay and authenticate durable finalized history under an exclusive\nstore lock; stop that validator before inspecting it. No wallet, public RPC or mint.\n\nTest workloads: --test-transactions 0..64; zero preserves the original workload.\nLab timing: --start-at-ms UNIX_MS (at most 60s ahead); --round-timeout-ms 800..60000.\nLocal topology: --sparse-peers true uses authenticated ring/chord neighbors.\nLoopback fault proxy: --peer-base-port PORT changes only outbound loopback ports.\nIsolated labs: init-isolated --dir NEW_PATH --endpoints PRIVATE_IP:PORT,...\nUse --isolated-network PATH for run/status/inspect. Roster is pinned locally;\nonly signed, short-lived private IPv4 endpoint hints become dial targets.\nMount only the own identity-N.bin and public roster/bootstrap files per node.\nNever expose lab listeners or development keys to public networks.\nStorage: default --storage-mode archive preserves full history.\nOpt-in --storage-mode pruned --checkpoint-interval 64 retains a certified compact base.\nOffline: export-checkpoint --dir PATH --out NEW_FILE; prune --dir PATH.\nFresh import: import-checkpoint --dir FRESH --snapshot FILE --anchor HEIGHT:BLOCK:STATE.\nObtain the anchor independently of the snapshot supplier; never restore a used identity\nwithout its original WAL, signing reservations and safety evidence.\n--max-store-bytes BYTES sets the refusal budget (default 18 GB, 64 MiB reserve).\nOptional --linger SECONDS serves certified history at the terminal demo height.\nTest fault injection: --crash-after proposal|vote|before-commit|epoch (run only).\nThe process exits 86 once per directory at the selected durable boundary.\nPreserve the entire directory, including signing records and WAL, when restarting.\nSigning storage: migrate-signing --dir PATH [--index N]; signing-info --dir PATH.\nverify-signing --dir PATH --signing-anchor COUNT:ROOT checks an independently retained minimum.\nrun also accepts --signing-anchor COUNT:ROOT; retain the anchor outside rolled-back storage.\nLegacy reservations are retained after migration; older validators refuse the versioned identity fence.\n";
+const HELP:&str="yami-validator 0.2 — NOT production-ready; no real money\n\nIsolated configurable-committee Malachite prototype. Public development keys; loopback only.\nAll YAMI payments and value-bearing protocol actions are disabled.\n\nUsage:\n  yami-validator run --dir PATH --index N [--base-port 28100] [--height 10] [--timeout 60]\n  yami-validator status --dir PATH\n  yami-validator inspect --dir PATH\n\nrun starts one independent process, binding only 127.0.0.1:base-port+index.\nLaunch the scheduled public development identities with separate stores.\n--committee-plan 1:4,5:7,9:5 pins sizes at activation heights; default 1:4.\nSupply the same plan for run/status/inspect; changing it refuses the existing store.\nstatus/inspect replay and authenticate durable finalized history under an exclusive\nstore lock; stop that validator before inspecting it. No wallet, public RPC or mint.\n\nTest workloads: --test-transactions 0..64; zero preserves the original workload.\nLab timing: --start-at-ms UNIX_MS (at most 60s ahead); --round-timeout-ms 800..60000.\nLocal topology: --sparse-peers true uses authenticated ring/chord neighbors.\nLoopback fault proxy: --peer-base-port PORT changes only outbound loopback ports.\nIsolated labs: init-isolated --dir NEW_PATH --endpoints PRIVATE_IP:PORT,...\nUse --isolated-network PATH for run/status/inspect. Roster is pinned locally;\nonly signed, short-lived private IPv4 endpoint hints become dial targets.\nMount only the own identity-N.bin and public roster/bootstrap files per node.\nNever expose lab listeners or development keys to public networks.\nStorage: default --storage-mode archive preserves full history.\nOpt-in --storage-mode pruned --checkpoint-interval 64 retains a certified compact base.\nOffline: export-checkpoint --dir PATH --out NEW_FILE; prune --dir PATH.\nFresh import: import-checkpoint --dir FRESH --snapshot FILE --anchor HEIGHT:BLOCK:STATE.\nObtain the anchor independently of the snapshot supplier; never restore a used identity\nwithout its original WAL, signing reservations and safety evidence.\n--max-store-bytes BYTES sets the refusal budget (default 18 GB, 64 MiB reserve).\nOptional --linger SECONDS serves certified history at the terminal demo height.\nTest fault injection: --crash-after proposal|vote|before-commit|epoch (run only).\nThe process exits 86 once per directory at the selected durable boundary.\nPreserve the entire directory, including signing records and WAL, when restarting.\nverify-archive --dir PATH --archive-anchor HEIGHT:ROOT checks an independent archive minimum.\nrun also accepts --archive-anchor HEIGHT:ROOT, before WAL or consensus work.\nArchive upgrade (stopped node): migrate-archive --dir PATH; retains legacy files, refuses in-place pruning.\nSigning storage: migrate-signing --dir PATH [--index N]; signing-info --dir PATH.\nverify-signing --dir PATH --signing-anchor COUNT:ROOT checks an independently retained minimum.\nrun also accepts --signing-anchor COUNT:ROOT; retain the anchor outside rolled-back storage.\nLegacy reservations are retained after migration; older validators refuse the versioned identity fence.\n";
 #[tokio::main(flavor = "multi_thread", worker_threads = 2)]
 async fn main() {
     // Diagnostics are opt-in to keep benchmark stdout machine-readable.
@@ -70,6 +70,8 @@ async fn run() -> Result<()> {
         "prune",
         "storage-info",
         "migrate-signing",
+        "migrate-archive",
+        "verify-archive",
         "signing-info",
         "verify-signing",
     ]
@@ -83,6 +85,7 @@ async fn run() -> Result<()> {
     let mut storage_fault = None;
     let mut anchor = None;
     let mut signing_anchor = None;
+    let mut archive_anchor = None;
     let mut storage_mode = "archive".to_owned();
     let mut checkpoint_interval = 64;
     let mut storage_limits = yami_chain_storage::StorageLimits::default();
@@ -108,16 +111,40 @@ async fn run() -> Result<()> {
         match pair[0].as_str() {
             "--dir" => dir = Some(PathBuf::from(value)),
             "--storage-crash"
-                if ["prune", "import-checkpoint", "export-checkpoint"].contains(&command) =>
+                if [
+                    "prune",
+                    "import-checkpoint",
+                    "export-checkpoint",
+                    "migrate-archive",
+                ]
+                .contains(&command) =>
             {
-                if !["base", "unlink", "export-temp"].contains(&value.as_str()) {
-                    return Err(eyre!("storage-crash: base|unlink|export-temp"));
+                if ![
+                    "base",
+                    "unlink",
+                    "export-temp",
+                    "archive-manifest",
+                    "archive-segment",
+                    "archive-tip",
+                    "archive-active",
+                    "archive-fence",
+                ]
+                .contains(&value.as_str())
+                {
+                    return Err(eyre!("storage-crash: base|unlink|export-temp|archive-manifest|archive-segment|archive-tip|archive-active|archive-fence"));
                 }
                 storage_fault = Some(value.clone());
             }
             "--out" if command == "export-checkpoint" => output = Some(PathBuf::from(value)),
             "--snapshot" if command == "import-checkpoint" => snapshot = Some(PathBuf::from(value)),
             "--anchor" if command == "import-checkpoint" => anchor = Some(parse_anchor(value)?),
+            "--archive-anchor" if ["run", "verify-archive"].contains(&command) => {
+                let parsed = parse_signing_anchor(value)?;
+                archive_anchor = Some(yami_chain_storage::ArchiveAnchor {
+                    height: parsed.reservations,
+                    root: parsed.root,
+                });
+            }
             "--signing-anchor" if ["run", "verify-signing"].contains(&command) => {
                 signing_anchor = Some(parse_signing_anchor(value)?)
             }
@@ -202,6 +229,31 @@ async fn run() -> Result<()> {
         .as_ref()
         .map(|n| n.genesis().clone())
         .unwrap_or(yami_chain::Genesis::development_schedule(&plan)?);
+    if command == "verify-archive" {
+        let journal = yami_chain_storage::Journal::open(&directory)?;
+        journal.verify_archive_anchor(archive_anchor.ok_or_else(|| {
+            eyre!("--archive-anchor HEIGHT:ROOT required; retain independently")
+        })?)?;
+        println!(
+            "{}",
+            status_json(&yami_chain_consensus::replay_certified(&journal, &genesis)?)
+        );
+        return Ok(());
+    }
+    if command == "migrate-archive" {
+        let journal = yami_chain_storage::Journal::open(&directory)?;
+        let stats = journal.migrate_archive_observed(
+            genesis.clone(),
+            |r| yami_chain_consensus::verify_record(&genesis, r),
+            |stage| {
+                if storage_fault.as_deref() == Some(&format!("archive-{stage:?}").to_lowercase()) {
+                    std::process::exit(86);
+                }
+            },
+        )?;
+        println!("{{\"format\":\"segmented-archive-v1\",\"height\":{},\"root\":\"{}\",\"segments\":{},\"legacy_height_retained\":{}}}", stats.height, stats.root, stats.segments, stats.migrated_height);
+        return Ok(());
+    }
     if ["migrate-signing", "signing-info", "verify-signing"].contains(&command) {
         let journal = yami_chain_storage::Journal::open(&directory)?;
         if command == "migrate-signing" {
@@ -295,6 +347,7 @@ async fn run() -> Result<()> {
                 checkpoint_interval: (storage_mode == "pruned").then_some(checkpoint_interval),
                 storage_limits,
                 minimum_signing_anchor: signing_anchor,
+                minimum_archive_anchor: archive_anchor,
             },
         )
         .await?

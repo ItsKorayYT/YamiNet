@@ -61,6 +61,15 @@ impl Journal {
         }
         self.check_capacity(&measured?, additional, 1, 2)
     }
+    /// Live filesystem/WAL preflight using conservative credits. The periodic
+    /// explicit audit still reconciles outside writers; this does not replace it.
+    pub fn check_cached_capacity(&self) -> io::Result<()> {
+        let _guard = self
+            .write_lock
+            .lock()
+            .map_err(|_| invalid("poisoned store lock"))?;
+        self.reserve_capacity(0, 0, 0)
+    }
     pub fn accounting_audits(&self) -> io::Result<u64> {
         Ok(self
             .accounting
@@ -225,6 +234,9 @@ impl Journal {
     /// Atomic replacement of the ONE active compact base only. Caller has
     /// authenticated the replacement; fsync must succeed before any deletion.
     pub fn install_compact_base(&self, bytes: &[u8]) -> io::Result<()> {
+        if self.is_segmented_archive() {
+            return Err(invalid("segmented archive cannot be pruned"));
+        }
         self.install_compact_base_inner(bytes, |_| Ok(()))
     }
     fn install_compact_base_inner(
@@ -266,6 +278,9 @@ impl Journal {
     /// Durable minimum trusted height/block/root. Publish after the new base and
     /// before unlinking, so replacement by an older valid base fails closed.
     pub fn install_compact_marker(&self, bytes: &[u8]) -> io::Result<()> {
+        if self.is_segmented_archive() {
+            return Err(invalid("segmented archive cannot be pruned"));
+        }
         if bytes.len() != 104 {
             return Err(invalid("compact marker size"));
         }
@@ -307,6 +322,9 @@ impl Journal {
         verify_base: impl Fn(&[u8]) -> io::Result<State>,
         mut removed: impl FnMut(),
     ) -> io::Result<()> {
+        if self.is_segmented_archive() {
+            return Err(invalid("segmented archive cannot be pruned"));
+        }
         if !self.path.join("compacted.bin").is_file()
             || !self.path.join("compact-base.bin").is_file()
         {
