@@ -242,7 +242,6 @@ impl IsolatedNetwork {
     /// Persist per-identity freshness under the journal's exclusive lock. Tombstones
     /// remain bounded by the pinned roster; an omitted hint cannot erase its history.
     pub(crate) fn checkpoint(&self, journal: &yami_chain_storage::Journal) -> Result<()> {
-        use std::io::Write as _;
         let path = journal.path().join("network-hints.bin");
         let mut high = BTreeMap::new();
         match read_bounded(&path, MAX_BYTES) {
@@ -300,22 +299,7 @@ impl IsolatedNetwork {
         if read_bounded(&path, MAX_BYTES).ok().as_deref() == Some(w.0.as_slice()) {
             return Ok(());
         }
-        let temporary = journal.path().join("network-hints.next");
-        // Only this process holds the store lock. Remove an interrupted write; never follow it.
-        match std::fs::remove_file(&temporary) {
-            Ok(()) => (),
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => (),
-            Err(e) => return Err(e.into()),
-        }
-        journal.ensure_capacity(w.0.len() as u64)?;
-        let mut file = std::fs::OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(&temporary)?;
-        file.write_all(&w.0)?;
-        file.sync_all()?;
-        std::fs::rename(temporary, path)?;
-        std::fs::File::open(journal.path())?.sync_all()?;
+        journal.replace_network_hints(&w.0)?;
         Ok(())
     }
 }

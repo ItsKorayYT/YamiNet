@@ -33,14 +33,127 @@ fn check_filesystem_reserve(available: u128, files: u64, free: u64, needed: u64)
     }
     Ok(())
 }
+/// Conservative allocation credits are never trusted across restart. Rebuild
+/// from actual files, then precharge BEFORE I/O; failed/uncertain writes overcount.
+#[derive(Default)]
+pub(super) struct Accounting {
+    pub(super) footprint: Option<StorageFootprint>,
+    writes: u16,
+    audits: u64,
+}
 impl Journal {
-    /// Includes retained history, safety files, WAL and pending files. Reserve
-    /// room for the largest atomic checkpoint replacement and in-flight WAL I/O.
+    /// Explicit/periodic reconciliation includes all files and externally written
+    /// WAL bytes. This is not an atomic filesystem quota against outside writers.
     pub fn ensure_capacity(&self, additional: u64) -> io::Result<()> {
-        let footprint = self.storage_footprint(DEFAULT_ENTRY_BUDGET)?;
-        // A new atomic write needs one temporary entry. Preserve room for a
-        // receipt/marker too; never allow a successful write to prevent reopen.
-        if footprint.entries.saturating_add(2) > DEFAULT_ENTRY_BUDGET {
+        let _guard = self
+            .write_lock
+            .lock()
+            .map_err(|_| invalid("poisoned store lock"))?;
+        let measured = self.storage_footprint(DEFAULT_ENTRY_BUDGET);
+        {
+            let mut account = self
+                .accounting
+                .lock()
+                .map_err(|_| invalid("poisoned storage accounting"))?;
+            account.footprint = measured.as_ref().ok().cloned();
+            account.writes = 0;
+            account.audits += 1;
+        }
+        self.check_capacity(&measured?, additional, 1, 2)
+    }
+    pub fn accounting_audits(&self) -> io::Result<u64> {
+        Ok(self
+            .accounting
+            .lock()
+            .map_err(|_| invalid("poisoned storage accounting"))?
+            .audits)
+    }
+    // All callers hold write_lock. A fresh audit every 256 write credits bounds
+    // conservative excess. WAL is sampled live on every credit, even in between.
+    pub(super) fn reserve_capacity(
+        &self,
+        additional: u64,
+        allocations: u64,
+        entries: u64,
+    ) -> io::Result<()> {
+        let mut account = self
+            .accounting
+            .lock()
+            .map_err(|_| invalid("poisoned storage accounting"))?;
+        if account.footprint.is_none() || account.writes >= 256 {
+            account.footprint = Some(self.storage_footprint(DEFAULT_ENTRY_BUDGET)?);
+            account.writes = 0;
+            account.audits += 1;
+        }
+        let footprint = account
+            .footprint
+            .as_mut()
+            .ok_or_else(|| invalid("missing storage accounting"))?;
+        // The Malachite writer is independent of Journal. Never cache its length.
+        let mut wal_bytes = 0u64;
+        let mut wal_allocated = 0u64;
+        let mut wal_entries = 0u64;
+        match fs::read_dir(self.path.join("wal")) {
+            Ok(wal) => {
+                for entry in wal {
+                    let m = fs::symlink_metadata(entry?.path())?;
+                    if !m.is_file() {
+                        return Err(invalid("unexpected WAL entry type"));
+                    }
+                    wal_entries += 1;
+                    if wal_entries > DEFAULT_ENTRY_BUDGET {
+                        return Err(invalid("WAL entry work limit"));
+                    }
+                    wal_bytes = wal_bytes
+                        .checked_add(m.len())
+                        .ok_or_else(|| invalid("WAL byte overflow"))?;
+                    #[cfg(unix)]
+                    {
+                        use std::os::unix::fs::MetadataExt as _;
+                        wal_allocated = wal_allocated
+                            .checked_add(m.blocks().saturating_mul(512))
+                            .ok_or_else(|| invalid("WAL allocation overflow"))?;
+                    }
+                }
+            }
+            Err(e) if e.kind() == io::ErrorKind::NotFound => {}
+            Err(e) => return Err(e),
+        }
+        // Conservatively add the whole live WAL, rather than subtracting a stale
+        // sample: an external truncation can never create negative accounting.
+        let mut checked = footprint.clone();
+        checked.bytes = checked.bytes.saturating_add(wal_bytes);
+        checked.allocated_bytes = checked.allocated_bytes.saturating_add(wal_allocated);
+        checked.entries = checked
+            .entries
+            .saturating_add(wal_entries.saturating_add(1));
+        self.check_capacity(&checked, additional, allocations, entries.saturating_add(2))?;
+        footprint.bytes = footprint.bytes.saturating_add(additional);
+        footprint.allocated_bytes = footprint
+            .allocated_bytes
+            .saturating_add(self.allocation_charge(additional, allocations)?);
+        footprint.entries = footprint.entries.saturating_add(entries);
+        account.writes += 1;
+        Ok(())
+    }
+    fn allocation_charge(&self, additional: u64, allocations: u64) -> io::Result<u64> {
+        #[cfg(unix)]
+        let block = rustix::fs::statvfs(&self.path)?.f_frsize.max(4096);
+        #[cfg(not(unix))]
+        let block = 4096;
+        Ok(additional
+            .div_ceil(block)
+            .saturating_mul(block)
+            .saturating_add(allocations.saturating_sub(1).saturating_mul(block)))
+    }
+    fn check_capacity(
+        &self,
+        footprint: &StorageFootprint,
+        additional: u64,
+        allocations: u64,
+        entries: u64,
+    ) -> io::Result<()> {
+        if footprint.entries.saturating_add(entries) > DEFAULT_ENTRY_BUDGET {
             return Err(io::Error::new(
                 io::ErrorKind::StorageFull,
                 "store entry reserve exhausted; safety data retained",
@@ -60,10 +173,7 @@ impl Journal {
         #[cfg(unix)]
         {
             let stats = rustix::fs::statvfs(&self.path)?;
-            let block = stats.f_frsize.max(4096);
-            let allocation = additional.div_ceil(block).saturating_mul(block);
-            // Tiny immutable safety files can consume a full block each. Logical
-            // length alone substantially undercounts their SSD requirements.
+            let allocation = self.allocation_charge(additional, allocations)?;
             if footprint
                 .allocated_bytes
                 .saturating_add(allocation)
@@ -84,6 +194,34 @@ impl Journal {
         }
         Ok(())
     }
+    pub fn replace_network_hints(&self, bytes: &[u8]) -> io::Result<()> {
+        let _guard = self
+            .write_lock
+            .lock()
+            .map_err(|_| invalid("poisoned store lock"))?;
+        if bytes.len() > 32 + 1 + 100 * 110 {
+            return Err(invalid("network hints cap"));
+        }
+        self.signing_replace_metadata("network-hints.bin", bytes)
+    }
+    fn signing_replace_metadata(&self, name: &str, bytes: &[u8]) -> io::Result<()> {
+        self.reserve_capacity(bytes.len() as u64, 1, 1)?;
+        let temp = self.path.join(format!(".pending-{name}"));
+        let result = (|| {
+            let mut f = OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(&temp)?;
+            f.write_all(bytes)?;
+            f.sync_all()?;
+            fs::rename(&temp, self.path.join(name))?;
+            self.sync_dir()
+        })();
+        if result.is_err() {
+            let _ = fs::remove_file(temp);
+        }
+        result
+    }
     /// Atomic replacement of the ONE active compact base only. Caller has
     /// authenticated the replacement; fsync must succeed before any deletion.
     pub fn install_compact_base(&self, bytes: &[u8]) -> io::Result<()> {
@@ -101,7 +239,7 @@ impl Journal {
         if bytes.len() > MAX_COMPACT_BASE_BYTES {
             return Err(invalid("compact base cap"));
         }
-        self.ensure_capacity(bytes.len() as u64)?;
+        self.reserve_capacity(bytes.len() as u64, 1, 1)?;
         let destination = self.path.join("compact-base.bin");
         if fs::symlink_metadata(&destination).is_ok_and(|m| !m.file_type().is_file()) {
             return Err(invalid("invalid compact base type"));
@@ -135,7 +273,7 @@ impl Journal {
             .write_lock
             .lock()
             .map_err(|_| invalid("poisoned store lock"))?;
-        self.ensure_capacity(104)?;
+        self.reserve_capacity(104, 1, 1)?;
         let destination = self.path.join("compacted.bin");
         if fs::symlink_metadata(&destination).is_ok_and(|m| !m.file_type().is_file()) {
             return Err(invalid("invalid compact marker type"));
@@ -269,8 +407,10 @@ mod tests {
         assert!(check_filesystem_reserve(10000, 0, 0, 1).is_ok());
         let path = directory();
         let j = Journal::open(&path).unwrap();
-        j.reserve_signature(1, 0, 1, b"a").unwrap();
-        j.reserve_signature(2, 0, 1, b"b").unwrap();
+        j.write_once("signed-00000000000000000001-0000000000-1.bin", b"a")
+            .unwrap();
+        j.write_once("signed-00000000000000000002-0000000000-1.bin", b"b")
+            .unwrap();
         let footprint = j.storage_footprint(100).unwrap();
         assert_eq!(footprint.bytes, 2);
         assert!(footprint.allocated_bytes > footprint.bytes);
@@ -285,7 +425,9 @@ mod tests {
         )
         .unwrap();
         assert_eq!(
-            j.reserve_signature(3, 0, 1, b"c").unwrap_err().kind(),
+            j.write_once("signed-00000000000000000003-0000000000-1.bin", b"c")
+                .unwrap_err()
+                .kind(),
             io::ErrorKind::StorageFull
         );
         drop(j);
@@ -306,10 +448,14 @@ mod tests {
             },
         )
         .unwrap();
-        j.reserve_signature(1, 0, 1, &[7; 5000]).unwrap();
-        let error = j.reserve_signature(2, 0, 1, &[8; 5000]).unwrap_err();
+        j.write_once("signed-00000000000000000001-0000000000-1.bin", &[7; 5000])
+            .unwrap();
+        let error = j
+            .write_once("signed-00000000000000000002-0000000000-1.bin", &[8; 5000])
+            .unwrap_err();
         assert_eq!(error.kind(), io::ErrorKind::StorageFull);
-        j.reserve_signature(1, 0, 1, &[7; 5000]).unwrap();
+        j.write_once("signed-00000000000000000001-0000000000-1.bin", &[7; 5000])
+            .unwrap();
         assert!(!path
             .join("signed-00000000000000000002-0000000000-1.bin")
             .exists());
@@ -317,6 +463,35 @@ mod tests {
             fs::read(path.join("signed-00000000000000000001-0000000000-1.bin")).unwrap(),
             vec![7; 5000]
         );
+        drop(j);
+        fs::remove_dir_all(path).unwrap();
+    }
+    #[test]
+    fn failed_reconciliation_and_live_wal_sampling_cannot_leave_an_under_count() {
+        let path = directory();
+        let j = Journal::open_with_limits(
+            &path,
+            100,
+            StorageLimits {
+                max_bytes: 20000,
+                reserve_bytes: 0,
+            },
+        )
+        .unwrap();
+        j.write_once("retained.bin", b"a").unwrap();
+        fs::create_dir(path.join("wal")).unwrap();
+        fs::write(path.join("wal/consensus.wal"), [0; 16000]).unwrap();
+        let audits = j.accounting_audits().unwrap();
+        assert!(j.write_once("refused.bin", b"b").is_err());
+        assert_eq!(j.accounting_audits().unwrap(), audits);
+        fs::write(path.join("external.bin"), [0; 20000]).unwrap();
+        assert!(j.ensure_capacity(0).is_err());
+        assert!(j.write_once("refused.bin", b"b").is_err());
+        assert!(!path.join("refused.bin").exists());
+        j.write_once("retained.bin", b"a").unwrap();
+        drop(j);
+        let j = Journal::open(&path).unwrap();
+        assert_eq!(fs::read(path.join("retained.bin")).unwrap(), b"a");
         drop(j);
         fs::remove_dir_all(path).unwrap();
     }

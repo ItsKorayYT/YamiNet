@@ -8,6 +8,7 @@ from pathlib import Path
 import shutil
 import subprocess
 import time
+from yamichain_safety import capture_safety, preserved, observed_anchor
 
 IMAGE = 'python:3.13-slim-trixie@sha256:ae14d4ce8771606477a81446e7ef429edd6762305fc50c84507c1041fa8285d1'
 
@@ -16,6 +17,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--binary', type=Path, default=Path('target/release/yami-validator'))
+    parser.add_argument('--legacy-binary', type=Path)
     parser.add_argument('--height', type=int, default=128)
     parser.add_argument('--restart-count', type=int, default=1)
     parser.add_argument('--restart-step', type=int, default=32)
@@ -28,6 +30,10 @@ def main():
     # terminal rebuilds the source target while containers are running.
     binary = root/'validator'
     shutil.copy2(args.binary.resolve(), binary)
+    legacy_binary = None
+    if args.legacy_binary:
+        legacy_binary = root/'legacy-validator'
+        shutil.copy2(args.legacy_binary.resolve(), legacy_binary)
     env = os.environ.copy()
     for key in ['DOCKER_HOST', 'DOCKER_CONTEXT', 'DOCKER_TLS', 'DOCKER_TLS_VERIFY', 'DOCKER_CERT_PATH']:
         env.pop(key, None)
@@ -35,6 +41,7 @@ def main():
     tag = f'yami-storage-{os.getpid()}'
     names = [f'{tag}-{i}' for i in range(4)]
     report = dict(passed=False, binary_sha256=hashlib.sha256(binary.read_bytes()).hexdigest(), samples=[], events=[])
+    report['legacy_binary_sha256'] = hashlib.sha256(legacy_binary.read_bytes()).hexdigest() if legacy_binary else None
     started = time.monotonic()
 
     def docker(*cmd, check=True):
@@ -51,17 +58,20 @@ def main():
         records = list((root/f'store-{i}').glob('finalized-*.bin'))
         return max([int(f.stem.split('-')[1]) for f in records], default=0)
 
-    def launch(i, target, linger):
+    def launch(i, target, linger, legacy=False):
+        executable = legacy_binary if legacy else binary
+        anchor = None if legacy else observed_anchor(root/f'store-{i}')
+        minimum = ['--signing-anchor', anchor] if anchor else []
         docker('run', '-d', '--name', names[i], '--network', tag, '--ip', f'10.83.0.{i+2}',
                '--cpus', '2', '--memory', '2g', '--memory-swap', '2g', '--pids-limit', '256',
                '--ulimit', 'nofile=512:512', '--cap-drop', 'ALL', '--security-opt', 'no-new-privileges',
                '--read-only', '--user', f'{os.getuid()}:{os.getgid()}',
-               '--mount', f'type=bind,src={binary},dst=/validator,readonly',
+               '--mount', f'type=bind,src={executable},dst=/validator,readonly',
                '--mount', f'type=bind,src={root/f"config-{i}"},dst=/config,readonly',
                '--mount', f'type=bind,src={root/f"store-{i}"},dst=/store', IMAGE,
                '/validator', 'run', '--dir', '/store', '--index', str(i), '--isolated-network', '/config',
                '--height', str(target), '--timeout', str(min(3600, max(240, args.height*3))), '--linger', str(linger), '--test-transactions', '4',
-               '--storage-mode', 'archive' if i == 0 else 'pruned', '--checkpoint-interval', '32')
+               '--storage-mode', 'archive' if i == 0 else 'pruned', '--checkpoint-interval', '32', *minimum)
 
     def sample():
         raw = docker('stats', '--no-stream', '--format', '{{json .}}', *names, check=False)
@@ -91,8 +101,7 @@ def main():
             (root/f'{phase}-node-{i}.log').write_text(result.stdout+result.stderr)
 
     def safety(path, include_wal=True):
-        return {str(p.relative_to(path)): hashlib.sha256(p.read_bytes()).hexdigest()
-                for p in path.rglob('*') if p.is_file() and (p.name.startswith(('signed-', 'equivocation-')) or (include_wal and p.parent.name == 'wal'))}
+        return capture_safety(path, live=not include_wal)
 
     provision = root/'provision'
     subprocess.run([str(binary), 'init-isolated', '--dir', str(provision), '--endpoints', ','.join(f'10.83.0.{i+2}:28100' for i in range(4))], check=True)
@@ -107,9 +116,10 @@ def main():
         docker('network', 'create', '--internal', '--subnet', '10.83.0.0/24', tag)
         network_created = True
         for i in range(3):
-            launch(i, args.height, 30)
+            launch(i, args.height, 30, legacy=legacy_binary is not None)
         deadline = time.monotonic()+150
-        while height(0) < 64:
+        # Exercise an imported base beyond the 32-height pruning boundary.
+        while height(0) < 65:
             if time.monotonic() > deadline:
                 raise RuntimeError('initial history generation stalled')
             time.sleep(.3)
@@ -128,6 +138,24 @@ def main():
         preserve_logs('phase1')
         report['phase1_storage'] = [local('storage-info', i) for i in range(4)]
         report['safety_before_restart'] = [safety(root/f'store-{i}', False) for i in range(4)]
+        report['migrations'] = []
+        if legacy_binary:
+            for i in range(4):
+                store = root/f'store-{i}'
+                before = {str(p.relative_to(store)):hashlib.sha256(p.read_bytes()).hexdigest()
+                          for p in store.rglob('*') if p.is_file() and p.name != 'validator-index.bin'}
+                info = local('migrate-signing', i)
+                if any(not (store/path).is_file() or hashlib.sha256((store/path).read_bytes()).hexdigest()!=value for path,value in before.items()):
+                    raise RuntimeError('migration changed historical storage bytes')
+                refused = root/f'downgrade-{i}'
+                shutil.copytree(store, refused)
+                result = subprocess.run([str(legacy_binary), 'run', '--dir', str(refused), '--isolated-network', str(root/f'config-{i}'), '--index', str(i), '--height', str(args.height+1), '--timeout', '1'],capture_output=True,text=True,timeout=30)
+                if result.returncode == 0 or 'conflicting durable record' not in result.stderr:
+                    raise RuntimeError(f'old validator did not respect format fence: {result.stderr}')
+                report['migrations'].append(dict(index=i, signing=info, historical_files_preserved=len(before), downgrade_refused=True))
+        report['post_migration_storage'] = [local('storage-info', i) for i in range(4)]
+        report['post_migration_signing'] = [local('signing-info', i) for i in range(4)]
+
         report['restarts'] = []
         for restart in range(args.restart_count):
             before_restart = [safety(root/f'store-{i}', False) for i in range(4)]
@@ -138,15 +166,14 @@ def main():
             wait_all('restart_convergence', args.height + (restart+1)*args.restart_step)
             preserve_logs(f'restart-{restart}')
             for i, before in enumerate(before_restart):
-                after = safety(root/f'store-{i}', False)
-                if any(after.get(path) != digest for path, digest in before.items()):
+                if not preserved(root/f'store-{i}', before):
                     raise RuntimeError('restart changed original safety records')
             report['restarts'].append(report['restart_convergence'])
         for i, before in enumerate(report['safety_before_restart']):
-            after = safety(root/f'store-{i}', False)
-            if any(after.get(path) != digest for path, digest in before.items()):
+            if not preserved(root/f'store-{i}', before):
                 raise RuntimeError('restart deleted or changed original signing safety data')
         report['final_storage'] = [local('storage-info', i) for i in range(4)]
+        report['final_signing'] = [local('signing-info', i) for i in range(4)]
         # Real offline process interruption at precise storage transaction boundaries.
         report['storage_crashes'] = []
         for stage in ['base', 'unlink', 'export-temp']:

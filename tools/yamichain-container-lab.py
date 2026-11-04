@@ -64,7 +64,7 @@ def run_lab(scope):
     if case.get('faults') == 'disk-full':
         directory.mkdir(parents=True, exist_ok=True)
         # Fill only this explicitly bounded tmpfs; never the host filesystem.
-        command += ['--tmpfs', f'/results/{args.case}/node-0:size=2m,uid={os.getuid()},gid={os.getgid()}']
+        command += ['--tmpfs', f'/results/{args.case}/node-0:size=128m,uid={os.getuid()},gid={os.getgid()}']
     binary = args.binary.resolve()
     if not binary.is_relative_to(repo):
         parser.error('binary must be inside this repository')

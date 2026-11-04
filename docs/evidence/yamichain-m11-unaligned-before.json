@@ -1,0 +1,12 @@
+{
+  "passed": false,
+  "imported_height": 65,
+  "last_finalized_height": 95,
+  "requested_periodic_floor": 64,
+  "error": "checkpoint rollback below local base",
+  "node_exit": 1,
+  "binary_sha256": "010ffd011c93c297276af625affffddc8a7eaf5f1e1ea3938dfd63e1e1de95f6",
+  "log_sha256": "7c62a24f8317b83fe1235973cd94130164a39c8034bf4fa7d729c335b2160375",
+  "safety_refusal": true,
+  "fixed_by": "skip periodic floors below independently imported local base; explicit backward-prune refusal preserved"
+}

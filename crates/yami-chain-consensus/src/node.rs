@@ -149,6 +149,7 @@ pub fn inspect_with_genesis(directory: &Path, genesis: Genesis) -> Result<State>
 pub struct StorageOptions {
     pub checkpoint_interval: Option<u64>,
     pub storage_limits: yami_chain_storage::StorageLimits,
+    pub minimum_signing_anchor: Option<yami_chain_storage::SigningAnchor>,
 }
 pub async fn run_node(options: NodeOptions) -> Result<State> {
     run_node_with_storage(options, StorageOptions::default()).await
@@ -224,7 +225,10 @@ pub async fn run_node_with_storage(options: NodeOptions, storage: StorageOptions
     if let Some(n) = &options.isolated_network {
         n.checkpoint(&journal)?;
     }
-    journal.write_once("validator-index.bin", &[options.index])?;
+    journal.bind_validator_index(options.index)?;
+    if let Some(anchor) = storage.minimum_signing_anchor {
+        journal.verify_signing_anchor(anchor)?;
+    }
     if storage.checkpoint_interval.is_none() && journal.path().join("compact-base.bin").exists() {
         return Err(eyre!(
             "archive mode cannot reopen a pruned store; select pruned mode"
@@ -238,14 +242,13 @@ pub async fn run_node_with_storage(options: NodeOptions, storage: StorageOptions
     // network actors or potentially large WAL recovery before refusing new work.
     journal.ensure_capacity(0)?;
     if !options.directory.join("wal/consensus.wal").exists()
-        && std::fs::read_dir(&options.directory)?.any(|entry| {
-            entry.is_ok_and(|e| e.file_name().to_string_lossy().starts_with("signed-"))
-        })
+        && journal.has_signing_reservations()?
     {
         return Err(eyre!(
             "signing history exists but consensus WAL is missing; refusing restart"
         ));
     }
+    journal.migrate_signatures()?;
     let key = options
         .isolated_network
         .as_ref()
@@ -652,15 +655,11 @@ async fn app_loop(
                     maybe_crash(&journal, options.crash, CrashPoint::BeforeEpoch)?;
                 }
                 journal.ensure_capacity(0)?;
-                if storage
-                    .checkpoint_interval
-                    .is_some_and(|n| state.height() > n && state.height().is_multiple_of(n))
-                {
-                    let compacted = crate::prune_certified_before(
-                        &journal,
-                        state.genesis(),
-                        state.height() - storage.checkpoint_interval.expect("pruned mode"),
-                    )?;
+                if let Some(floor) = storage.checkpoint_interval.and_then(|n| {
+                    crate::compact::periodic_prune_floor(state.height(), n, history_min)
+                }) {
+                    let compacted =
+                        crate::prune_certified_before(&journal, state.genesis(), floor)?;
                     if compacted != state {
                         return Err(eyre!("compaction changed finalized state"));
                     }
@@ -940,6 +939,7 @@ mod startup_tests {
                 options,
                 StorageOptions {
                     checkpoint_interval: None,
+                    minimum_signing_anchor: None,
                     storage_limits: yami_chain_storage::StorageLimits {
                         max_bytes: 1,
                         reserve_bytes: 0,
@@ -962,6 +962,65 @@ mod startup_tests {
                 .unwrap();
             assert!(journal.reserve_signature(1, 0, 1, b"conflict").is_err());
         }
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[tokio::test]
+    async fn independent_signing_anchor_is_checked_before_wal_or_new_work() {
+        let directory = std::env::temp_dir().join(format!(
+            "yami-signing-anchor-startup-{}",
+            std::process::id()
+        ));
+        let genesis = Genesis::development_schedule(&[(1, 4)]).unwrap();
+        let journal = Journal::open(&directory).unwrap();
+        journal.bind_validator_index(0).unwrap();
+        journal.replay(genesis.clone(), |_| Ok(())).unwrap();
+        journal.reserve_signature(1, 0, 1, b"retained").unwrap();
+        std::fs::create_dir(directory.join("wal")).unwrap();
+        std::fs::write(directory.join("wal/consensus.wal"), b"unread WAL").unwrap();
+        drop(journal);
+        let options = NodeOptions {
+            directory: directory.clone(),
+            genesis,
+            index: 0,
+            base_port: 28100,
+            peer_base_port: 28100,
+            isolated_network: None,
+            test_transactions: 0,
+            sparse_peers: false,
+            start_at: None,
+            round_timeout: Duration::from_millis(800),
+            target_height: 1,
+            timeout: Duration::from_secs(1),
+            linger: Duration::ZERO,
+            crash: None,
+        };
+        let error = run_node_with_storage(
+            options,
+            StorageOptions {
+                minimum_signing_anchor: Some(yami_chain_storage::SigningAnchor {
+                    reservations: 2,
+                    root: Digest([42; 32]),
+                }),
+                ..StorageOptions::default()
+            },
+        )
+        .await
+        .unwrap_err();
+        assert!(
+            error.to_string().contains("signing anchor rollback"),
+            "{error}"
+        );
+        let journal = Journal::open(&directory).unwrap();
+        assert_eq!(
+            journal.signature_reservation(1, 0, 1).unwrap().unwrap(),
+            b"retained"
+        );
+        assert_eq!(
+            std::fs::read(directory.join("wal/consensus.wal")).unwrap(),
+            b"unread WAL"
+        );
+        drop(journal);
         std::fs::remove_dir_all(directory).unwrap();
     }
 

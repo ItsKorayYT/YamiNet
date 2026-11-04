@@ -4,7 +4,7 @@ use yami_chain_consensus::{
     inspect_with_genesis, run_node_with_storage, status_json, CrashPoint, NodeOptions,
     StorageOptions,
 };
-const HELP:&str="yami-validator 0.2 — NOT production-ready; no real money\n\nIsolated configurable-committee Malachite prototype. Public development keys; loopback only.\nAll YAMI payments and value-bearing protocol actions are disabled.\n\nUsage:\n  yami-validator run --dir PATH --index N [--base-port 28100] [--height 10] [--timeout 60]\n  yami-validator status --dir PATH\n  yami-validator inspect --dir PATH\n\nrun starts one independent process, binding only 127.0.0.1:base-port+index.\nLaunch the scheduled public development identities with separate stores.\n--committee-plan 1:4,5:7,9:5 pins sizes at activation heights; default 1:4.\nSupply the same plan for run/status/inspect; changing it refuses the existing store.\nstatus/inspect replay and authenticate durable finalized history under an exclusive\nstore lock; stop that validator before inspecting it. No wallet, public RPC or mint.\n\nTest workloads: --test-transactions 0..64; zero preserves the original workload.\nLab timing: --start-at-ms UNIX_MS (at most 60s ahead); --round-timeout-ms 800..60000.\nLocal topology: --sparse-peers true uses authenticated ring/chord neighbors.\nLoopback fault proxy: --peer-base-port PORT changes only outbound loopback ports.\nIsolated labs: init-isolated --dir NEW_PATH --endpoints PRIVATE_IP:PORT,...\nUse --isolated-network PATH for run/status/inspect. Roster is pinned locally;\nonly signed, short-lived private IPv4 endpoint hints become dial targets.\nMount only the own identity-N.bin and public roster/bootstrap files per node.\nNever expose lab listeners or development keys to public networks.\nStorage: default --storage-mode archive preserves full history.\nOpt-in --storage-mode pruned --checkpoint-interval 64 retains a certified compact base.\nOffline: export-checkpoint --dir PATH --out NEW_FILE; prune --dir PATH.\nFresh import: import-checkpoint --dir FRESH --snapshot FILE --anchor HEIGHT:BLOCK:STATE.\nObtain the anchor independently of the snapshot supplier; never restore a used identity\nwithout its original WAL, signing reservations and safety evidence.\n--max-store-bytes BYTES sets the refusal budget (default 18 GB, 64 MiB reserve).\nOptional --linger SECONDS serves certified history at the terminal demo height.\nTest fault injection: --crash-after proposal|vote|before-commit|epoch (run only).\nThe process exits 86 once per directory at the selected durable boundary.\nPreserve the entire directory, including signing records and WAL, when restarting.\n";
+const HELP:&str="yami-validator 0.2 — NOT production-ready; no real money\n\nIsolated configurable-committee Malachite prototype. Public development keys; loopback only.\nAll YAMI payments and value-bearing protocol actions are disabled.\n\nUsage:\n  yami-validator run --dir PATH --index N [--base-port 28100] [--height 10] [--timeout 60]\n  yami-validator status --dir PATH\n  yami-validator inspect --dir PATH\n\nrun starts one independent process, binding only 127.0.0.1:base-port+index.\nLaunch the scheduled public development identities with separate stores.\n--committee-plan 1:4,5:7,9:5 pins sizes at activation heights; default 1:4.\nSupply the same plan for run/status/inspect; changing it refuses the existing store.\nstatus/inspect replay and authenticate durable finalized history under an exclusive\nstore lock; stop that validator before inspecting it. No wallet, public RPC or mint.\n\nTest workloads: --test-transactions 0..64; zero preserves the original workload.\nLab timing: --start-at-ms UNIX_MS (at most 60s ahead); --round-timeout-ms 800..60000.\nLocal topology: --sparse-peers true uses authenticated ring/chord neighbors.\nLoopback fault proxy: --peer-base-port PORT changes only outbound loopback ports.\nIsolated labs: init-isolated --dir NEW_PATH --endpoints PRIVATE_IP:PORT,...\nUse --isolated-network PATH for run/status/inspect. Roster is pinned locally;\nonly signed, short-lived private IPv4 endpoint hints become dial targets.\nMount only the own identity-N.bin and public roster/bootstrap files per node.\nNever expose lab listeners or development keys to public networks.\nStorage: default --storage-mode archive preserves full history.\nOpt-in --storage-mode pruned --checkpoint-interval 64 retains a certified compact base.\nOffline: export-checkpoint --dir PATH --out NEW_FILE; prune --dir PATH.\nFresh import: import-checkpoint --dir FRESH --snapshot FILE --anchor HEIGHT:BLOCK:STATE.\nObtain the anchor independently of the snapshot supplier; never restore a used identity\nwithout its original WAL, signing reservations and safety evidence.\n--max-store-bytes BYTES sets the refusal budget (default 18 GB, 64 MiB reserve).\nOptional --linger SECONDS serves certified history at the terminal demo height.\nTest fault injection: --crash-after proposal|vote|before-commit|epoch (run only).\nThe process exits 86 once per directory at the selected durable boundary.\nPreserve the entire directory, including signing records and WAL, when restarting.\nSigning storage: migrate-signing --dir PATH [--index N]; signing-info --dir PATH.\nverify-signing --dir PATH --signing-anchor COUNT:ROOT checks an independently retained minimum.\nrun also accepts --signing-anchor COUNT:ROOT; retain the anchor outside rolled-back storage.\nLegacy reservations are retained after migration; older validators refuse the versioned identity fence.\n";
 #[tokio::main(flavor = "multi_thread", worker_threads = 2)]
 async fn main() {
     // Diagnostics are opt-in to keep benchmark stdout machine-readable.
@@ -69,6 +69,9 @@ async fn run() -> Result<()> {
         "import-checkpoint",
         "prune",
         "storage-info",
+        "migrate-signing",
+        "signing-info",
+        "verify-signing",
     ]
     .contains(&command)
     {
@@ -79,6 +82,7 @@ async fn run() -> Result<()> {
     let mut snapshot = None;
     let mut storage_fault = None;
     let mut anchor = None;
+    let mut signing_anchor = None;
     let mut storage_mode = "archive".to_owned();
     let mut checkpoint_interval = 64;
     let mut storage_limits = yami_chain_storage::StorageLimits::default();
@@ -114,6 +118,9 @@ async fn run() -> Result<()> {
             "--out" if command == "export-checkpoint" => output = Some(PathBuf::from(value)),
             "--snapshot" if command == "import-checkpoint" => snapshot = Some(PathBuf::from(value)),
             "--anchor" if command == "import-checkpoint" => anchor = Some(parse_anchor(value)?),
+            "--signing-anchor" if ["run", "verify-signing"].contains(&command) => {
+                signing_anchor = Some(parse_signing_anchor(value)?)
+            }
             "--storage-mode" if command == "run" => {
                 if !["archive", "pruned"].contains(&value.as_str()) {
                     return Err(eyre!("storage-mode must be archive or pruned"));
@@ -181,12 +188,9 @@ async fn run() -> Result<()> {
             }
             yami_chain_consensus::network::IsolatedNetwork::load_with_store(
                 path,
-                index.unwrap_or_else(|| {
-                    std::fs::read(directory.join("validator-index.bin"))
-                        .ok()
-                        .and_then(|b| b.first().copied())
-                        .unwrap_or(0)
-                }),
+                index
+                    .or(yami_chain_storage::validator_index_at(&directory)?)
+                    .unwrap_or(0),
                 std::time::SystemTime::now()
                     .duration_since(std::time::UNIX_EPOCH)?
                     .as_secs(),
@@ -198,6 +202,26 @@ async fn run() -> Result<()> {
         .as_ref()
         .map(|n| n.genesis().clone())
         .unwrap_or(yami_chain::Genesis::development_schedule(&plan)?);
+    if ["migrate-signing", "signing-info", "verify-signing"].contains(&command) {
+        let journal = yami_chain_storage::Journal::open(&directory)?;
+        if command == "migrate-signing" {
+            if let Some(index) = index {
+                journal.bind_validator_index(index)?;
+            }
+            journal.migrate_signatures()?;
+        }
+        if command == "verify-signing" {
+            journal.verify_signing_anchor(signing_anchor.ok_or_else(|| {
+                eyre!("--signing-anchor COUNT:ROOT required; pin independently")
+            })?)?;
+        }
+        if let Some(s) = journal.signing_stats()? {
+            println!("{{\"format\":\"segmented-v1\",\"reservations\":{},\"root\":\"{}\",\"preimage_bytes\":{},\"segments\":{},\"legacy_files_retained\":{}}}",s.reservations,s.root,s.preimage_bytes,s.segments,s.legacy_files);
+        } else {
+            println!("{{\"format\":\"legacy\",\"reservations\":null}}");
+        }
+        return Ok(());
+    }
     if [
         "export-checkpoint",
         "import-checkpoint",
@@ -270,6 +294,7 @@ async fn run() -> Result<()> {
             StorageOptions {
                 checkpoint_interval: (storage_mode == "pruned").then_some(checkpoint_interval),
                 storage_limits,
+                minimum_signing_anchor: signing_anchor,
             },
         )
         .await?
@@ -280,17 +305,27 @@ async fn run() -> Result<()> {
     Ok(())
 }
 
-fn parse_anchor(text: &str) -> Result<yami_chain_consensus::CheckpointAnchor> {
-    fn digest(text: &str) -> Result<yami_chain::Digest> {
-        if text.len() != 64 || !text.bytes().all(|b| b.is_ascii_hexdigit()) {
-            return Err(eyre!("anchor digest must be 64 hex digits"));
-        }
-        let mut bytes = [0; 32];
-        for (i, b) in bytes.iter_mut().enumerate() {
-            *b = u8::from_str_radix(&text[i * 2..i * 2 + 2], 16)?;
-        }
-        Ok(yami_chain::Digest(bytes))
+fn digest(text: &str) -> Result<yami_chain::Digest> {
+    if text.len() != 64 || !text.bytes().all(|b| b.is_ascii_hexdigit()) {
+        return Err(eyre!("anchor digest must be 64 hex digits"));
     }
+    let mut bytes = [0; 32];
+    for (i, b) in bytes.iter_mut().enumerate() {
+        *b = u8::from_str_radix(&text[i * 2..i * 2 + 2], 16)?;
+    }
+    Ok(yami_chain::Digest(bytes))
+}
+fn parse_signing_anchor(text: &str) -> Result<yami_chain_storage::SigningAnchor> {
+    let (count, root) = text
+        .split_once(':')
+        .ok_or_else(|| eyre!("signing anchor format COUNT:ROOT"))?;
+    Ok(yami_chain_storage::SigningAnchor {
+        reservations: count.parse()?,
+        root: digest(root)?,
+    })
+}
+
+fn parse_anchor(text: &str) -> Result<yami_chain_consensus::CheckpointAnchor> {
     let parts: Vec<_> = text.split(':').collect();
     if parts.len() != 3 {
         return Err(eyre!("anchor format HEIGHT:BLOCK:STATE; pin independently"));

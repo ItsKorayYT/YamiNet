@@ -12,7 +12,12 @@ use yami_chain::{
 };
 
 mod limits;
+mod signing;
 pub use limits::*;
+pub use signing::{
+    validator_index_at, SigningAnchor, SigningStage, SigningStats, MAX_SIGNING_RESERVATIONS,
+    SIGNING_SEGMENT_BYTES,
+};
 pub const DEFAULT_ENTRY_BUDGET: u64 = 4_000_000;
 pub const MAX_RECORD_BYTES: usize = MAX_BLOCK_BYTES + MAX_CERTIFICATE_BYTES + 32;
 const RECEIPT_BYTES: usize = 32;
@@ -95,6 +100,8 @@ pub struct Journal {
     _lock: File,
     write_lock: Mutex<()>,
     limits: StorageLimits,
+    signing: Mutex<Option<signing::SigningState>>,
+    accounting: Mutex<limits::Accounting>,
 }
 impl Journal {
     pub fn open(path: &Path) -> io::Result<Self> {
@@ -131,6 +138,8 @@ impl Journal {
             _lock: lock,
             write_lock: Mutex::new(()),
             limits,
+            signing: Mutex::new(None),
+            accounting: Mutex::new(limits::Accounting::default()),
         };
         journal.check_entry_budget(max_entries)?;
         // Only this process can mutate these files now. Unrenamed records were
@@ -152,6 +161,7 @@ impl Journal {
         for parent in fs::canonicalize(path)?.ancestors().skip(1) {
             File::open(parent)?.sync_all()?;
         }
+        journal.recover_signing()?;
         Ok(journal)
     }
     fn check_entry_budget(&self, max_entries: u64) -> io::Result<()> {
@@ -196,6 +206,11 @@ impl Journal {
         {
             return Err(invalid("invalid record name"));
         }
+        if name.starts_with("signing-")
+            || (name.starts_with("signed-") && self.path.join("signing-active.bin").exists())
+        {
+            return Err(invalid("reserved signing storage namespace"));
+        }
         let limit = if name == "compact-base.bin" {
             MAX_COMPACT_BASE_BYTES
         } else if name == "genesis.bin" {
@@ -226,7 +241,7 @@ impl Journal {
             Err(error) if error.kind() == io::ErrorKind::NotFound => {}
             Err(error) => return Err(error),
         }
-        self.ensure_capacity(bytes.len() as u64)?;
+        self.reserve_capacity(bytes.len() as u64, 1, 1)?;
         let temp = self.path.join(format!(".pending-{name}"));
         let mut file = OpenOptions::new()
             .write(true)
@@ -417,10 +432,7 @@ impl Journal {
         step: u8,
         preimage: &[u8],
     ) -> io::Result<()> {
-        self.write_once(
-            &format!("signed-{height:020}-{round:010}-{step}.bin"),
-            preimage,
-        )
+        self.reserve_segmented((height, round, step), preimage, |_| {})
     }
 }
 
@@ -782,7 +794,7 @@ mod io_boundaries {
 
 /// Bounded, read-only pressure diagnostics. Candidates remain safety-relevant
 /// until finality. This sample is not an atomic snapshot or a deletion policy.
-#[derive(Debug, Default)]
+#[derive(Clone, Debug, Default)]
 pub struct StorageFootprint {
     pub entries: u64,
     pub bytes: u64,
@@ -841,7 +853,7 @@ impl Journal {
                 let name = name.to_string_lossy();
                 if entry.path().parent() == Some(self.path.join("wal").as_path()) {
                     report.wal_bytes += size;
-                } else if name.starts_with("signed-") {
+                } else if name.starts_with("signed-") || name.starts_with("signing-") {
                     report.signing_bytes += size;
                 } else if name.starts_with("equivocation-") {
                     report.evidence_bytes += size;

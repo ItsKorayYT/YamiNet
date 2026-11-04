@@ -1,0 +1,71 @@
+{
+  "base_commit": "61b66fb0547eb2a6822c6cc94de2e9873ffbdb75",
+  "branch": "development/yamichain",
+  "toolchain": "rustc 1.90.0 (1159e78c4 2025-09-14)",
+  "format": true,
+  "strict_workspace_all_targets_clippy": true,
+  "workspace_release_build": true,
+  "release_signing_benchmark_build": true,
+  "release_chain_benchmark_build": true,
+  "workspace_tests": {
+    "passed": 531,
+    "failed": 0,
+    "ignored": 10
+  },
+  "python_tooling_tests": 6,
+  "production_proof_versions_rejected": 65536,
+  "archive_default_preserved": true,
+  "legacy_reservations_deleted": false,
+  "complete_local_rollback_protected_by_hash_chains": false,
+  "independent_external_anchor_supported": true,
+  "indefinite_operation_demonstrated": false,
+  "hard_20GB_volume_enforced": false,
+  "public_deployment": false,
+  "log_sha256": {
+    "m11-format-final.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "m11-clippy-final.log": "9d23de4361fb95696d9ff12d876eee71272c130fb5994f20f71b21dcae7c6493",
+    "m11-tests-final.log": "804f8950f738e0e921b00b83160ba0286ca3865ab33a8cc22001661b2e4f5c47",
+    "m11-python-final.log": "8750d4b5acdce1e4d680a3a27eb5d68370ed8b7d37b619aa32e9e0049f881dae",
+    "m11-release-final.log": "ba4a06e6ff7bdaac02e9fe76bbe6989cf85b3101d4cb6ec5bd96845e058ba312"
+  },
+  "final_validator_sha256": "75c747082e22d836bea0b83e23b2f65e51796aedd0d07e52b3aba5b9361edfb8",
+  "signing_benchmark_matches_measured_executable": true,
+  "passed": true,
+  "process_upgrade_campaign": {
+    "passed": true,
+    "height": 704,
+    "restart_heights": [
+      576,
+      640,
+      704
+    ]
+  },
+  "final_code_process_campaign": {
+    "passed": true,
+    "imported_height": 65,
+    "height": 160
+  },
+  "signing_benchmark": {
+    "passed": true,
+    "max_authorizations": 65536,
+    "restarts_per_case": 5,
+    "actual_block_and_inode_fault_cases": 4
+  },
+  "chain_benchmark": {
+    "passed": true,
+    "heights": [
+      1024,
+      4096,
+      8192
+    ],
+    "restarts_per_mode": 5,
+    "cpus": 2,
+    "memory_bytes": 2147483648
+  },
+  "live_disk_full": {
+    "passed": true,
+    "height": 48,
+    "container_exit": 0
+  },
+  "no_validator_safety_records_evicted": true
+}

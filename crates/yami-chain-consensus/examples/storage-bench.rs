@@ -130,6 +130,9 @@ fn main() -> eyre::Result<()> {
     assert_eq!(prune_certified_before(&j, &genesis, height - 8)?, state);
     let pruning = start.elapsed().as_secs_f64();
     let after = j.storage_footprint(100_000)?;
+    let signing = j.signing_stats()?.expect("segmented signing fixture");
+    assert_eq!(signing.reservations, height);
+    let audits = j.accounting_audits()?;
     let start = Instant::now();
     assert_eq!(replay_certified(&j, &genesis)?, state);
     let pruned_restart = start.elapsed().as_secs_f64();
@@ -142,6 +145,6 @@ fn main() -> eyre::Result<()> {
         assert!(reopened.reserve_signature(1, 0, 2, b"conflict").is_err());
     }
     let pruned_restarts = start.elapsed().as_secs_f64();
-    println!("{{\"height\":{height},\"transactions_per_block\":{tx},\"generation_seconds\":{generation},\"archive_replay_seconds\":{archive_restart},\"archive_bytes\":{archive_bytes},\"snapshot_bytes\":{},\"export_seconds\":{export},\"import_seconds\":{import},\"compact_restart_seconds\":{compact_restart},\"fresh_bytes\":{fresh_bytes},\"prune_seconds\":{pruning},\"pruned_bytes\":{},\"retained_signing_bytes\":{},\"pruned_restart_seconds\":{pruned_restart},\"retained_tail\":8,\"restart_count_per_mode\":5,\"archive_restarts_seconds\":{archive_restarts},\"pruned_restarts_seconds\":{pruned_restarts},\"archive_allocated_bytes\":{},\"pruned_allocated_bytes\":{},\"archive_entries\":{},\"pruned_entries\":{},\"passed\":true}}",snapshot.bytes().len(),after.bytes,after.signing_bytes,archive_footprint.allocated_bytes,after.allocated_bytes,archive_footprint.entries,after.entries);
+    println!("{{\"height\":{height},\"transactions_per_block\":{tx},\"generation_seconds\":{generation},\"archive_replay_seconds\":{archive_restart},\"archive_bytes\":{archive_bytes},\"snapshot_bytes\":{},\"export_seconds\":{export},\"import_seconds\":{import},\"compact_restart_seconds\":{compact_restart},\"fresh_bytes\":{fresh_bytes},\"prune_seconds\":{pruning},\"pruned_bytes\":{},\"retained_signing_bytes\":{},\"pruned_restart_seconds\":{pruned_restart},\"retained_preimage_bytes\":{},\"signing_reservations\":{},\"signing_segments\":{},\"accounting_audits\":{audits},\"retained_tail\":8,\"restart_count_per_mode\":5,\"archive_restarts_seconds\":{archive_restarts},\"pruned_restarts_seconds\":{pruned_restarts},\"archive_allocated_bytes\":{},\"pruned_allocated_bytes\":{},\"archive_entries\":{},\"pruned_entries\":{},\"passed\":true}}",snapshot.bytes().len(),after.bytes,after.signing_bytes,signing.preimage_bytes,signing.reservations,signing.segments,archive_footprint.allocated_bytes,after.allocated_bytes,archive_footprint.entries,after.entries);
     Ok(())
 }

@@ -10,6 +10,7 @@ import asyncio
 from datetime import datetime, timezone
 import errno
 import hashlib
+from yamichain_safety import capture_safety, preserved, observed_anchor
 import json
 import os
 from pathlib import Path
@@ -58,7 +59,7 @@ def usage(path):
     return {'logical_bytes': sum(st.st_size for p, st in files),
             'allocated_bytes': sum(st.st_blocks * 512 for p, st in files), 'files': len(files),
             'wal_bytes': sum(st.st_size for p, st in files if p.suffix == '.wal'),
-            'signing_bytes': sum(st.st_size for p, st in files if p.name.startswith('signed-'))}
+            'signing_bytes': sum(st.st_size for p, st in files if p.name.startswith(('signed-', 'signing-')))}
 
 
 def validator_command(binary, address_space_mib):
@@ -200,10 +201,11 @@ async def run(args):
     first_all_height = all_target_time = None
     filler = None
     reserved = {}
+    minimum_anchors = {}
     completed_faults = set()
     fuzz_task = None
     shutdown_requested = False
-    history_linger = 60 if args.validators >= 25 else 12
+    history_linger = 60 if args.validators >= 25 else (30 if 'disk-full' in pending_faults else 12)
 
     barrier_ms = int((time.time() + args.startup_barrier) * 1000)
 
@@ -217,7 +219,7 @@ async def run(args):
             '--committee-plan', plan, '--base-port', str(args.base_port),
             '--peer-base-port', str(args.base_port if args.direct else args.proxy_base_port + 100 * (index if args.distinct_source_ips else proxy.group(index))),
             '--height', str(args.height), '--timeout', str(args.timeout), '--linger', str(history_linger),
-            '--round-timeout-ms',str(args.round_timeout_ms), '--start-at-ms', str(barrier_ms), '--test-transactions', str(args.transactions), '--sparse-peers', str(args.sparse).lower()], env=(dict(os.environ, YAMI_VALIDATOR_LOG='arc_malachitebft_network=debug,arc_malachitebft_engine=debug,arc_malachitebft_discovery=debug') if args.trace_one and index == 0 else None), stdout=log, stderr=subprocess.STDOUT)
+            '--round-timeout-ms',str(args.round_timeout_ms), '--start-at-ms', str(barrier_ms), '--test-transactions', str(args.transactions), '--sparse-peers', str(args.sparse).lower()] + (['--signing-anchor', minimum_anchors[index]] if index in minimum_anchors else []), env=(dict(os.environ, YAMI_VALIDATOR_LOG='arc_malachitebft_network=debug,arc_malachitebft_engine=debug,arc_malachitebft_discovery=debug') if args.trace_one and index == 0 else None), stdout=log, stderr=subprocess.STDOUT)
         offsets[log_path] = (index, 0, '')
 
     def progress():
@@ -335,11 +337,14 @@ async def run(args):
                 if kind in pending_faults and kind not in completed_faults and can_crash and crash_time is None:
                     if kind == 'disk-full':
                         store = root / 'node-0'
-                        reserved = {p.name: hashlib.sha256(p.read_bytes()).hexdigest() for p in store.glob('signed-*.bin')}
+                        reserved = capture_safety(store, live=True)
+                        if anchor := observed_anchor(store):
+                            minimum_anchors[0] = anchor
                         filler = store / 'fault-filler.data'
-                        # This case must use a small Docker tmpfs, never fill the host disk.
-                        if os.statvfs(store).f_blocks * os.statvfs(store).f_frsize > 8 * 1024 * 1024:
-                            raise RuntimeError('disk-full requires a dedicated tmpfs <=8 MiB')
+                        # Keep enough room for the 64-MiB refusal reserve before
+                        # injection; fill only this bounded tmpfs, never the host.
+                        if os.statvfs(store).f_blocks * os.statvfs(store).f_frsize > 512 * 1024 * 1024:
+                            raise RuntimeError('disk-full requires a dedicated tmpfs <=512 MiB')
                         with open(filler, 'wb', buffering=0) as f:
                             try:
                                 while True:
@@ -357,7 +362,7 @@ async def run(args):
             if 'socket-fuzz' in pending_faults and 'socket-fuzz' not in completed_faults and can_crash:
                 fuzz_task = asyncio.create_task(socket_fuzz())
                 completed_faults.add('socket-fuzz')
-            if crash_time is not None and elapsed - crash_time >= 2:
+            if crash_time is not None and elapsed - crash_time >= (12 if filler else 2):
                 if filler:
                     assert processes[0].poll() is not None and processes[0].returncode != 0, 'full-disk node did not fail closed before restart'
                     faults.append({'kind': 'ENOSPC-node-failed-closed', 'exit_code': processes[0].returncode,
@@ -367,8 +372,7 @@ async def run(args):
                 processes[0].wait()
                 if filler:
                     filler.unlink()
-                    for name, digest in reserved.items():
-                        assert hashlib.sha256((root / 'node-0' / name).read_bytes()).hexdigest() == digest, 'signing reservation changed under ENOSPC'
+                    assert preserved(root/'node-0', reserved), 'signing reservation changed under ENOSPC'
                     filler = None
                 launch(0)
                 faults.append({'kind': 'restart-preserving-entire-store', 'seconds': round(elapsed, 3)})

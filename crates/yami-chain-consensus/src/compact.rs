@@ -158,6 +158,15 @@ pub fn replay_certified(journal: &Journal, genesis: &Genesis) -> Result<State> {
         Ok(journal.replay(genesis.clone(), |r| verify_record(genesis, r))?)
     }
 }
+// An independently imported base need not align with the periodic interval.
+// Wait until the proposed floor reaches it; explicit backward pruning still fails.
+pub(crate) fn periodic_prune_floor(height: u64, interval: u64, history_min: u64) -> Option<u64> {
+    if interval == 0 || height <= interval || !height.is_multiple_of(interval) {
+        return None;
+    }
+    let floor = height - interval;
+    (floor >= history_min.saturating_sub(1)).then_some(floor)
+}
 pub fn history_min_height(journal: &Journal, genesis: &Genesis) -> Result<u64> {
     Ok(local_base(journal, genesis)?.map_or(1, |b| b.state.height() + 1))
 }
@@ -227,6 +236,7 @@ pub fn import_compact_checkpoint_observed(
         let name = entry?.file_name();
         let name = name.to_string_lossy();
         if name.starts_with("signed-")
+            || name.starts_with("signing-")
             || name.starts_with("equivocation-")
             || name == "wal"
             || name == "validator-index.bin"
@@ -380,6 +390,27 @@ mod tests {
         }
     }
     #[test]
+    fn periodic_pruning_waits_for_unaligned_checkpoint_without_rolling_it_back() {
+        let f = Fixture::new();
+        let current = replay_certified(&f.journal, &f.genesis).unwrap();
+        prune_certified_before(&f.journal, &f.genesis, 7).unwrap();
+        let base = std::fs::read(f.path.join("compact-base.bin")).unwrap();
+        let minimum = history_min_height(&f.journal, &f.genesis).unwrap();
+        assert_eq!(periodic_prune_floor(9, 3, minimum), None);
+        assert!(prune_certified_before(&f.journal, &f.genesis, 6).is_err());
+        assert_eq!(
+            std::fs::read(f.path.join("compact-base.bin")).unwrap(),
+            base
+        );
+        let floor = periodic_prune_floor(12, 3, minimum).unwrap();
+        assert_eq!(
+            prune_certified_before(&f.journal, &f.genesis, floor).unwrap(),
+            current
+        );
+        assert_eq!(history_min_height(&f.journal, &f.genesis).unwrap(), 10);
+        assert_eq!(replay_certified(&f.journal, &f.genesis).unwrap(), current);
+    }
+    #[test]
     fn captured_floor_is_never_published_when_later_history_fails() {
         for corrupt in ["receipt", "finalized"] {
             let f = Fixture::new();
@@ -530,8 +561,7 @@ mod tests {
                 .is_err()
         );
         assert_eq!(
-            std::fs::read(destination.join("signed-00000000000000000013-0000000000-1.bin"))
-                .unwrap(),
+            j.signature_reservation(13, 0, 1).unwrap().unwrap(),
             b"reservation"
         );
     }
