@@ -3200,6 +3200,8 @@ mod tests {
         assert!(app.scroll_limit() > 0.0);
         app.browser.active_mut().target_scroll = 300.0;
         for _ in 0..30 {
+            // Exercise 30 animation ticks independently of rendering speed.
+            app.last = Instant::now() - Duration::from_millis(16);
             frame(&mut app);
         }
         assert!(app.browser.active().scroll > 250.0);

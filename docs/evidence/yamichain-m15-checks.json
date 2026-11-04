@@ -1,0 +1,272 @@
+{
+  "base": "1394f43",
+  "branch": "development/yamichain",
+  "rust": "1.90.0",
+  "rust_default_passed": 556,
+  "rust_default_failed": 0,
+  "existing_default_ignored": 10,
+  "lab_tests_passed": 67,
+  "lab_tests_failed": 0,
+  "existing_lab_ignored": 1,
+  "python_passed": 6,
+  "financial_proof_versions_rejected": 65536,
+  "root_and_consensus_encodings_unchanged": true,
+  "v1_limits_unchanged": true,
+  "v2_production_recovery": false,
+  "v2_pruning": false,
+  "live_engine_capacity_exercised": 107008,
+  "larger_live_engine_capacity_claimed": false,
+  "certified_fixture_capacity_exercised": 500000,
+  "physical_power_failure_tested": false,
+  "logs": {
+    "format": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "clippy_default": {
+      "sha256": "bdaefe24fc3f94d54f97d96d8391b27ea6a3dbfa34d235dc3a670259bee26ccc",
+      "bytes": 226
+    },
+    "clippy_lab": {
+      "sha256": "a562afe3f2c47acc9f452a537f276408ff1f6f5c9fb4074faea783169ad2613a",
+      "bytes": 150
+    },
+    "regressions": {
+      "sha256": "7cc425b14dc18180a88ba6a61eef3302b2e674d8be34b5be37043cd3ee5b7dd7",
+      "bytes": 74732
+    },
+    "lab_tests": {
+      "sha256": "eb36d63e509f596764132c558440e1b429980df8675708635c7249136f9aa805",
+      "bytes": 8220
+    },
+    "release": {
+      "sha256": "15d373be47ad080a0d3a21fed8d931dcf5e169236e6807c52be17a2447133595",
+      "bytes": 62
+    },
+    "lab_release": {
+      "sha256": "d3b2eddefb35f9cf71579f0b8a738056d251a1ddba415c90be6911d3f32653e5",
+      "bytes": 152
+    },
+    "python_tests": {
+      "sha256": "8750d4b5acdce1e4d680a3a27eb5d68370ed8b7d37b619aa32e9e0049f881dae",
+      "bytes": 104
+    }
+  },
+  "unchanged_reference_files": [
+    "crates/yami-chain/src/snapshot.rs",
+    "crates/yami-chain/src/codec.rs",
+    "crates/yami-chain/src/committee.rs",
+    "crates/yami-chain/tests/state_reference.rs",
+    "crates/yami-chain/src/snapshot_v2/mod.rs",
+    "crates/yami-chain/src/snapshot_v2/store.rs",
+    "crates/yami-chain/src/snapshot_v2/tests.rs",
+    "crates/yami-chain-storage/src/archive.rs",
+    "crates/yami-chain-storage/src/signing.rs",
+    "crates/yami-chain-storage/src/lib.rs",
+    "crates/yami-chain-consensus/src/compact.rs",
+    "crates/yami-chain-consensus/src/signing.rs",
+    "crates/yami-chain-consensus/src/wire.rs",
+    "crates/yami-chain-privacy/tests/non_test_boundary.rs",
+    "crates/yami-chain-naming/src/lib.rs",
+    "Cargo.lock"
+  ],
+  "source_hashes": {
+    "apps/yami-browser/src/desktop.rs": "1950e5b9eec3e524b780412b4754893596b3e11e723d51a60229c670e3313225",
+    "apps/yami-validator/src/main.rs": "69c84895fb53b40b4bd0f310899afbe62e1f93fa3b2c77d5b9d1944721dd540e",
+    "crates/yami-chain-consensus/Cargo.toml": "642243d488d5e54f2a836c5efe0520aea7c0a92f224a72a6f6378a8864fe9101",
+    "crates/yami-chain-consensus/src/candidates.rs": "96f9557350de82916df975f6c3f8481ac7842e48cca705046a4054375e28c2bb",
+    "crates/yami-chain-consensus/src/lib.rs": "3b0208e85e2e6d87d97af7c6a08bea112d33ecdfb1c6ac94fa52d32ea6c0b2b2",
+    "crates/yami-chain-consensus/src/node.rs": "6d44fa2b543ba44ed2e9eba78eb6ebf79a6a4b436a60566bd18cbe5b736e37e1",
+    "crates/yami-chain/src/lib.rs": "eae9b0698f3628d5063926993104e4dbf79f3812849391cb861d57ad5805c39f",
+    "crates/yami-chain/src/scalability_tests.rs": "5f69eb555bbb41e67bc53a6324bb98f6534dcb04f51baad634322e2d7b4380e8",
+    "crates/yami-chain-consensus/examples/large-state-bench.rs": "50910af4e7dc8e6b8b32ddb7bb6e116edbecad925ced1115bf3fee6c017645b7",
+    "tools/yamichain-large-history.py": "ec3926b1d88b41fe70e0035a9863210b4c61cf1a834a164e45380faae9e80b98",
+    "tools/yamichain-large-live.py": "31423ad99bd03faadaae421d572333b07b02b5e6ed2fbc9fdf9400bfe1bd0400",
+    "tools/yamichain-large-followup.py": "161f10181723b2c119ba31e5a5d1b3e617ea2333c7ac9473f1706f285c11ea19",
+    "tools/yamichain-archive-faults.py": "ec95fb79de4b11657bcdb3f87e7ed4b4887afcfcec764588dce698b688295c06",
+    "crates/yami-chain/src/snapshot.rs": "1c47458ab4883bee40c7ec9b291a8af1a213611a88200169e2dc6a7c7cefbb07",
+    "crates/yami-chain/src/codec.rs": "9483c17adfb00a9efa0ba3c81bd8d98741cb39d3b8e16ff49ffb1b8fafc5e31f",
+    "crates/yami-chain/src/committee.rs": "82086a2055f9a188a2a200318eb10234b78de93637dacc975f440187e0752661",
+    "crates/yami-chain/tests/state_reference.rs": "9462c79680a067ef9e00f896bada65a20f26b84f313c4c0197ba4c0a02d4a9b8",
+    "crates/yami-chain/src/snapshot_v2/mod.rs": "33376930dbbe1818daef17eb92691dd98cb2ed504498a925dc250e5134ec554b",
+    "crates/yami-chain/src/snapshot_v2/store.rs": "677bfe77d85bf1752658e989b07d976ab5923954fd04d9b1b80709c2f4a43938",
+    "crates/yami-chain/src/snapshot_v2/tests.rs": "6d74c976f2c4d1012b31fca7dba9c98b90a263a2198c6122b8c334c458256de5",
+    "crates/yami-chain-storage/src/archive.rs": "e80d8d9d5e5f2f2af39a7007e1ffd48b7b2caeef4efee88e1d9db7e3b5a97e64",
+    "crates/yami-chain-storage/src/signing.rs": "4bf33c8e595a752f0709b5208d46055d2ccd9d0fa3711ec9d50c8fb87d530876",
+    "crates/yami-chain-storage/src/lib.rs": "04aa9f25b385a8f039485b42ac3ac267922c1c712aef982f3405ed20cf9df25e",
+    "crates/yami-chain-consensus/src/compact.rs": "e5b5e119386467df10fa3370bf60f1ab311e9d5563c0d9a225e7fe43a238d3bd",
+    "crates/yami-chain-consensus/src/signing.rs": "7f8155cd22ff820e6566e4974f3cb67e31bf801ad3587c35b0cf4730f99730c2",
+    "crates/yami-chain-consensus/src/wire.rs": "62272c7de99e040c285ea223bce273d928b4767fb3e95c56a9be6f72e14610bc",
+    "crates/yami-chain-privacy/tests/non_test_boundary.rs": "72c0c3df14100f2f0c972a9a837a4726736d80d6c0a025743c4d898e12029b36",
+    "crates/yami-chain-naming/src/lib.rs": "921a287f8ac9a5c88d9a084831c0eab72b5167e0c7e58cd0384c355036b68843",
+    "Cargo.lock": "359eef23f81cb4aa943f81bb4760dbc24d0f5ae59b3bf0f5c2ce34fb3dc3eb8f"
+  },
+  "binaries": {
+    "yami-validator": {
+      "sha256": "dc19828ecd64f8e59746be743e05b28cec14364013c3e2903fcfb4aaef592bae",
+      "bytes": 25946056
+    },
+    "yami-validator-final": {
+      "sha256": "f7f45123ea5dcdd6bc094f4ef2ee37013d83b711f80fc538e4d5c7ad0186c519",
+      "bytes": 25914528
+    },
+    "large-state-bench-final": {
+      "sha256": "a38be90603911722be37b23aa70eb8ad1311c596d6f05d9767786d5ef29be9b5",
+      "bytes": 1997976
+    },
+    "large-state-lab-delivery": {
+      "sha256": "35f417d6450419efe307fe0e1933993cc5fbdf8964dd696858d7ea99b5d367ac",
+      "bytes": 2004728
+    }
+  },
+  "initial_release_ui_test_failure": {
+    "cause": "Existing animation test assumed rendering itself advanced wall time. Test-only deterministic 16-ms ticks fixed it; full optimized regressions then passed.",
+    "log_sha256": "6c955f3295203ad437881344c6f1ca77ec013c41e67b12cb65b044603ee43150"
+  },
+  "delivery_smoke": {
+    "passed": true,
+    "cpus": 2,
+    "memory_bytes": 2147483648,
+    "synthetic_snapshots": false,
+    "live_engine_generated": false,
+    "binary_sha256": "1dba9f3d7bd4fccafc0b53bbe66728cff37c7a566c8834a71907c7595daea37b",
+    "validator_sha256": "f7f45123ea5dcdd6bc094f4ef2ee37013d83b711f80fc538e4d5c7ad0186c519",
+    "cases": [
+      {
+        "entries": 1024,
+        "future_epoch": 800103,
+        "accounts": 1024,
+        "pattern": "distinct",
+        "height": 16,
+        "root": "9d3e338d950cd1e33ec67cd07e1c7601e7fd0b97f43058fd1d94869a5b2f6212",
+        "tip": "6741b10b6b5d46716ae635f2712e2ec20debd91003e79596738b94d0ceeee9f2",
+        "v1_bytes": 95322,
+        "generation_seconds": 0.549556741,
+        "propose_seconds": 0.09344414800000002,
+        "execute_seconds": 0.08818679200000001,
+        "certificate_persistence_seconds": 0.2990041559999999,
+        "cached_root_seconds": 4.3e-07,
+        "repeated_roots_100_seconds": 2.11e-07,
+        "clones_8_seconds": 5.237e-06,
+        "lookups_1024_seconds": 0.000286856,
+        "snapshot_serialization_seconds": 6.067e-05,
+        "retained_divergent_forks_8_seconds": 0.00454953,
+        "empty_proposal_hash_seconds": 7.8049e-05,
+        "uncached_retransmission_mean_seconds": 0.0070800245,
+        "cached_retransmission_mean_seconds": 0.000164388875,
+        "v2_save_verify_seconds": 0.012275303,
+        "v2_recovery_seconds": 0.006242661,
+        "v2_transfer_verify_seconds": 0.014898965,
+        "v2_manifest": "1d90590bf5f90d3cd1482da56a4a5ed7009a397fe4ff8b7e1dfdb968dc997bc2",
+        "archive_replay_seconds": 0.098047609,
+        "archive_allocated_bytes": 225280,
+        "archive_entries": 8,
+        "certificate_signers": 4,
+        "transactions_genuinely_signed": true,
+        "certificates_verified": true,
+        "live_engine_generated": false,
+        "passed": true,
+        "cpu_user_seconds": 0.344367,
+        "cpu_system_seconds": 0.046577,
+        "peak_rss_kib": 16628,
+        "wall_seconds": 0.8152093959979538,
+        "cgroup_cpu_max": "200000 100000",
+        "cgroup_memory_max": "2147483648",
+        "memory_peak_bytes": 12926976
+      }
+    ],
+    "concurrent": [
+      {
+        "passed": true,
+        "kind": "v2",
+        "entries": 1024,
+        "processes": 4,
+        "seconds": 0.03766833600093378,
+        "cpu_user_seconds": 0.02792,
+        "cpu_system_seconds": 0.002783,
+        "sampled_combined_peak_rss_bytes": 12746752,
+        "memory_peak_bytes": 13250560
+      },
+      {
+        "passed": true,
+        "kind": "v2",
+        "entries": 1024,
+        "processes": 4,
+        "seconds": 0.0665378569974564,
+        "cpu_user_seconds": 0.029924,
+        "cpu_system_seconds": 0.0,
+        "sampled_combined_peak_rss_bytes": 9687040,
+        "memory_peak_bytes": 13230080
+      },
+      {
+        "passed": true,
+        "kind": "full_archive",
+        "entries": 1024,
+        "processes": 4,
+        "seconds": 0.5038929609982006,
+        "cpu_user_seconds": 0.31564,
+        "cpu_system_seconds": 0.00842,
+        "sampled_combined_peak_rss_bytes": 14569472,
+        "memory_peak_bytes": 15495168
+      }
+    ],
+    "attacks": [
+      {
+        "kind": "corrupt",
+        "rejected": true,
+        "error": "Error: archive receipt mismatch\n\nLocation:\n    crates/yami-chain-consensus/examples/large-state-bench.rs:179:23"
+      },
+      {
+        "kind": "missing",
+        "rejected": true,
+        "error": "Error: No such file or directory (os error 2)\n\nLocation:\n    crates/yami-chain-consensus/examples/large-state-bench.rs:179:23"
+      },
+      {
+        "kind": "cross-context",
+        "rejected": true,
+        "error": "Error: independent archive anchor mismatch\n\nLocation:\n    crates/yami-chain-consensus/examples/large-state-bench.rs:182:9"
+      },
+      {
+        "kind": "same-chain-rollback",
+        "rejected": true,
+        "valid_certified_prefix": {
+          "height": 15,
+          "names": 960,
+          "tip": "65a1ef9e70afb9e9c94598928bc4b0483c565c29b4c3ec57edc21ed6aecec0ae",
+          "root": "ca8b8cf2de0910dfdb32edabc4c2b9422abc29f9ef863330ff5dd0582089a0e5",
+          "observer_only": true
+        },
+        "error": "Error: independent archive anchor mismatch\n\nLocation:\n    crates/yami-chain-consensus/examples/large-state-bench.rs:182:9"
+      }
+    ],
+    "enospc": [
+      {
+        "passed": true,
+        "entries": 1024,
+        "kind": "blocks",
+        "errno": 28,
+        "source_bytes_unchanged": true,
+        "retry_verified": true,
+        "error": "yami-validator: No space left on device (os error 28)"
+      },
+      {
+        "passed": true,
+        "entries": 1024,
+        "kind": "inodes",
+        "errno": 28,
+        "source_bytes_unchanged": true,
+        "retry_verified": true,
+        "error": "yami-validator: No space left on device (os error 28)"
+      }
+    ],
+    "fixture_cannot_be_live_identity": true,
+    "note": "Final CLI whitelist also rejects unsupported case sizes; supported smoke/measurement contexts and hot algorithms unchanged."
+  },
+  "final_cli_size_refusal_and_idempotent_fence": {
+    "passed": true,
+    "rejected_entries": 1025,
+    "no_directory_created": true,
+    "observer_fence_reverified": true,
+    "binary_sha256": "35f417d6450419efe307fe0e1933993cc5fbdf8964dd696858d7ea99b5d367ac"
+  }
+}

@@ -15,6 +15,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--test-binary', type=Path, required=True)
     parser.add_argument('--output', type=Path, required=True)
+    parser.add_argument('--cpuset', help='optional CPU affinity for isolated lab scheduling')
     args = parser.parse_args()
     binary = args.test_binary.resolve()
     if args.output.exists():
@@ -28,7 +29,8 @@ def main():
         for kind in ['blocks', 'inodes']:
             for mode in ['append', 'migration', 'recovery']:
                 started = time.monotonic()
-                result = subprocess.run(['docker', '--host=unix:///var/run/docker.sock', 'run', '--rm',
+                result = subprocess.run(['docker', '--host=unix:///var/run/docker.sock', 'run',
+                    *(['--cpuset-cpus', args.cpuset] if args.cpuset else []), '--rm',
                     '--network', 'none', '--cpus', '2', '--memory', '2g', '--memory-swap', '2g',
                     '--read-only', '--pids-limit', '64', '--cap-drop', 'ALL',
                     '--security-opt', 'no-new-privileges', '--user', f'{os.getuid()}:{os.getgid()}',

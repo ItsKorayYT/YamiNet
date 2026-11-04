@@ -117,3 +117,33 @@ fn derived_reserved_key_index_matches_all_epoch_keys_and_unreserved_accounts() {
         );
     }
 }
+
+#[test]
+fn distinct_laboratory_accounts_execute_deterministically_without_changing_default_workloads() {
+    let state = State::new(Genesis::local()).unwrap();
+    assert_eq!(
+        state.development_distinct_workload_block(0),
+        state.development_block()
+    );
+    assert!(state.development_distinct_workload_block(65).is_err());
+    let block = state.development_distinct_workload_block(64).unwrap();
+    assert_eq!(
+        block,
+        state.development_distinct_workload_block(64).unwrap()
+    );
+    let next = state.execute(&block).unwrap();
+    assert_eq!(next.names().len(), 64);
+    assert_eq!(next.nonces.len(), 64);
+    assert!(next.nonces.values().all(|n| *n == 1));
+    let second = next
+        .execute(&next.development_distinct_workload_block(64).unwrap())
+        .unwrap();
+    assert_eq!(second.names().len(), 128);
+    assert_eq!(second.nonces.len(), 128);
+    assert_eq!(state.names().len(), 0);
+    assert_eq!(next.names().len(), 64);
+    assert_eq!(
+        state.development_workload_block(64).unwrap(),
+        state.development_workload_block(64).unwrap()
+    );
+}

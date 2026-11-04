@@ -24,10 +24,19 @@ impl Part {
 }
 pub(crate) struct Candidates {
     journal: Arc<Journal>,
+    validated: Option<Validated>,
+}
+struct Validated {
+    parent: (Digest, u64, Digest, Digest),
+    block: Block,
+    next: State,
 }
 impl Candidates {
     pub fn new(journal: Arc<Journal>) -> Self {
-        Self { journal }
+        Self {
+            journal,
+            validated: None,
+        }
     }
     fn name(height: u64, round: m::Round) -> Result<String> {
         Ok(format!(
@@ -111,8 +120,32 @@ impl Candidates {
                 })
                 .is_ok()
     }
-    fn valid(state: &State, part: &Part) -> bool {
-        Self::authenticated(state, part) && state.execute(&part.block).is_ok()
+    // A single volatile entry is bounded and cannot authorize disk/network data.
+    // Authentication still runs on every proposal. Exact parent and complete block
+    // equality are required. Restart starts empty; disk-loaded blocks must execute
+    // successfully before they can populate this cache.
+    pub fn execute(&mut self, state: &State, block: &Block) -> yami_chain::Result<State> {
+        let parent = (
+            state.genesis().id(),
+            state.height(),
+            state.tip(),
+            state.root(),
+        );
+        if let Some(v) = &self.validated {
+            if v.parent == parent && v.block == *block {
+                return Ok(v.next.clone());
+            }
+        }
+        let next = state.execute(block)?;
+        self.validated = Some(Validated {
+            parent,
+            block: block.clone(),
+            next: next.clone(),
+        });
+        Ok(next)
+    }
+    fn valid(&mut self, state: &State, part: &Part) -> bool {
+        Self::authenticated(state, part) && self.execute(state, &part.block).is_ok()
     }
     pub fn admit(&mut self, state: &State, active_round: m::Round, part: &Part) -> Result<bool> {
         let current = active_round.as_u32().unwrap_or(0);
@@ -137,7 +170,7 @@ impl Candidates {
             // Disk cache membership is not authentication. Recheck even an
             // identical retransmission: corrupted metadata/payloads must never
             // become a Valid proposal or an equivocation evidence source.
-            if !Self::valid(state, &original) {
+            if !self.valid(state, &original) {
                 return Err(eyre!("invalid cached proposal"));
             }
             if original != *part {
@@ -163,7 +196,7 @@ impl Candidates {
             }
             return Ok(true);
         }
-        if !Self::valid(state, part) {
+        if !self.valid(state, part) {
             return Ok(false);
         }
         self.store_block(&part.block)?;
@@ -174,18 +207,19 @@ impl Candidates {
         self.journal.write_once(&name, &metadata)?;
         Ok(true)
     }
-    pub fn recover(&self, state: &State, round: m::Round) -> Result<Option<Part>> {
+    pub fn recover(&mut self, state: &State, round: m::Round) -> Result<Option<Part>> {
         self.read(&Self::name(state.height() + 1, round)?, MAX_RECORD_BYTES)?
             .map(|bytes| {
                 let part = self.decode_proposal(state, bytes)?;
-                if part.round != round || !Self::valid(state, &part) {
+                if part.round != round || !self.valid(state, &part) {
                     return Err(eyre!("invalid recovered proposal"));
                 }
                 Ok(part)
             })
             .transpose()
     }
-    pub fn prune_finalized(&self, height: u64) -> Result<()> {
+    pub fn prune_finalized(&mut self, height: u64) -> Result<()> {
+        self.validated = None;
         self.journal.remove_finalized_candidates(height)?;
         Ok(())
     }
@@ -251,7 +285,7 @@ mod tests {
         let honest = signed(&state, m::Round::new(1), "test-honest");
         assert!(c.admit(&state, round, &honest).unwrap()); // arrives before StartedRound(1)
         drop(c);
-        let c = Candidates::new(Arc::new(Journal::open(&path).unwrap()));
+        let mut c = Candidates::new(Arc::new(Journal::open(&path).unwrap()));
         assert_eq!(c.recover(&state, round).unwrap(), Some(original.clone()));
         assert_eq!(c.recover(&state, honest.round).unwrap(), Some(honest));
         assert_eq!(
@@ -263,6 +297,45 @@ mod tests {
         c.prune_finalized(1).unwrap();
         assert_eq!(std::fs::read_dir(&path).unwrap().count(), 2); // lock and evidence
         drop(c);
+        std::fs::remove_dir_all(path).unwrap();
+    }
+    #[test]
+    fn volatile_execution_cache_is_bound_to_exact_parent_and_block_and_dies_on_restart() {
+        let path = std::env::temp_dir().join(format!("yami-execute-cache-{}", std::process::id()));
+        let journal = Arc::new(Journal::open(&path).unwrap());
+        let state = State::new(Genesis::local()).unwrap();
+        let mut c = Candidates::new(journal.clone());
+        let block = state.development_workload_block(64).unwrap();
+        let next = c.execute(&state, &block).unwrap();
+        assert_eq!(next, state.execute(&block).unwrap());
+        assert_eq!(c.execute(&state.clone(), &block).unwrap(), next);
+        let child = next.propose(Vec::new()).unwrap();
+        assert_eq!(
+            c.execute(&next, &child).unwrap(),
+            next.execute(&child).unwrap()
+        );
+        let alternate = state
+            .execute(&state.development_workload_block(63).unwrap())
+            .unwrap();
+        assert!(c.execute(&alternate, &child).is_err());
+        let mut corrupt = child.clone();
+        corrupt.header.state.0[0] ^= 1;
+        assert!(c.execute(&next, &corrupt).is_err());
+        assert_eq!(
+            c.execute(&next, &child).unwrap(),
+            next.execute(&child).unwrap()
+        );
+        let genesis = Genesis::development_schedule(&[(1, 5)]).unwrap();
+        let other = State::new(genesis).unwrap();
+        assert!(c.execute(&other, &block).is_err());
+        c.prune_finalized(next.height()).unwrap();
+        assert!(c.validated.is_none());
+        drop(c);
+        let c = Candidates::new(journal.clone());
+        assert!(c.validated.is_none());
+        assert_eq!(state.names().len(), 0);
+        drop(c);
+        drop(journal);
         std::fs::remove_dir_all(path).unwrap();
     }
     #[test]
@@ -366,7 +439,7 @@ mod retention_tests {
             }
         }
         drop(candidates);
-        let candidates = Candidates::new(Arc::new(Journal::open(&path).unwrap()));
+        let mut candidates = Candidates::new(Arc::new(Journal::open(&path).unwrap()));
         for (r, id) in ids.into_iter().enumerate() {
             assert!(candidates.block(1, id).unwrap().is_some());
             assert!(candidates
@@ -450,4 +523,82 @@ mod compact_storage_tests {
         drop(journal);
         std::fs::remove_dir_all(path).unwrap();
     }
+}
+
+/// Paired laboratory profile on a genuinely replayed development-chain state.
+/// This creates a NEW fixture directory and never opens a validator safety store.
+/// Its public development identity must never be reused as a live validator.
+#[cfg(feature = "large-state-lab")]
+pub fn profile_candidate_retransmission(
+    state: &State,
+    directory: &std::path::Path,
+) -> Result<(f64, f64)> {
+    use yami_chain::{development_key, Genesis, Signer as _};
+    eyre::ensure!(
+        !directory.exists()
+            && state.genesis()
+                == &Genesis::development_schedule(
+                    &state
+                        .genesis()
+                        .epochs
+                        .iter()
+                        .map(|e| (e.first_height, e.validators.members().len()))
+                        .collect::<Vec<_>>()
+                )?,
+        "fresh development fixture required"
+    );
+    let journal = Arc::new(Journal::open(directory)?);
+    journal.ensure_genesis(state.genesis())?;
+    let mut candidates = Candidates::new(journal.clone());
+    let height = Height(state.height() + 1);
+    let proposer = Context
+        .select_proposer(
+            &Committee::at(state.genesis(), height.0)?,
+            height,
+            m::Round::ZERO,
+        )
+        .address;
+    let (index, key) = (0..4)
+        .map(|i| (i, development_key("consensus", i)))
+        .find(|(_, k)| k.verifying_key().to_bytes() == proposer.0 .0)
+        .ok_or_else(|| eyre!("fixture proposer"))?;
+    journal.bind_validator_index(index)?;
+    journal.migrate_signatures()?;
+    let mut part = Part {
+        height,
+        round: m::Round::ZERO,
+        valid_round: m::Round::Nil,
+        proposer,
+        block: state.development_distinct_workload_block(64)?,
+        signature: [0; 64],
+    };
+    let preimage = proposal_preimage_for(state.genesis(), &part.proposal()?)?;
+    journal.reserve_signature(height.0, 0, 0, &preimage)?;
+    part.signature = key.sign(&preimage).to_bytes();
+    eyre::ensure!(
+        candidates.admit(state, part.round, &part)?,
+        "initial fixture admission"
+    );
+    let at = std::time::Instant::now();
+    for _ in 0..8 {
+        candidates.validated = None;
+        eyre::ensure!(
+            candidates.admit(state, part.round, &part)?,
+            "uncached retransmission"
+        );
+    }
+    let uncached = at.elapsed().as_secs_f64() / 8.;
+    let at = std::time::Instant::now();
+    for _ in 0..8 {
+        eyre::ensure!(
+            candidates.admit(state, part.round, &part)?,
+            "cached retransmission"
+        );
+    }
+    let cached = at.elapsed().as_secs_f64() / 8.;
+    eyre::ensure!(
+        candidates.execute(state, &part.block)? == state.execute(&part.block)?,
+        "cached execution oracle"
+    );
+    Ok((uncached, cached))
 }

@@ -1,0 +1,57 @@
+{
+  "passed": true,
+  "test_binary_sha256": "6629ed53be848b63d6e73ccd454f80d72f6fa5bfa5e435f60a4e6d9d0ec7fc4f",
+  "cpus": 2,
+  "memory_bytes": 2147483648,
+  "tmpfs_bytes": 134217728,
+  "cases": [
+    {
+      "kind": "blocks",
+      "mode": "append",
+      "passed": true,
+      "seconds": 1.2864383429987356,
+      "stdout": "\nrunning 1 test\ntest archive::tests::actual_enospc_child ... ok\n\ntest result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 42 filtered out; finished in 0.11s\n\n",
+      "stderr": ""
+    },
+    {
+      "kind": "blocks",
+      "mode": "migration",
+      "passed": true,
+      "seconds": 1.7976327780015708,
+      "stdout": "\nrunning 1 test\ntest archive::tests::actual_enospc_child ... \nrunning 1 test\ntest archive::tests::crash_child ... ok\n\ntest result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 42 filtered out; finished in 0.11s\n\n",
+      "stderr": ""
+    },
+    {
+      "kind": "blocks",
+      "mode": "recovery",
+      "passed": true,
+      "seconds": 1.5999084409995703,
+      "stdout": "\nrunning 1 test\ntest archive::tests::actual_enospc_child ... \nrunning 1 test\ntest archive::tests::crash_child ... ok\n\ntest result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 42 filtered out; finished in 0.09s\n\n",
+      "stderr": ""
+    },
+    {
+      "kind": "inodes",
+      "mode": "append",
+      "passed": true,
+      "seconds": 3.619766735002486,
+      "stdout": "\nrunning 1 test\ntest archive::tests::actual_enospc_child ... ok\n\ntest result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 42 filtered out; finished in 0.03s\n\n",
+      "stderr": ""
+    },
+    {
+      "kind": "inodes",
+      "mode": "migration",
+      "passed": true,
+      "seconds": 1.876966767002159,
+      "stdout": "\nrunning 1 test\ntest archive::tests::actual_enospc_child ... \nrunning 1 test\ntest archive::tests::crash_child ... ok\n\ntest result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 42 filtered out; finished in 0.03s\n\n",
+      "stderr": ""
+    },
+    {
+      "kind": "inodes",
+      "mode": "recovery",
+      "passed": true,
+      "seconds": 1.9566760560010152,
+      "stdout": "\nrunning 1 test\ntest archive::tests::actual_enospc_child ... \nrunning 1 test\ntest archive::tests::crash_child ... ok\n\ntest result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 42 filtered out; finished in 0.04s\n\n",
+      "stderr": ""
+    }
+  ]
+}

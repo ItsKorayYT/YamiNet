@@ -519,6 +519,28 @@ impl State {
             .collect::<Result<Vec<_>>>()?;
         self.propose(transactions)
     }
+    /// Distinct, deterministic laboratory accounts; no financial functionality.
+    /// Existing workload/transaction semantics and all production limits are unchanged.
+    pub fn development_distinct_workload_block(&self, count: usize) -> Result<Block> {
+        if count == 0 {
+            return self.development_block();
+        }
+        if count > MAX_TXS {
+            return Err(Error::Limit);
+        }
+        let height = self.height.checked_add(1).ok_or(Error::Overflow)?;
+        let transactions = (0..count)
+            .map(|i| {
+                let mut seed = Writer::default();
+                seed.raw(&self.genesis_id.0);
+                seed.u64(height);
+                seed.u32(i as u32);
+                let owner = SigningKey::from_bytes(&hash(b"YC-DISTINCT-LAB-ACCOUNT-1", &seed.0).0);
+                Transaction::sign(&format!("test-distinct-{height}-{i}"), 0, height, &owner)
+            })
+            .collect::<Result<Vec<_>>>()?;
+        self.propose(transactions)
+    }
     /// Repeatable local non-financial workload, identical for every proposer/round.
     pub fn development_block(&self) -> Result<Block> {
         let txs = if self.height == 0 {

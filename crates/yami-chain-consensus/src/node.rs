@@ -127,6 +127,7 @@ pub struct NodeOptions {
     pub base_port: u16,
     pub peer_base_port: u16,
     pub test_transactions: usize,
+    pub test_distinct_accounts: bool,
     pub sparse_peers: bool,
     pub start_at: Option<std::time::SystemTime>,
     pub round_timeout: Duration,
@@ -438,6 +439,8 @@ async fn app_loop(
     let mut history_min = crate::history_min_height(&journal, state.genesis())?;
     let mut storage_tick = tokio::time::interval(Duration::from_secs(2));
     let mut active_round = m::Round::Nil;
+    // One bounded observation, only for the explicit distinct-account lab workload.
+    let mut proposal_observation: Option<(Digest, std::time::Instant, bool)> = None;
     let consensus_deadline = tokio::time::Instant::now() + options.timeout;
     let mut serve_deadline = None;
     let mut _held_final_reply = None;
@@ -554,7 +557,15 @@ async fn app_loop(
                 if height.0 != state.height() + 1 {
                     return Err(eyre!("proposal height mismatch"));
                 }
-                let block = state.development_workload_block(options.test_transactions)?;
+                let proposal_began = options.test_distinct_accounts.then(std::time::Instant::now);
+                let block = if options.test_distinct_accounts {
+                    state.development_distinct_workload_block(options.test_transactions)?
+                } else {
+                    state.development_workload_block(options.test_transactions)?
+                };
+                if let Some(at) = proposal_began {
+                    proposal_observation = Some((block.id()?, at, true));
+                }
                 candidates.store_block(&block)?;
                 let proposer = Context
                     .select_proposer(&Committee::at(state.genesis(), height.0)?, height, round)
@@ -578,6 +589,15 @@ async fn app_loop(
                 let mut result = None;
                 if let Some(part) = single_part_proposal(part) {
                     if candidates.admit(&state, active_round, &part)? {
+                        if options.test_distinct_accounts {
+                            let id = part.block.id()?;
+                            if proposal_observation
+                                .as_ref()
+                                .is_none_or(|(previous, _, _)| *previous != id)
+                            {
+                                proposal_observation = Some((id, std::time::Instant::now(), false));
+                            }
+                        }
                         result = Some(proposal(&part)?);
                     }
                 }
@@ -636,7 +656,7 @@ async fn app_loop(
                     .block(certificate.height.0, certificate.value_id.0)?
                     .ok_or_else(|| eyre!("decided payload unavailable"))?;
                 verify_certificate(state.genesis(), &block, &certificate)?;
-                let next = state.execute(&block)?;
+                let next = candidates.execute(&state, &block)?;
                 maybe_crash(&journal, options.crash, CrashPoint::BeforeCommit)?;
                 journal.append(&FinalizedRecord {
                     block,
@@ -673,6 +693,13 @@ async fn app_loop(
                         return Err(eyre!("compaction changed finalized state"));
                     }
                     history_min = crate::history_min_height(&journal, state.genesis())?;
+                }
+                if options.test_distinct_accounts {
+                    if let Some((id, at, local)) = proposal_observation.take() {
+                        if id == certificate.value_id.0 {
+                            eprintln!("{{\"lab_finality\":true,\"height\":{},\"proposal_to_finalized_seconds\":{},\"origin\":\"{}\"}}",state.height(),at.elapsed().as_secs_f64(),if local { "local_builder_start" } else { "authenticated_admission" });
+                        }
+                    }
                 }
                 println!("{}", status_json(&state));
                 if state.height() >= options.target_height {
@@ -899,6 +926,7 @@ mod startup_tests {
                 peer_base_port: 28100,
                 isolated_network: None,
                 test_transactions: 0,
+                test_distinct_accounts: false,
                 sparse_peers: false,
                 start_at: barrier,
                 round_timeout: Duration::from_millis(800),
@@ -936,6 +964,7 @@ mod startup_tests {
                 peer_base_port: 28100,
                 isolated_network: None,
                 test_transactions: 0,
+                test_distinct_accounts: false,
                 sparse_peers: false,
                 start_at: None,
                 round_timeout: Duration::from_millis(800),
@@ -997,6 +1026,7 @@ mod startup_tests {
             peer_base_port: 28100,
             isolated_network: None,
             test_transactions: 0,
+            test_distinct_accounts: false,
             sparse_peers: false,
             start_at: None,
             round_timeout: Duration::from_millis(800),
@@ -1058,6 +1088,7 @@ mod startup_tests {
             peer_base_port: 28100,
             isolated_network: None,
             test_transactions: 0,
+            test_distinct_accounts: false,
             sparse_peers: false,
             start_at: None,
             round_timeout: Duration::from_millis(800),

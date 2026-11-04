@@ -24,7 +24,12 @@ tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "signa
 
 [features]
 fuzzing = []
+large-state-lab = ["yami-chain/experimental-snapshot-v2"]
 
 [[example]]
 name = "fuzz-seeds"
 required-features = ["fuzzing"]
+
+[[example]]
+name = "large-state-bench"
+required-features = ["large-state-lab"]

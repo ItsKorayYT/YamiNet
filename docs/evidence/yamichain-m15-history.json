@@ -1,0 +1,389 @@
+{
+  "passed": true,
+  "cpus": 2,
+  "memory_bytes": 2147483648,
+  "synthetic_snapshots": false,
+  "live_engine_generated": false,
+  "binary_sha256": "a38be90603911722be37b23aa70eb8ad1311c596d6f05d9767786d5ef29be9b5",
+  "validator_sha256": "dc19828ecd64f8e59746be743e05b28cec14364013c3e2903fcfb4aaef592bae",
+  "cases": [
+    {
+      "entries": 100000,
+      "future_epoch": 810001,
+      "accounts": 100000,
+      "pattern": "distinct",
+      "height": 1563,
+      "root": "f590103df63af2445d76e413cdc71255064134ad66f5a70bfb1b184e7acf566d",
+      "tip": "287e2d447b52e16e2d931349140e4adfc3c1aa5ed00e5be43f878d23820c718b",
+      "v1_bytes": 9300090,
+      "generation_seconds": 79.363587654,
+      "propose_seconds": 16.506511119000013,
+      "execute_seconds": 16.247161990000002,
+      "certificate_persistence_seconds": 41.673681746999904,
+      "cached_root_seconds": 1.9e-07,
+      "repeated_roots_100_seconds": 3.91e-07,
+      "clones_8_seconds": 5.979e-06,
+      "lookups_1024_seconds": 0.002713855,
+      "snapshot_serialization_seconds": 0.011336991,
+      "retained_divergent_forks_8_seconds": 0.192799917,
+      "empty_proposal_hash_seconds": 0.013824582333333333,
+      "uncached_retransmission_mean_seconds": 0.017115992375,
+      "cached_retransmission_mean_seconds": 0.0001661495,
+      "v2_save_verify_seconds": 0.87658883,
+      "v2_recovery_seconds": 0.801803104,
+      "v2_transfer_verify_seconds": 0.890888455,
+      "v2_manifest": "0d104a4b6fb010689d66ff902bbdb20368788c33d49315f69e0b8f55f1a9a238",
+      "archive_replay_seconds": 16.03982672,
+      "archive_allocated_bytes": 18976768,
+      "archive_entries": 10,
+      "certificate_signers": 4,
+      "transactions_genuinely_signed": true,
+      "certificates_verified": true,
+      "live_engine_generated": false,
+      "passed": true,
+      "cpu_user_seconds": 57.798298,
+      "cpu_system_seconds": 5.240646,
+      "peak_rss_kib": 59192,
+      "wall_seconds": 98.49568142899807,
+      "cgroup_cpu_max": "200000 100000",
+      "cgroup_memory_max": "2147483648",
+      "memory_peak_bytes": 110063616,
+      "post_fence_archive_storage": {
+        "logical_bytes": 18927284,
+        "allocated_bytes": 18984960,
+        "files": 12
+      },
+      "v2_source_storage": {
+        "logical_bytes": 9302739,
+        "allocated_bytes": 9322496,
+        "files": 56
+      },
+      "v2_received_storage": {
+        "logical_bytes": 9302739,
+        "allocated_bytes": 9322496,
+        "files": 56
+      },
+      "whole_case_storage": {
+        "logical_bytes": 39219333,
+        "allocated_bytes": 39477248,
+        "files": 166
+      }
+    },
+    {
+      "entries": 250000,
+      "future_epoch": 825001,
+      "accounts": 250000,
+      "pattern": "distinct",
+      "height": 3907,
+      "root": "108d38f9814d32431a0518f548431ba38c4ae02147c3bd05a6fbb4922414b5fa",
+      "tip": "4cfb0d0da2fe72edba2172e106d1eaf311438e4c7ff4a8e70b9dc341ad70f3cd",
+      "v1_bytes": 0,
+      "generation_seconds": 227.335998907,
+      "propose_seconds": 77.54675050600005,
+      "execute_seconds": 75.94787025899986,
+      "certificate_persistence_seconds": 62.40508203700002,
+      "cached_root_seconds": 2e-07,
+      "repeated_roots_100_seconds": 2.6e-07,
+      "clones_8_seconds": 4.257e-06,
+      "lookups_1024_seconds": 0.003626581,
+      "snapshot_serialization_seconds": 2.1e-07,
+      "retained_divergent_forks_8_seconds": 0.547809001,
+      "empty_proposal_hash_seconds": 0.034368984666666665,
+      "uncached_retransmission_mean_seconds": 0.039101594125,
+      "cached_retransmission_mean_seconds": 0.000180304125,
+      "v2_save_verify_seconds": 2.471356103,
+      "v2_recovery_seconds": 2.454481726,
+      "v2_transfer_verify_seconds": 2.7200677730000002,
+      "v2_manifest": "998e88b6b36b8cb5182aa1d5391dec36c1be4cff59dc0aa23dc53673beae9a7b",
+      "archive_replay_seconds": 82.655092931,
+      "archive_allocated_bytes": 47419392,
+      "archive_entries": 17,
+      "certificate_signers": 4,
+      "transactions_genuinely_signed": true,
+      "certificates_verified": true,
+      "live_engine_generated": false,
+      "passed": true,
+      "cpu_user_seconds": 258.594476,
+      "cpu_system_seconds": 12.030276,
+      "peak_rss_kib": 142636,
+      "wall_seconds": 318.8717239030011,
+      "cgroup_cpu_max": "200000 100000",
+      "cgroup_memory_max": "2147483648",
+      "memory_peak_bytes": 256110592,
+      "post_fence_archive_storage": {
+        "logical_bytes": 47314964,
+        "allocated_bytes": 47427584,
+        "files": 19
+      },
+      "v2_source_storage": {
+        "logical_bytes": 23256069,
+        "allocated_bytes": 23277568,
+        "files": 130
+      },
+      "v2_received_storage": {
+        "logical_bytes": 23256069,
+        "allocated_bytes": 23277568,
+        "files": 130
+      },
+      "whole_case_storage": {
+        "logical_bytes": 98017065,
+        "allocated_bytes": 98320384,
+        "files": 321
+      }
+    },
+    {
+      "entries": 500000,
+      "future_epoch": 850001,
+      "accounts": 500000,
+      "pattern": "distinct",
+      "height": 7813,
+      "root": "11a54543860fc74e7a1ad9a6b78b7bb25d78ee33886dc6a08620c9af3b0f7505",
+      "tip": "07dc3754f81e08ab7df0e18807334e8f95712c5f7bc9c1d2e8f943c346c08b23",
+      "v1_bytes": 0,
+      "generation_seconds": 742.089713718,
+      "propose_seconds": 294.3011890459993,
+      "execute_seconds": 290.5498207989997,
+      "certificate_persistence_seconds": 134.52976102699998,
+      "cached_root_seconds": 1.61e-07,
+      "repeated_roots_100_seconds": 3.1e-07,
+      "clones_8_seconds": 3.836e-06,
+      "lookups_1024_seconds": 0.004477967,
+      "snapshot_serialization_seconds": 1.9e-07,
+      "retained_divergent_forks_8_seconds": 1.032800911,
+      "empty_proposal_hash_seconds": 0.06360037466666667,
+      "uncached_retransmission_mean_seconds": 0.067276369,
+      "cached_retransmission_mean_seconds": 0.000133273125,
+      "v2_save_verify_seconds": 4.535578732,
+      "v2_recovery_seconds": 4.380806104,
+      "v2_transfer_verify_seconds": 4.746068304,
+      "v2_manifest": "f5f1fdfbf8a8e29ce98e38346c3b21b2f90fbc26a7660ce961a51eaf7f097926",
+      "archive_replay_seconds": 296.953356777,
+      "archive_allocated_bytes": 94814208,
+      "archive_entries": 28,
+      "certificate_signers": 4,
+      "transactions_genuinely_signed": true,
+      "certificates_verified": true,
+      "live_engine_generated": false,
+      "passed": true,
+      "cpu_user_seconds": 922.048712,
+      "cpu_system_seconds": 24.23847,
+      "peak_rss_kib": 281248,
+      "wall_seconds": 1054.886811294,
+      "cgroup_cpu_max": "200000 100000",
+      "cgroup_memory_max": "2147483648",
+      "memory_peak_bytes": 500129792,
+      "post_fence_archive_storage": {
+        "logical_bytes": 94627284,
+        "allocated_bytes": 94822400,
+        "files": 30
+      },
+      "v2_source_storage": {
+        "logical_bytes": 46511559,
+        "allocated_bytes": 46530560,
+        "files": 252
+      },
+      "v2_received_storage": {
+        "logical_bytes": 46511559,
+        "allocated_bytes": 46530560,
+        "files": 252
+      },
+      "whole_case_storage": {
+        "logical_bytes": 196011973,
+        "allocated_bytes": 196415488,
+        "files": 580
+      }
+    }
+  ],
+  "concurrent": [
+    {
+      "passed": true,
+      "kind": "v2",
+      "entries": 100000,
+      "processes": 4,
+      "seconds": 2.139210696997907,
+      "cpu_user_seconds": 4.115763,
+      "cpu_system_seconds": 0.083191,
+      "sampled_combined_peak_rss_bytes": 112738304,
+      "memory_peak_bytes": 113258496
+    },
+    {
+      "passed": true,
+      "kind": "v2",
+      "entries": 500000,
+      "processes": 4,
+      "seconds": 9.884604275001038,
+      "cpu_user_seconds": 19.112959,
+      "cpu_system_seconds": 0.312415,
+      "sampled_combined_peak_rss_bytes": 655564800,
+      "memory_peak_bytes": 656785408
+    },
+    {
+      "passed": true,
+      "kind": "full_archive",
+      "entries": 100000,
+      "processes": 4,
+      "seconds": 44.30964555800165,
+      "cpu_user_seconds": 72.951415,
+      "cpu_system_seconds": 1.040206,
+      "sampled_combined_peak_rss_bytes": 109346816,
+      "memory_peak_bytes": 187916288
+    }
+  ],
+  "attacks": [
+    {
+      "kind": "corrupt",
+      "rejected": true,
+      "error": "Error: archive receipt mismatch\n\nLocation:\n    crates/yami-chain-consensus/examples/large-state-bench.rs:122:23"
+    },
+    {
+      "kind": "missing",
+      "rejected": true,
+      "error": "Error: No such file or directory (os error 2)\n\nLocation:\n    crates/yami-chain-consensus/examples/large-state-bench.rs:122:23"
+    },
+    {
+      "kind": "cross-context",
+      "rejected": true,
+      "error": "Error: archive genesis mismatch\n\nLocation:\n    crates/yami-chain-consensus/src/compact.rs:158:12",
+      "note": "Original campaign compared independent case genesis contexts; see separate same-chain certified-prefix rollback test."
+    }
+  ],
+  "enospc": [
+    {
+      "passed": true,
+      "entries": 100000,
+      "kind": "blocks",
+      "errno": 28,
+      "source_bytes_unchanged": true,
+      "retry_verified": true,
+      "error": "yami-validator: No space left on device (os error 28)"
+    },
+    {
+      "passed": true,
+      "entries": 100000,
+      "kind": "inodes",
+      "errno": 28,
+      "source_bytes_unchanged": true,
+      "retry_verified": true,
+      "error": "yami-validator: No space left on device (os error 28)"
+    }
+  ],
+  "base": "1394f43",
+  "branch": "development/yamichain",
+  "cpu_model": "AMD EPYC 9V74",
+  "image": "python:3.13-slim-trixie@sha256:ae14d4ce8771606477a81446e7ef429edd6762305fc50c84507c1041fa8285d1",
+  "cpuset": "0,1",
+  "page_cache_dropped": false,
+  "methodology": "Complete signed/valid-quorum-certificate fixture histories; not live-engine generation. Four durable fixture signer journals, no signing identity reuse.",
+  "post_measurement_observer_fencing": {
+    "passed": true,
+    "existing_history_bytes_unchanged": true,
+    "cases": [
+      {
+        "entries": 100000,
+        "validator_sha256": "f7f45123ea5dcdd6bc094f4ef2ee37013d83b711f80fc538e4d5c7ad0186c519",
+        "index": 0,
+        "refused": true,
+        "error": "NOT production-ready; no real money. Isolated test networks only; no public deployment.\nyami-validator: validator identity binding conflict"
+      },
+      {
+        "entries": 100000,
+        "validator_sha256": "f7f45123ea5dcdd6bc094f4ef2ee37013d83b711f80fc538e4d5c7ad0186c519",
+        "index": 4,
+        "refused": true,
+        "error": "NOT production-ready; no real money. Isolated test networks only; no public deployment.\nyami-validator: validator identity binding conflict"
+      },
+      {
+        "entries": 100000,
+        "validator_sha256": "f7f45123ea5dcdd6bc094f4ef2ee37013d83b711f80fc538e4d5c7ad0186c519",
+        "index": 99,
+        "refused": true,
+        "error": "NOT production-ready; no real money. Isolated test networks only; no public deployment.\nyami-validator: invalid local options: scheduled identity, ports 1024..65436, height 1..100000, timeout 1..3600s, linger 0..60s, round timeout 800..60000ms"
+      },
+      {
+        "entries": 100000,
+        "validator_sha256": "dcb13ea8dda04fe5ddd712bba9c7bb8698cde1461e2fe57d700dd454abb8fd10",
+        "index": 0,
+        "refused": true,
+        "error": "NOT production-ready; no real money. Isolated test networks only; no public deployment.\nyami-validator: validator identity binding conflict"
+      },
+      {
+        "entries": 100000,
+        "validator_sha256": "dcb13ea8dda04fe5ddd712bba9c7bb8698cde1461e2fe57d700dd454abb8fd10",
+        "index": 4,
+        "refused": true,
+        "error": "NOT production-ready; no real money. Isolated test networks only; no public deployment.\nyami-validator: validator identity binding conflict"
+      },
+      {
+        "entries": 100000,
+        "validator_sha256": "dcb13ea8dda04fe5ddd712bba9c7bb8698cde1461e2fe57d700dd454abb8fd10",
+        "index": 99,
+        "refused": true,
+        "error": "NOT production-ready; no real money. Isolated test networks only; no public deployment.\nyami-validator: invalid local options: scheduled identity, ports 1024..65436, height 1..100000, timeout 1..3600s, linger 0..60s, round timeout 800..60000ms"
+      },
+      {
+        "entries": 250000,
+        "validator_sha256": "f7f45123ea5dcdd6bc094f4ef2ee37013d83b711f80fc538e4d5c7ad0186c519",
+        "index": 0,
+        "refused": true,
+        "error": "NOT production-ready; no real money. Isolated test networks only; no public deployment.\nyami-validator: validator identity binding conflict"
+      },
+      {
+        "entries": 250000,
+        "validator_sha256": "f7f45123ea5dcdd6bc094f4ef2ee37013d83b711f80fc538e4d5c7ad0186c519",
+        "index": 4,
+        "refused": true,
+        "error": "NOT production-ready; no real money. Isolated test networks only; no public deployment.\nyami-validator: validator identity binding conflict"
+      },
+      {
+        "entries": 250000,
+        "validator_sha256": "f7f45123ea5dcdd6bc094f4ef2ee37013d83b711f80fc538e4d5c7ad0186c519",
+        "index": 99,
+        "refused": true,
+        "error": "NOT production-ready; no real money. Isolated test networks only; no public deployment.\nyami-validator: invalid local options: scheduled identity, ports 1024..65436, height 1..100000, timeout 1..3600s, linger 0..60s, round timeout 800..60000ms"
+      },
+      {
+        "entries": 250000,
+        "validator_sha256": "dcb13ea8dda04fe5ddd712bba9c7bb8698cde1461e2fe57d700dd454abb8fd10",
+        "index": 0,
+        "refused": true,
+        "error": "NOT production-ready; no real money. Isolated test networks only; no public deployment.\nyami-validator: validator identity binding conflict"
+      },
+      {
+        "entries": 250000,
+        "validator_sha256": "dcb13ea8dda04fe5ddd712bba9c7bb8698cde1461e2fe57d700dd454abb8fd10",
+        "index": 4,
+        "refused": true,
+        "error": "NOT production-ready; no real money. Isolated test networks only; no public deployment.\nyami-validator: validator identity binding conflict"
+      },
+      {
+        "entries": 250000,
+        "validator_sha256": "dcb13ea8dda04fe5ddd712bba9c7bb8698cde1461e2fe57d700dd454abb8fd10",
+        "index": 99,
+        "refused": true,
+        "error": "NOT production-ready; no real money. Isolated test networks only; no public deployment.\nyami-validator: invalid local options: scheduled identity, ports 1024..65436, height 1..100000, timeout 1..3600s, linger 0..60s, round timeout 800..60000ms"
+      }
+    ],
+    "all_three_archives_fenced": true,
+    "note": "Existing identity binding for unscheduled index 99 plus an explanatory marker added to all three observer archives after frozen timing measurements; block, certificate, receipt and state-root bytes unchanged. Delivery generator fences before creating history."
+  },
+  "same_chain_rollback": {
+    "passed": true,
+    "same_genesis_and_history": true,
+    "complete_valid_certified_prefix": {
+      "height": 1562,
+      "names": 99968,
+      "tip": "1557ff8f5da2fed6f33db187d302a201495310d9ebdca52dbe2a53d9d48b089e",
+      "root": "eef63539fe9a81a79c24aa2a788e162d6c74bd1edd2643eb43615bab0adebff0",
+      "observer_only": true
+    },
+    "independent_later_anchor": {
+      "height": 1563,
+      "tip": "287e2d447b52e16e2d931349140e4adfc3c1aa5ed00e5be43f878d23820c718b",
+      "root": "f590103df63af2445d76e413cdc71255064134ad66f5a70bfb1b184e7acf566d"
+    },
+    "rollback_rejected": true,
+    "error": "Error: independent archive anchor mismatch\n\nLocation:\n    crates/yami-chain-consensus/examples/large-state-bench.rs:154:9"
+  },
+  "delivery_lab_binary_sha256": "35f417d6450419efe307fe0e1933993cc5fbdf8964dd696858d7ea99b5d367ac",
+  "delivery_note": "Frozen performance binary precedes CLI observer-prefix/fencing helpers; delivery hot execution/cache algorithms and root semantics are unchanged. Final delivery harness smoke campaign separately verifies fencing and same-chain rollback."
+}

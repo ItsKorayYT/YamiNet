@@ -22,3 +22,6 @@ mod staking_sim;
 mod fuzzing;
 #[cfg(feature = "fuzzing")]
 pub use fuzzing::{fuzz_decode, fuzz_seeds};
+
+#[cfg(feature = "large-state-lab")]
+pub use candidates::profile_candidate_retransmission;
