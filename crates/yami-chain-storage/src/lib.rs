@@ -125,6 +125,14 @@ impl Journal {
         if fs::symlink_metadata(path)?.file_type().is_symlink() {
             return Err(invalid("symlinked store"));
         }
+        if ["experimental-v2.bin", "lab.lock"]
+            .iter()
+            .any(|name| fs::symlink_metadata(path.join(name)).is_ok())
+        {
+            return Err(invalid(
+                "experimental snapshot directories cannot be production journals",
+            ));
+        }
         let lock_path = path.join("store.lock");
         if fs::symlink_metadata(&lock_path).is_ok_and(|m| !m.file_type().is_file()) {
             return Err(invalid("symlinked lock"));
@@ -972,5 +980,29 @@ mod recovery_entry_tests {
         assert!(!path.join("genesis.bin").exists());
         drop(journal);
         fs::remove_dir_all(path).unwrap();
+    }
+}
+
+#[cfg(test)]
+mod experimental_boundary {
+    use super::*;
+    #[test]
+    fn experimental_directories_are_refused_before_touching_safety_files() {
+        for marker in ["experimental-v2.bin", "lab.lock"] {
+            let path = std::env::temp_dir().join(format!(
+                "production-refuses-v2-{}-{marker}",
+                std::process::id()
+            ));
+            fs::create_dir_all(&path).unwrap();
+            fs::write(path.join(marker), b"experimental").unwrap();
+            fs::write(path.join("signed-safety.bin"), b"irrevocable").unwrap();
+            assert!(Journal::open(&path).is_err());
+            assert!(!path.join("store.lock").exists());
+            assert_eq!(
+                fs::read(path.join("signed-safety.bin")).unwrap(),
+                b"irrevocable"
+            );
+            fs::remove_dir_all(path).unwrap();
+        }
     }
 }

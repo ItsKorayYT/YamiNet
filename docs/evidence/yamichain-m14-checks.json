@@ -1,0 +1,148 @@
+{
+  "base": "2942bd1",
+  "branch": "development/yamichain",
+  "rust": "1.90.0",
+  "rust_default_passed": 554,
+  "rust_default_failed": 0,
+  "existing_ignored": 10,
+  "experimental_all_target_passed": 25,
+  "experimental_final_unit_passed": 17,
+  "python_passed": 6,
+  "financial_proof_versions_rejected": 65536,
+  "v1_limits_and_encodings_unchanged": true,
+  "v2_activated": false,
+  "pruning_uses_v2": false,
+  "physical_power_failure_tested": false,
+  "logs": {
+    "format": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "clippy_default": {
+      "sha256": "0c640d3e6056e973186018eb9b5813373e71f3ed6be436183c1506ae0042300e",
+      "bytes": 60
+    },
+    "clippy_feature": {
+      "sha256": "d7788b024b6bba6a636b805919c35175d458218009f9a183dffa15bd84dcbfa6",
+      "bytes": 130
+    },
+    "clippy_workspace_feature": {
+      "sha256": "c2328ab8bbc70fcebf2a8b13c87b8f9ecbdfb0cab6e3a22a54dc9d9081735c6a",
+      "bytes": 130
+    },
+    "regressions": {
+      "sha256": "f4ee87da195442be2f8479dbc3eda5bf9000089e8214d29a921fb43ce1db6f7b",
+      "bytes": 71849
+    },
+    "experimental_all_targets": {
+      "sha256": "2b34845dd64d3d7107e876d23eaead3f242f26fc90beb09a3a003832e5d721d7",
+      "bytes": 3585
+    },
+    "final_feature_unit": {
+      "sha256": "3c58401fe8f19286ee05e2ea16c109dede49a9786b04b7ed9fe63458bb063436",
+      "bytes": 1978
+    },
+    "release": {
+      "sha256": "bd056f887706742df30b1d33a8dc5d127dbe5a28ed471799f6e85a71b757bc11",
+      "bytes": 884
+    },
+    "python_tests": {
+      "sha256": "c1de396add63b60b7739446ae754c9af4d1c4c8af85083ffc8071726ef9e4e98",
+      "bytes": 104
+    }
+  },
+  "unchanged_reference_files": [
+    "crates/yami-chain/src/snapshot.rs",
+    "crates/yami-chain/src/codec.rs",
+    "crates/yami-chain/src/scalability_tests.rs",
+    "crates/yami-chain/tests/state_reference.rs",
+    "crates/yami-chain-privacy/tests/non_test_boundary.rs",
+    "crates/yami-chain-naming/src/lib.rs",
+    "crates/yami-chain-consensus/src/node.rs",
+    "Cargo.lock"
+  ],
+  "source_hashes": {
+    "crates/yami-chain/src/lib.rs": "150c224ce8a303eef457423d1603ac1666cde30a9556b12748134ea72274df1e",
+    "crates/yami-chain/src/snapshot_v2/mod.rs": "33376930dbbe1818daef17eb92691dd98cb2ed504498a925dc250e5134ec554b",
+    "crates/yami-chain/src/snapshot_v2/store.rs": "677bfe77d85bf1752658e989b07d976ab5923954fd04d9b1b80709c2f4a43938",
+    "crates/yami-chain/src/snapshot_v2/tests.rs": "6d74c976f2c4d1012b31fca7dba9c98b90a263a2198c6122b8c334c458256de5",
+    "crates/yami-chain/examples/snapshot-v2-bench.rs": "86afb735917f300aac4e45aec8a8bb4f89d4f77b2d7863efb37e1663a97a9314",
+    "crates/yami-chain/Cargo.toml": "c6123420be7fd37b554e86f4a2d904e715ab1a5b0a37ec0086b010b51188e321",
+    "crates/yami-chain-storage/src/lib.rs": "04aa9f25b385a8f039485b42ac3ac267922c1c712aef982f3405ed20cf9df25e",
+    "crates/yami-chain-consensus/src/compact.rs": "e5b5e119386467df10fa3370bf60f1ab311e9d5563c0d9a225e7fe43a238d3bd",
+    "tools/yamichain-v2-lab.py": "7e8b2ebbebb48c1ec92e16f5a97ddfa109d65ea56f16b4eb01967f8c68a219ed",
+    "crates/yami-chain/src/snapshot.rs": "1c47458ab4883bee40c7ec9b291a8af1a213611a88200169e2dc6a7c7cefbb07",
+    "crates/yami-chain/src/codec.rs": "9483c17adfb00a9efa0ba3c81bd8d98741cb39d3b8e16ff49ffb1b8fafc5e31f",
+    "crates/yami-chain/src/scalability_tests.rs": "3f416df7c22940d085f986bda01dbbe21e7fc2b05e0bf01df2571688003fe787",
+    "crates/yami-chain/tests/state_reference.rs": "9462c79680a067ef9e00f896bada65a20f26b84f313c4c0197ba4c0a02d4a9b8",
+    "crates/yami-chain-privacy/tests/non_test_boundary.rs": "72c0c3df14100f2f0c972a9a837a4726736d80d6c0a025743c4d898e12029b36",
+    "crates/yami-chain-naming/src/lib.rs": "921a287f8ac9a5c88d9a084831c0eab72b5167e0c7e58cd0384c355036b68843",
+    "crates/yami-chain-consensus/src/node.rs": "17477558fa2ec528c4a8e73ce7931cf2235a2423f9d145d50c4c436e7f015ad1",
+    "Cargo.lock": "359eef23f81cb4aa943f81bb4760dbc24d0f5ae59b3bf0f5c2ce34fb3dc3eb8f"
+  },
+  "binaries": {
+    "snapshot-v2-bench": {
+      "sha256": "7d830e0a6edf59a67dec8e5d4055e1d8abbed2da9f09dfee571ca14763ec4698",
+      "bytes": 946304
+    },
+    "yami-validator": {
+      "sha256": "dcb13ea8dda04fe5ddd712bba9c7bb8698cde1461e2fe57d700dd454abb8fd10",
+      "bytes": 25906680
+    },
+    "feature-unit-tests-final": {
+      "sha256": "9873548ca1ad08cd75cca5ffed4ff842dd0e49478c2745e43ea5f62208deead6",
+      "bytes": 3170656
+    }
+  },
+  "final_enospc": {
+    "passed": true,
+    "binary_sha256": "9873548ca1ad08cd75cca5ffed4ff842dd0e49478c2745e43ea5f62208deead6",
+    "asserted_transfer_errno": 28,
+    "cases": [
+      {
+        "kind": "blocks",
+        "passed": true,
+        "stdout": "\nrunning 1 test\ntest snapshot_v2::tests::actual_enospc_child ... \nrunning 1 test\nok\n\ntest result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 16 filtered out; finished in 0.05s\n\n"
+      },
+      {
+        "kind": "inodes",
+        "passed": true,
+        "stdout": "\nrunning 1 test\ntest snapshot_v2::tests::actual_enospc_child ... \nrunning 1 test\nok\n\ntest result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 16 filtered out; finished in 0.05s\n\n"
+      }
+    ]
+  },
+  "initial_interop_attempt": {
+    "passed": false,
+    "cause": "existing filesystem reserve exhausted by temporary build/container artifacts after all four nodes reached matching height 128; safe refusal, no reserve change",
+    "report_sha256": "48b093b4919ab7afde2f6626c5759524b0674731e9298f2fc88e1fe69780e2d5",
+    "node_logs": {
+      "last-node-1.log": "ba8869ccd3f7cf2ed94e7e8f651e604f1ff9d9c3dad2ef77be485264dae39b22",
+      "last-node-0.log": "0da5b8c0f333c815fae0bf2f5a038187350a5918f5267f20d972dbdc405c1fdb",
+      "last-node-3.log": "87fe1935207be2078cedfb891b0fb13c0cf0df7ff268796fafa07e9815d87c5e",
+      "last-node-2.log": "4b4142d7592b23c67b214a1a424d299780d99b5d4749c27217c231a5f2c96f52"
+    }
+  },
+  "live_v1_interop": {
+    "passed": true,
+    "previous_release": "2942bd1",
+    "final_height": 160,
+    "registrations": 10240,
+    "nodes": 4,
+    "archive_previous_reader_compatible": true,
+    "report_sha256": "05bfb49129545d6dd9d23e8b6203a4fcb0b000217ec018b321b9d65776acac53",
+    "logs": {
+      "phase1-node-0.log": "2ce1e99a992401386c60bd59b36e127d56596153c1de4622e4cb8b2b477a88bd",
+      "last-node-1.log": "3dc57e66b9e769aa3cd0867f7659723d3dd71157ff0ebc0cff0907b35b5ccf95",
+      "last-node-0.log": "e0de031c6c8ddbdcdd5f1df52c2f2d9688bc5681b56bb5d46a21bc2714a49dbd",
+      "restart-0-node-1.log": "3dc57e66b9e769aa3cd0867f7659723d3dd71157ff0ebc0cff0907b35b5ccf95",
+      "phase1-node-1.log": "b65737dce87c12cd2a60746345652a75ce2af8d5cecd32dafc7aa9b2bc3a53db",
+      "restart-0-node-2.log": "e0de031c6c8ddbdcdd5f1df52c2f2d9688bc5681b56bb5d46a21bc2714a49dbd",
+      "last-node-3.log": "e0de031c6c8ddbdcdd5f1df52c2f2d9688bc5681b56bb5d46a21bc2714a49dbd",
+      "restart-0-node-0.log": "e0de031c6c8ddbdcdd5f1df52c2f2d9688bc5681b56bb5d46a21bc2714a49dbd",
+      "restart-0-node-3.log": "e0de031c6c8ddbdcdd5f1df52c2f2d9688bc5681b56bb5d46a21bc2714a49dbd",
+      "phase1-node-3.log": "5c2281cd7ae0ce345815afb13186258b731114a9fa3cf67ac6f235db8074e53e",
+      "last-node-2.log": "e0de031c6c8ddbdcdd5f1df52c2f2d9688bc5681b56bb5d46a21bc2714a49dbd",
+      "phase1-node-2.log": "401746a7170bf739da6e5b0c92e27a8e1cf2b801c926d99ccbd262f9eb9b4be9"
+    }
+  }
+}

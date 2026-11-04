@@ -3,6 +3,9 @@ pub mod codec;
 pub mod committee;
 pub mod selection;
 pub mod snapshot;
+/// Isolated laboratory codec; never selected by consensus or automatic pruning.
+#[cfg(feature = "experimental-snapshot-v2")]
+pub mod snapshot_v2;
 pub mod validators;
 use codec::{Reader, Writer};
 pub use committee::{Epoch, Member, ValidatorSet};

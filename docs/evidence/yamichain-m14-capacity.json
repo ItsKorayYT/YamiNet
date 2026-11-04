@@ -1,0 +1,232 @@
+{
+  "passed": true,
+  "binary_sha256": "7d830e0a6edf59a67dec8e5d4055e1d8abbed2da9f09dfee571ca14763ec4698",
+  "cpus": 2,
+  "memory_bytes": 2147483648,
+  "experimental_only": true,
+  "bft_finality_claimed": false,
+  "cases": [
+    {
+      "entries": 100000,
+      "accounts": 100000,
+      "label_bytes": 63,
+      "height": 1563,
+      "tip": "05826332c6a4979ccad337a1f250e8a4fa9a91a2b2b27dce55f100aa29905761",
+      "root": "2e09db404a10bbc14d1ea54adb2769957ed6e79673c10efb5b59ab3e46905b87",
+      "manifest": "a2d20b3c6785cc2e53f8683be6f617afb55e4ee0768d8a55042920e5420f985d",
+      "fixture_seconds": 2.804224436,
+      "uncached_root_mean_seconds": 0.016284536999999998,
+      "next_empty_proposal_mean_seconds": 0.016216713,
+      "save_verify_seconds": 0.924267265,
+      "transfer_verify_seconds": 0.891605226,
+      "recovery_mean_seconds": 0.7941220813333333,
+      "payload_bytes": 13900000,
+      "chunks": 63,
+      "manifest_bytes": 2974,
+      "logical_store_bytes": 13903324,
+      "allocated_store_bytes": 13926400,
+      "v1_bytes": 13900090,
+      "v1_limits_preserved": true,
+      "experimental_only": true,
+      "bft_finality_claimed": false,
+      "passed": true,
+      "cpu_user_seconds": 7.69095,
+      "cpu_system_seconds": 0.092152,
+      "peak_rss_kib": 83556,
+      "wall_seconds": 7.916577777999919,
+      "container_memory_peak_bytes": 122978304,
+      "cgroup_cpu_max": "200000 100000",
+      "cgroup_memory_max": "2147483648"
+    },
+    {
+      "entries": 250000,
+      "accounts": 250000,
+      "label_bytes": 63,
+      "height": 3907,
+      "tip": "a91a526d15753311c2fa2f4ad4f1bdb82c24ff02ec03b85b1c04cf295b4bbe61",
+      "root": "2b9b9cccd1a6edd30980548d284e84077426f8facbcf72c908b986a936341666",
+      "manifest": "659bd2991fde67bde80839c582129dcb74c388d40d797ce6b7808aa7dd02eb30",
+      "fixture_seconds": 7.958278649,
+      "uncached_root_mean_seconds": 0.040885127,
+      "next_empty_proposal_mean_seconds": 0.04134788833333333,
+      "save_verify_seconds": 2.355038012,
+      "transfer_verify_seconds": 2.405987692,
+      "recovery_mean_seconds": 2.258483870666667,
+      "payload_bytes": 34750000,
+      "chunks": 157,
+      "manifest_bytes": 7204,
+      "logical_store_bytes": 34757554,
+      "allocated_store_bytes": 34787328,
+      "v1_bytes": 0,
+      "v1_limits_preserved": true,
+      "experimental_only": true,
+      "bft_finality_claimed": false,
+      "passed": true,
+      "cpu_user_seconds": 19.328571,
+      "cpu_system_seconds": 0.23191499999999998,
+      "peak_rss_kib": 170008,
+      "wall_seconds": 19.800529765998363,
+      "container_memory_peak_bytes": 255205376,
+      "cgroup_cpu_max": "200000 100000",
+      "cgroup_memory_max": "2147483648"
+    },
+    {
+      "entries": 500000,
+      "accounts": 500000,
+      "label_bytes": 63,
+      "height": 7813,
+      "tip": "b0b868f0c69052dc9f8d364a7d759c467efb5b661bb748a4afcd39e50dd2e50e",
+      "root": "71ab4a37c82d8b581efabcaacaa7d67ac8ea604a25c5394efe07cecf3577a907",
+      "manifest": "af92a16f5333487c344c6266430b1810874e0e20b7d350774d71c8c54d037a8b",
+      "fixture_seconds": 14.385148502,
+      "uncached_root_mean_seconds": 0.076465449,
+      "next_empty_proposal_mean_seconds": 0.07594467766666667,
+      "save_verify_seconds": 4.948966703,
+      "transfer_verify_seconds": 4.7190493159999995,
+      "recovery_mean_seconds": 4.648108977,
+      "payload_bytes": 69500000,
+      "chunks": 312,
+      "manifest_bytes": 14179,
+      "logical_store_bytes": 69514529,
+      "allocated_store_bytes": 69554176,
+      "v1_bytes": 0,
+      "v1_limits_preserved": true,
+      "experimental_only": true,
+      "bft_finality_claimed": false,
+      "passed": true,
+      "cpu_user_seconds": 37.751321,
+      "cpu_system_seconds": 0.368485,
+      "peak_rss_kib": 337100,
+      "wall_seconds": 38.564144571002544,
+      "container_memory_peak_bytes": 499126272,
+      "cgroup_cpu_max": "200000 100000",
+      "cgroup_memory_max": "2147483648"
+    }
+  ],
+  "concurrent": [
+    {
+      "passed": true,
+      "entries": 100000,
+      "processes": 4,
+      "round_seconds": [
+        1.8541989679979451,
+        2.0266521079975064,
+        2.0717524440005946
+      ],
+      "sampled_combined_peak_rss_bytes": 100360192,
+      "container_memory_peak_bytes": 101724160,
+      "cpu_user_seconds": 11.419307,
+      "cpu_system_seconds": 0.29836199999999996
+    },
+    {
+      "passed": true,
+      "entries": 250000,
+      "processes": 4,
+      "round_seconds": [
+        4.9047672000015154,
+        5.101860397000564,
+        4.775070538998989
+      ],
+      "sampled_combined_peak_rss_bytes": 239009792,
+      "container_memory_peak_bytes": 240189440,
+      "cpu_user_seconds": 28.373306,
+      "cpu_system_seconds": 0.46538599999999997
+    },
+    {
+      "passed": true,
+      "entries": 500000,
+      "processes": 4,
+      "round_seconds": [
+        11.076481714000693,
+        11.280675759997393,
+        11.13145392399747
+      ],
+      "sampled_combined_peak_rss_bytes": 494100480,
+      "container_memory_peak_bytes": 497909760,
+      "cpu_user_seconds": 63.966283,
+      "cpu_system_seconds": 1.260036
+    }
+  ],
+  "attacks": [
+    {
+      "mode": "corrupt",
+      "rejected": true
+    },
+    {
+      "mode": "missing",
+      "rejected": true
+    },
+    {
+      "mode": "duplicate",
+      "rejected": true
+    },
+    {
+      "mode": "tail",
+      "rejected": true
+    },
+    {
+      "mode": "manifest",
+      "rejected": true
+    },
+    {
+      "mode": "pending-conflict",
+      "rejected": true
+    },
+    {
+      "mode": "rollback",
+      "rejected": true
+    }
+  ],
+  "crashes": [
+    {
+      "file": "state.bin",
+      "stage": "Synced",
+      "resumed": true
+    },
+    {
+      "file": "anchor.bin",
+      "stage": "Renamed",
+      "resumed": true
+    },
+    {
+      "file": "chunk-000000.bin",
+      "stage": "Synced",
+      "resumed": true
+    },
+    {
+      "file": "chunk-000001.bin",
+      "stage": "Renamed",
+      "resumed": true
+    },
+    {
+      "file": "manifest.bin",
+      "stage": "DirectorySynced",
+      "resumed": true
+    },
+    {
+      "file": "complete.bin",
+      "stage": "Renamed",
+      "resumed": true
+    }
+  ],
+  "enospc": [
+    {
+      "kind": "blocks",
+      "passed": true,
+      "stdout": "\nrunning 1 test\ntest snapshot_v2::tests::actual_enospc_child ... \nrunning 1 test\nok\n\ntest result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 16 filtered out; finished in 0.07s\n\n"
+    },
+    {
+      "kind": "inodes",
+      "passed": true,
+      "stdout": "\nrunning 1 test\ntest snapshot_v2::tests::actual_enospc_child ... \nrunning 1 test\nok\n\ntest result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 16 filtered out; finished in 0.03s\n\n"
+    }
+  ],
+  "production_journal_refused_without_writes": true,
+  "test_binary_sha256": "6edfba68d9a650b1fb6288387fb02b917a9bfa8fcf285a5618a055f134c1aad4",
+  "base": "2942bd1",
+  "branch": "development/yamichain",
+  "fixture": "synthetic independently rooted application state, not a signed BFT-finalized history",
+  "image": "python:3.13-slim-trixie@sha256:ae14d4ce8771606477a81446e7ef429edd6762305fc50c84507c1041fa8285d1",
+  "cpu_model": "AMD EPYC 9V74",
+  "page_cache_dropped": false
+}

@@ -8,6 +8,10 @@ license.workspace = true
 [lints]
 workspace = true
 
+[features]
+default = []
+experimental-snapshot-v2 = []
+
 [dependencies]
 im = "15.1.0"
 sha2 = "0.11.1"
@@ -18,3 +22,7 @@ yami-chain-privacy = { path = "../yami-chain-privacy" }
 [[bench]]
 name = "execution"
 harness = false
+
+[[example]]
+name = "snapshot-v2-bench"
+required-features = ["experimental-snapshot-v2"]

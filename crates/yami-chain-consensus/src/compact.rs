@@ -397,6 +397,26 @@ mod tests {
         }
     }
     #[test]
+    fn experimental_v2_bytes_never_enter_production_checkpoint_or_pruning_paths() {
+        let f = Fixture::new();
+        let checkpoint = export_compact_checkpoint(&f.journal, &f.genesis).unwrap();
+        let bogus = b"YC-LAB-STATE2-1";
+        assert!(verify_compact_checkpoint(&f.genesis, bogus, checkpoint.anchor()).is_err());
+        let path = f.path.with_extension("v2-boundary");
+        let fresh = Journal::open(&path).unwrap();
+        assert!(import_compact_checkpoint(&fresh, &f.genesis, bogus, checkpoint.anchor()).is_err());
+        assert!(!path.join("compact-base.bin").exists());
+        assert!(!path.join("compacted.bin").exists());
+        drop(fresh);
+        std::fs::remove_dir_all(path).unwrap();
+        assert_eq!(
+            checkpoint.bytes(),
+            export_compact_checkpoint(&f.journal, &f.genesis)
+                .unwrap()
+                .bytes()
+        );
+    }
+    #[test]
     fn segmented_history_preserves_authenticated_exports_sync_and_pruned_interoperability() {
         let f = Fixture::new();
         let before = export_compact_checkpoint(&f.journal, &f.genesis).unwrap();
