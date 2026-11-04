@@ -205,7 +205,8 @@ fn export_state(
     w.raw(&state.root().0);
     w.raw(&genesis.committee_at(state.height() + 1)?.hash().0);
     w.bytes(&record.canonical()?)?;
-    w.bytes(&state.snapshot_bytes()?)?;
+    w.u32(state.snapshot_len()?.try_into()?);
+    state.append_snapshot(&mut w.0)?;
     verify_compact_checkpoint(genesis, &w.0, CheckpointAnchor::from_state(&state))
 }
 /// Fresh-node bootstrap only. This is NOT a validator identity backup. A key

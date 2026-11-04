@@ -7,8 +7,12 @@ pub mod validators;
 use codec::{Reader, Writer};
 pub use committee::{Epoch, Member, ValidatorSet};
 pub use ed25519_dalek::{Signer, SigningKey, VerifyingKey};
+use im::OrdMap;
 use sha2::{Digest as _, Sha256};
-use std::collections::{BTreeMap, BTreeSet};
+use std::{
+    collections::BTreeSet,
+    sync::{Arc, OnceLock},
+};
 pub use yami_chain_naming::TestNames;
 pub use yami_chain_privacy as privacy;
 
@@ -311,24 +315,57 @@ impl Block {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug)]
 pub struct State {
-    genesis: Genesis,
+    genesis: Arc<Genesis>,
+    genesis_id: Digest,
+    reserved_keys: Arc<BTreeSet<[u8; 32]>>,
+    root_cache: OnceLock<Digest>,
     height: u64,
     tip: Digest,
-    nonces: BTreeMap<[u8; 32], u64>,
+    nonces: OrdMap<[u8; 32], u64>,
     names: TestNames,
 }
+impl PartialEq for State {
+    fn eq(&self, other: &Self) -> bool {
+        self.genesis == other.genesis
+            && self.height == other.height
+            && self.tip == other.tip
+            && self.nonces == other.nonces
+            && self.names == other.names
+    }
+}
+impl Eq for State {}
 impl State {
     pub fn new(genesis: Genesis) -> Result<Self> {
         genesis.validate()?;
-        Ok(Self {
-            tip: genesis.id(),
-            genesis,
+        Ok(Self::from_validated_genesis(genesis))
+    }
+    fn from_validated_genesis(genesis: Genesis) -> Self {
+        let genesis_id = genesis.id();
+        let reserved_keys = Arc::new(
+            genesis
+                .epochs
+                .iter()
+                .flat_map(|epoch| {
+                    epoch
+                        .validators
+                        .members()
+                        .iter()
+                        .flat_map(|member| [member.consensus_key, member.transport_key])
+                })
+                .collect(),
+        );
+        Self {
+            tip: genesis_id,
+            genesis_id,
+            reserved_keys,
+            genesis: Arc::new(genesis),
+            root_cache: OnceLock::new(),
             height: 0,
-            nonces: BTreeMap::new(),
+            nonces: OrdMap::new(),
             names: TestNames::default(),
-        })
+        }
     }
     pub fn height(&self) -> u64 {
         self.height
@@ -342,28 +379,51 @@ impl State {
     pub fn names(&self) -> &TestNames {
         &self.names
     }
+    /// Derived only from immutable, validated application data; never persisted.
     pub fn root(&self) -> Digest {
-        let mut w = Writer::default();
-        w.raw(&self.genesis.id().0);
-        w.u64(self.height);
-        w.u32(self.nonces.len() as u32);
+        *self.root_cache.get_or_init(|| {
+            let domain = b"yamichain-state-v1";
+            let length = 32 + 8 + self.application_bytes();
+            let mut hash = Sha256::new();
+            hash.update((domain.len() as u64).to_be_bytes());
+            hash.update(domain);
+            hash.update((length as u64).to_be_bytes());
+            hash.update(self.genesis_id.0);
+            hash.update(self.height.to_be_bytes());
+            self.visit_application_bytes(|bytes| hash.update(bytes));
+            Digest(hash.finalize().into())
+        })
+    }
+    pub fn nonce(&self, owner: &[u8; 32]) -> u64 {
+        self.nonces.get(owner).copied().unwrap_or(0)
+    }
+    fn application_bytes(&self) -> usize {
+        4 + self.nonces.len() * 40 + 4 + self.names.encoded_bytes()
+    }
+    // Identical sorted canonical stream for hashing and checkpoint serialization.
+    fn visit_application_bytes(&self, mut write: impl FnMut(&[u8])) {
+        write(&(self.nonces.len() as u32).to_be_bytes());
+        let mut nonce_bytes = [0; 40];
         for (key, nonce) in &self.nonces {
-            w.raw(key);
-            w.u64(*nonce);
+            nonce_bytes[..32].copy_from_slice(key);
+            nonce_bytes[32..].copy_from_slice(&nonce.to_be_bytes());
+            write(&nonce_bytes);
         }
-        let entries: Vec<_> = self.names.entries().collect();
-        w.u32(entries.len() as u32);
-        for (label, owner) in entries {
-            w.bytes(label.as_bytes()).expect("bounded label");
-            w.raw(owner);
+        write(&(self.names.len() as u32).to_be_bytes());
+        let mut name_bytes = [0; 99];
+        for (label, owner) in self.names.entries() {
+            name_bytes[..4].copy_from_slice(&(label.len() as u32).to_be_bytes());
+            name_bytes[4..4 + label.len()].copy_from_slice(label.as_bytes());
+            name_bytes[4 + label.len()..36 + label.len()].copy_from_slice(owner);
+            write(&name_bytes[..36 + label.len()]);
         }
-        hash(b"yamichain-state-v1", &w.0)
     }
     fn stage(&self, txs: &[Transaction]) -> Result<Self> {
         if txs.len() > MAX_TXS {
             return Err(Error::Limit);
         }
         let mut next = self.clone();
+        next.root_cache = OnceLock::new();
         next.height = next.height.checked_add(1).ok_or(Error::Overflow)?;
         let mut seen = BTreeSet::new();
         for tx in txs {
@@ -371,7 +431,7 @@ impl State {
             if !seen.insert(hash(b"yamichain-tx-id-v1", &bytes)) {
                 return Err(Error::Duplicate);
             }
-            if self.genesis.is_reserved_key(&tx.registry_owner) {
+            if self.reserved_keys.contains(&tx.registry_owner) {
                 return Err(Error::Signature);
             }
             verify(&tx.registry_owner, &tx.signing_bytes()?, &tx.signature)?;
@@ -398,6 +458,9 @@ impl State {
     }
     pub fn propose(&self, transactions: Vec<Transaction>) -> Result<Block> {
         let next = self.stage(&transactions)?;
+        self.proposed_from_stage(&next, transactions)
+    }
+    fn proposed_from_stage(&self, next: &Self, transactions: Vec<Transaction>) -> Result<Block> {
         let mut w = Writer::default();
         w.u32(transactions.len() as u32);
         for tx in &transactions {
@@ -417,11 +480,11 @@ impl State {
         Ok(block)
     }
     pub fn execute(&self, block: &Block) -> Result<Self> {
-        let expected = self.propose(block.transactions.clone())?;
+        let mut next = self.stage(&block.transactions)?;
+        let expected = self.proposed_from_stage(&next, block.transactions.clone())?;
         if &expected != block {
             return Err(Error::Header);
         }
-        let mut next = self.stage(&block.transactions)?;
         next.tip = block.id()?;
         Ok(next)
     }
@@ -468,3 +531,6 @@ impl State {
         self.propose(txs)
     }
 }
+
+#[cfg(test)]
+mod scalability_tests;

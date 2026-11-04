@@ -1,0 +1,141 @@
+{
+  "passed": true,
+  "validator_sha256": "0775a0cd0a3b8f5c2e232c23f77cbc055fc74f7a89767b6216a009054b9b4a8b",
+  "snapshot_sha256": "9a8224dbc71394f3af7330f42459f723f99569b20a7a721d61a333362a4efa9a",
+  "cpus": 2,
+  "memory_bytes": 2147483648,
+  "anchor": "1563:cbadf9ddcd9c137c2c014a313b04dbcc23395d3cedff22aee6e07a989dbc116f:ea1bf948fb1413d92d10a81f5e15a4887debd7600d7baafc6c44bd38b3fa2aac",
+  "rounds": [
+    {
+      "seconds": 1.9922533489989291,
+      "states": [
+        {
+          "chain_id": "yamichain-local-0.2",
+          "height": 1563,
+          "block": "cbadf9ddcd9c137c2c014a313b04dbcc23395d3cedff22aee6e07a989dbc116f",
+          "state_root": "ea1bf948fb1413d92d10a81f5e15a4887debd7600d7baafc6c44bd38b3fa2aac",
+          "test_tlds": 100000,
+          "payments_enabled": false,
+          "production_ready": false
+        },
+        {
+          "chain_id": "yamichain-local-0.2",
+          "height": 1563,
+          "block": "cbadf9ddcd9c137c2c014a313b04dbcc23395d3cedff22aee6e07a989dbc116f",
+          "state_root": "ea1bf948fb1413d92d10a81f5e15a4887debd7600d7baafc6c44bd38b3fa2aac",
+          "test_tlds": 100000,
+          "payments_enabled": false,
+          "production_ready": false
+        },
+        {
+          "chain_id": "yamichain-local-0.2",
+          "height": 1563,
+          "block": "cbadf9ddcd9c137c2c014a313b04dbcc23395d3cedff22aee6e07a989dbc116f",
+          "state_root": "ea1bf948fb1413d92d10a81f5e15a4887debd7600d7baafc6c44bd38b3fa2aac",
+          "test_tlds": 100000,
+          "payments_enabled": false,
+          "production_ready": false
+        },
+        {
+          "chain_id": "yamichain-local-0.2",
+          "height": 1563,
+          "block": "cbadf9ddcd9c137c2c014a313b04dbcc23395d3cedff22aee6e07a989dbc116f",
+          "state_root": "ea1bf948fb1413d92d10a81f5e15a4887debd7600d7baafc6c44bd38b3fa2aac",
+          "test_tlds": 100000,
+          "payments_enabled": false,
+          "production_ready": false
+        }
+      ]
+    },
+    {
+      "seconds": 1.9078673490002984,
+      "states": [
+        {
+          "chain_id": "yamichain-local-0.2",
+          "height": 1563,
+          "block": "cbadf9ddcd9c137c2c014a313b04dbcc23395d3cedff22aee6e07a989dbc116f",
+          "state_root": "ea1bf948fb1413d92d10a81f5e15a4887debd7600d7baafc6c44bd38b3fa2aac",
+          "test_tlds": 100000,
+          "payments_enabled": false,
+          "production_ready": false
+        },
+        {
+          "chain_id": "yamichain-local-0.2",
+          "height": 1563,
+          "block": "cbadf9ddcd9c137c2c014a313b04dbcc23395d3cedff22aee6e07a989dbc116f",
+          "state_root": "ea1bf948fb1413d92d10a81f5e15a4887debd7600d7baafc6c44bd38b3fa2aac",
+          "test_tlds": 100000,
+          "payments_enabled": false,
+          "production_ready": false
+        },
+        {
+          "chain_id": "yamichain-local-0.2",
+          "height": 1563,
+          "block": "cbadf9ddcd9c137c2c014a313b04dbcc23395d3cedff22aee6e07a989dbc116f",
+          "state_root": "ea1bf948fb1413d92d10a81f5e15a4887debd7600d7baafc6c44bd38b3fa2aac",
+          "test_tlds": 100000,
+          "payments_enabled": false,
+          "production_ready": false
+        },
+        {
+          "chain_id": "yamichain-local-0.2",
+          "height": 1563,
+          "block": "cbadf9ddcd9c137c2c014a313b04dbcc23395d3cedff22aee6e07a989dbc116f",
+          "state_root": "ea1bf948fb1413d92d10a81f5e15a4887debd7600d7baafc6c44bd38b3fa2aac",
+          "test_tlds": 100000,
+          "payments_enabled": false,
+          "production_ready": false
+        }
+      ]
+    },
+    {
+      "seconds": 1.924729923999621,
+      "states": [
+        {
+          "chain_id": "yamichain-local-0.2",
+          "height": 1563,
+          "block": "cbadf9ddcd9c137c2c014a313b04dbcc23395d3cedff22aee6e07a989dbc116f",
+          "state_root": "ea1bf948fb1413d92d10a81f5e15a4887debd7600d7baafc6c44bd38b3fa2aac",
+          "test_tlds": 100000,
+          "payments_enabled": false,
+          "production_ready": false
+        },
+        {
+          "chain_id": "yamichain-local-0.2",
+          "height": 1563,
+          "block": "cbadf9ddcd9c137c2c014a313b04dbcc23395d3cedff22aee6e07a989dbc116f",
+          "state_root": "ea1bf948fb1413d92d10a81f5e15a4887debd7600d7baafc6c44bd38b3fa2aac",
+          "test_tlds": 100000,
+          "payments_enabled": false,
+          "production_ready": false
+        },
+        {
+          "chain_id": "yamichain-local-0.2",
+          "height": 1563,
+          "block": "cbadf9ddcd9c137c2c014a313b04dbcc23395d3cedff22aee6e07a989dbc116f",
+          "state_root": "ea1bf948fb1413d92d10a81f5e15a4887debd7600d7baafc6c44bd38b3fa2aac",
+          "test_tlds": 100000,
+          "payments_enabled": false,
+          "production_ready": false
+        },
+        {
+          "chain_id": "yamichain-local-0.2",
+          "height": 1563,
+          "block": "cbadf9ddcd9c137c2c014a313b04dbcc23395d3cedff22aee6e07a989dbc116f",
+          "state_root": "ea1bf948fb1413d92d10a81f5e15a4887debd7600d7baafc6c44bd38b3fa2aac",
+          "test_tlds": 100000,
+          "payments_enabled": false,
+          "production_ready": false
+        }
+      ]
+    }
+  ],
+  "crash_import_resumed": true,
+  "committed_files_unchanged": true,
+  "hostile_snapshot_refused": true,
+  "cpu_user_seconds": 16.803875,
+  "cpu_system_seconds": 0.499727,
+  "sampled_combined_peak_rss_bytes": 151715840,
+  "container_memory_peak_bytes": 189972480,
+  "concurrent_recovery_seconds": 6.659930705000079
+}

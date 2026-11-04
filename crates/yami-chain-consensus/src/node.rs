@@ -760,7 +760,7 @@ async fn app_loop(
     Err(eyre!("Malachite channels closed before requested height"))
 }
 pub fn status_json(state: &State) -> String {
-    format!("{{\"chain_id\":\"{}\",\"height\":{},\"block\":\"{}\",\"state_root\":\"{}\",\"test_tlds\":{},\"payments_enabled\":false,\"production_ready\":false}}",yami_chain::CHAIN_ID,state.height(),state.tip(),state.root(),state.names().entries().count())
+    format!("{{\"chain_id\":\"{}\",\"height\":{},\"block\":\"{}\",\"state_root\":\"{}\",\"test_tlds\":{},\"payments_enabled\":false,\"production_ready\":false}}",yami_chain::CHAIN_ID,state.height(),state.tip(),state.root(),state.names().len())
 }
 
 // Our transport publishes exactly one data part, keyed by its block ID. Reject

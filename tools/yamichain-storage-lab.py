@@ -19,6 +19,7 @@ def main():
     parser.add_argument('--binary', type=Path, default=Path('target/release/yami-validator'))
     parser.add_argument('--legacy-binary', type=Path)
     parser.add_argument('--segmented-archive', action='store_true')
+    parser.add_argument('--transactions', type=int, choices=range(65), default=4)
     parser.add_argument('--height', type=int, default=128)
     parser.add_argument('--restart-count', type=int, default=1)
     parser.add_argument('--restart-step', type=int, default=32)
@@ -35,6 +36,7 @@ def main():
     if args.legacy_binary:
         legacy_binary = root/'legacy-validator'
         shutil.copy2(args.legacy_binary.resolve(), legacy_binary)
+    legacy_archive_capable = bool(legacy_binary and 'migrate-archive' in subprocess.run([str(legacy_binary), '--help'], capture_output=True, text=True, check=True).stdout)
     env = os.environ.copy()
     for key in ['DOCKER_HOST', 'DOCKER_CONTEXT', 'DOCKER_TLS', 'DOCKER_TLS_VERIFY', 'DOCKER_CERT_PATH']:
         env.pop(key, None)
@@ -42,6 +44,7 @@ def main():
     tag = f'yami-storage-{os.getpid()}'
     names = [f'{tag}-{i}' for i in range(4)]
     report = dict(passed=False, binary_sha256=hashlib.sha256(binary.read_bytes()).hexdigest(), samples=[], events=[])
+    report['legacy_archive_capable'] = legacy_archive_capable
     report['legacy_binary_sha256'] = hashlib.sha256(legacy_binary.read_bytes()).hexdigest() if legacy_binary else None
     started = time.monotonic()
 
@@ -79,7 +82,7 @@ def main():
                '--mount', f'type=bind,src={root/f"config-{i}"},dst=/config,readonly',
                '--mount', f'type=bind,src={root/f"store-{i}"},dst=/store', IMAGE,
                '/validator', 'run', '--dir', '/store', '--index', str(i), '--isolated-network', '/config',
-               '--height', str(target), '--timeout', str(min(3600, max(240, args.height*3))), '--linger', str(linger), '--test-transactions', '4',
+               '--height', str(target), '--timeout', str(min(3600, max(240, args.height*3))), '--linger', str(linger), '--test-transactions', str(args.transactions),
                '--storage-mode', 'archive' if i == 0 else 'pruned', '--checkpoint-interval', '32', *minimum)
 
     def sample():
@@ -189,9 +192,14 @@ def main():
                 refused = root/'archive-downgrade'
                 shutil.copytree(root/'store-0', refused)
                 result = subprocess.run([str(legacy_binary), 'inspect', '--dir', str(refused), '--isolated-network', str(root/'config-0'), '--index', '0'], capture_output=True, text=True, timeout=30)
-                if result.returncode == 0 or 'conflicting durable record' not in result.stderr:
-                    raise RuntimeError(f'archive downgrade did not refuse: {result.stderr}')
-                report['archive_downgrade_refused'] = True
+                if legacy_archive_capable:
+                    if result.returncode != 0 or json.loads(result.stdout.splitlines()[-1]) != report['first_convergence'][0]:
+                        raise RuntimeError(f'previous archive reader incompatible: {result.stderr}')
+                    report['archive_previous_reader_compatible'] = True
+                else:
+                    if result.returncode == 0 or 'conflicting durable record' not in result.stderr:
+                        raise RuntimeError(f'archive downgrade did not refuse: {result.stderr}')
+                    report['archive_downgrade_refused'] = True
             report['archive_migration_crashes'] = []
             for stage in ['manifest', 'segment', 'tip', 'active', 'fence']:
                 store = root/f'archive-crash-{stage}'

@@ -1,0 +1,95 @@
+{
+  "base": "d0d972f",
+  "branch": "development/yamichain",
+  "rust": "1.90.0",
+  "debug_symbols": false,
+  "incremental": false,
+  "rust_passed": 552,
+  "rust_failed": 0,
+  "existing_ignored": 10,
+  "python_passed": 6,
+  "benchmark_roots_and_checkpoint_bytes_identical": true,
+  "snapshot_limits_unchanged": true,
+  "financial_proof_versions_rejected": 65536,
+  "logs": {
+    "format": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "clippy": {
+      "sha256": "d8dea3e4928c14762d4588c96325b4c1b5fd59eec0b37b41809987a3caf860f1",
+      "bytes": 226
+    },
+    "rust_tests": {
+      "sha256": "2a962463bb6775d54f10661bfbe8d3644a2e8215b3926b57cc86a0a39cbf3f0b",
+      "bytes": 71491
+    },
+    "release": {
+      "sha256": "3fa3bb9f4053b1036d4d0f3ff037986f5c6a4966ac4b07598e0c2b04049e8a00",
+      "bytes": 381
+    },
+    "python_tests": {
+      "sha256": "d26bdd8902cfd9615fdc56631c8cf5c6f50365669f489e98ad81e93f48fdb11a",
+      "bytes": 104
+    }
+  },
+  "source_hashes": {
+    "crates/yami-chain/src/snapshot.rs": "1c47458ab4883bee40c7ec9b291a8af1a213611a88200169e2dc6a7c7cefbb07",
+    "crates/yami-chain/src/validators.rs": "ab4ae2a48a022b5545a6c429bc54c3490ef717b23ad616bad7aecad19744b09f",
+    "crates/yami-chain/src/lib.rs": "648421eb47cc54715fb7a699f0717d3e3c80afdc81c9903de975d6386347d33d",
+    "crates/yami-chain/src/scalability_tests.rs": "3f416df7c22940d085f986bda01dbbe21e7fc2b05e0bf01df2571688003fe787",
+    "crates/yami-chain/src/codec.rs": "9483c17adfb00a9efa0ba3c81bd8d98741cb39d3b8e16ff49ffb1b8fafc5e31f",
+    "crates/yami-chain/src/selection.rs": "25ab9594076f3c7f69116abec2558716ca1b8423b198c43de90525715d60665b",
+    "crates/yami-chain/src/committee.rs": "82086a2055f9a188a2a200318eb10234b78de93637dacc975f440187e0752661",
+    "crates/yami-chain/Cargo.toml": "54f0d563ce35ee7636cf774a88bde41efd16da85f2b48f9b6df6672a0fd5c9fb",
+    "crates/yami-chain/tests/state_reference.rs": "9462c79680a067ef9e00f896bada65a20f26b84f313c4c0197ba4c0a02d4a9b8",
+    "crates/yami-chain-naming/src/lib.rs": "921a287f8ac9a5c88d9a084831c0eab72b5167e0c7e58cd0384c355036b68843",
+    "crates/yami-chain-naming/Cargo.toml": "67da6bd8bb8a6ca106eddb2f6625e527338e728d49167434f991aa4bc30b92da",
+    "crates/yami-chain-consensus/src/compact.rs": "c7d4496dcf2df3926f7e13521779a23aacb1506f228f0713dffa7eb339f41fd2",
+    "crates/yami-chain-consensus/src/node.rs": "17477558fa2ec528c4a8e73ce7931cf2235a2423f9d145d50c4c436e7f015ad1",
+    "crates/yami-chain-consensus/examples/application-bench.rs": "12980c5e0c933fcc6ca5a3a5eb584224ab04cd06af52f144446fc2b9c4ecc8ca",
+    "crates/yami-chain-privacy/tests/non_test_boundary.rs": "72c0c3df14100f2f0c972a9a837a4726736d80d6c0a025743c4d898e12029b36",
+    "Cargo.lock": "359eef23f81cb4aa943f81bb4760dbc24d0f5ae59b3bf0f5c2ce34fb3dc3eb8f",
+    "tools/yamichain-state-bench.py": "9fad707e823a7ce6490c524bc5f398f1147436ca93325789b12e79f2edbf6576",
+    "tools/yamichain-state-recovery.py": "766b02e05a336eb066cac80e7b33ad6ab731c977b9e355106f5ed90a43f2302f",
+    "tools/yamichain-storage-lab.py": "866d01a39268d39aaec5f4a79a649ae367b3d2e93a255c272b129b8c969d9279"
+  },
+  "binaries": {
+    "m12_validator": {
+      "sha256": "171d268160ff4fde5c0526a3600f5041b68b0fc145a38bc6df2cbb14af3b02ba",
+      "bytes": 25912600
+    },
+    "m12_application_bench": {
+      "sha256": "89e3a79b354368d81b1a498b2d5989c4ce0db1f7843e90c10cf5d29905cd2cbb",
+      "bytes": 1705752
+    },
+    "m13_validator": {
+      "sha256": "0775a0cd0a3b8f5c2e232c23f77cbc055fc74f7a89767b6216a009054b9b4a8b",
+      "bytes": 25907368
+    },
+    "m13_application_bench": {
+      "sha256": "9a4a2605bca2e00b00bea70ac357b44f2f0317135aa751eefab56742340b12a5",
+      "bytes": 1750384
+    }
+  },
+  "benchmark_m12": {
+    "passed": true,
+    "sha256": "7faddf62c47688895a9449c70beee7a0916e3ca011c057fb4944dd2c96e0553d"
+  },
+  "benchmark_m13": {
+    "passed": true,
+    "sha256": "1eb63904ce951a0dd51e107782975965bfdfe50b40f20b3321b94e523de990d6"
+  },
+  "live": {
+    "passed": true,
+    "sha256": "a5054e64a1d33c9941f76dad55bf2675b50b026215f09aff8901f1c1eda19da1"
+  },
+  "recovery": {
+    "passed": true,
+    "sha256": "333bee2548ba07bd59fa76d8288d5248c6cb8ccd0bc27f2d1b7306892b9b5b73"
+  },
+  "enospc": {
+    "passed": true,
+    "sha256": "aa0c79d715354f4ee7a500c2d9889cb82842a224f44044915e6a48e5513c3597"
+  }
+}

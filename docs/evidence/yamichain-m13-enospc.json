@@ -1,0 +1,57 @@
+{
+  "passed": true,
+  "test_binary_sha256": "bc909a772e61e6e15fa9a06e3437aed2ad5ba2a9b7a2eac1ebf954b5a3fb4c2f",
+  "cpus": 2,
+  "memory_bytes": 2147483648,
+  "tmpfs_bytes": 134217728,
+  "cases": [
+    {
+      "kind": "blocks",
+      "mode": "append",
+      "passed": true,
+      "seconds": 0.9211317579993192,
+      "stdout": "\nrunning 1 test\ntest archive::tests::actual_enospc_child ... ok\n\ntest result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 41 filtered out; finished in 0.08s\n\n",
+      "stderr": ""
+    },
+    {
+      "kind": "blocks",
+      "mode": "migration",
+      "passed": true,
+      "seconds": 0.84833468800025,
+      "stdout": "\nrunning 1 test\ntest archive::tests::actual_enospc_child ... \nrunning 1 test\nok\n\ntest result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 41 filtered out; finished in 0.13s\n\n",
+      "stderr": ""
+    },
+    {
+      "kind": "blocks",
+      "mode": "recovery",
+      "passed": true,
+      "seconds": 0.8929240779998509,
+      "stdout": "\nrunning 1 test\ntest archive::tests::actual_enospc_child ... \nrunning 1 test\nok\n\ntest result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 41 filtered out; finished in 0.12s\n\n",
+      "stderr": ""
+    },
+    {
+      "kind": "inodes",
+      "mode": "append",
+      "passed": true,
+      "seconds": 1.0655356510014826,
+      "stdout": "\nrunning 1 test\ntest archive::tests::actual_enospc_child ... ok\n\ntest result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 41 filtered out; finished in 0.08s\n\n",
+      "stderr": ""
+    },
+    {
+      "kind": "inodes",
+      "mode": "migration",
+      "passed": true,
+      "seconds": 1.1449928129986802,
+      "stdout": "\nrunning 1 test\ntest archive::tests::actual_enospc_child ... \nrunning 1 test\nok\n\ntest result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 41 filtered out; finished in 0.11s\n\n",
+      "stderr": ""
+    },
+    {
+      "kind": "inodes",
+      "mode": "recovery",
+      "passed": true,
+      "seconds": 1.7250665800002025,
+      "stdout": "\nrunning 1 test\ntest archive::tests::actual_enospc_child ... \nrunning 1 test\nok\n\ntest result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 41 filtered out; finished in 0.13s\n\n",
+      "stderr": ""
+    }
+  ]
+}
