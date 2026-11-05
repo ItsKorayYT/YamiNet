@@ -1,0 +1,33 @@
+   Compiling yamichain-tee-m20 v0.1.0 (/workspace/YamiNet/experiments/yamichain-tee-m20)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.50s
+     Running unittests src/lib.rs (experiments/yamichain-tee-m20/target/debug/deps/yamichain_tee_m20-5bcdbffa356b9078)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/bin/measure.rs (experiments/yamichain-tee-m20/target/debug/deps/measure-3c490c79c47a454c)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/security.rs (experiments/yamichain-tee-m20/target/debug/deps/security-085c0524449825d7)
+
+running 8 tests
+test attestation_policy_is_simulation_and_tdx_fails_closed ... ok
+test compromised_enclave_can_forge_receipt_but_disclosed_auditor_rejects ... ok
+test authorization_ranges_and_atomicity ... ok
+test concurrent_double_spend_serializes ... ok
+test envelope_key_domain_and_payload_substitution_rejected ... ok
+test interrupted_commit_fails_closed_at_each_durability_boundary ... ok
+test concurrent_independent_senders_credit_offline_recipient ... ok
+test offline_receive_query_recovery_and_host_attacks ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.32s
+
+   Doc-tests yamichain_tee_m20
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s

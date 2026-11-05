@@ -1,0 +1,37 @@
+{
+  "platform": "Linux-6.18.57-x86_64-with-glibc2.41",
+  "runs": [
+    {
+      "accounts": 2,
+      "mode": "SOFTWARE ONLY",
+      "recovery_ms": 0.027872,
+      "snapshot_bytes": 2015,
+      "tps": 1895.0287878465983,
+      "transfers": 1000,
+      "wallet_encrypt_execute_receipt_ms": 527.696469,
+      "peak_rss_kib": 9984
+    },
+    {
+      "accounts": 1000,
+      "mode": "SOFTWARE ONLY",
+      "recovery_ms": 3.9733650000000003,
+      "snapshot_bytes": 508546,
+      "tps": 196.484444941785,
+      "transfers": 1000,
+      "wallet_encrypt_execute_receipt_ms": 5089.4614090000005,
+      "peak_rss_kib": 10240
+    },
+    {
+      "accounts": 10000,
+      "mode": "SOFTWARE ONLY",
+      "recovery_ms": 39.23554,
+      "snapshot_bytes": 5080179,
+      "tps": 25.79845545187429,
+      "transfers": 1000,
+      "wallet_encrypt_execute_receipt_ms": 38762.010457000004,
+      "peak_rss_kib": 16740
+    }
+  ],
+  "repetitions": 1,
+  "warning": "SOFTWARE ONLY; full snapshot per transfer; no TDX or production capacity claim"
+}
