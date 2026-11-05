@@ -425,3 +425,6 @@ pub mod quorum;
 
 /// Private process harness for reproducible software-only quorum tests.
 pub mod software_harness;
+
+/// M22 wallet-local Intel QVL verification and attestation-gated delivery.
+pub mod attestation;

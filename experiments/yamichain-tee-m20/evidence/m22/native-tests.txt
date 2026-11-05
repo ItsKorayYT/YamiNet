@@ -1,0 +1,32 @@
+-- Configuring done (0.0s)
+-- Generating done (0.0s)
+-- Build files have been written to: /workspace/YamiNet/work/m22/native-build
+[  1%] Building CXX object CMakeFiles/yami_intel_qvl.dir/abi_check.cpp.o
+[  3%] Linking CXX shared library libyami_intel_qvl.so
+[100%] Built target yami_intel_qvl
+{"intel_source": "https://github.com/intel/SGX-TDX-DCAP-QuoteVerificationLibrary.git", "intel_commit": "d12717e3f1f2ab81313f88001fd902b5ef5f9c8c", "library": "/workspace/YamiNet/work/m22/native-build/libyami_intel_qvl.so", "sha256": "8efd64acbff7165a3f73982b0885875c76374f1b37f953424ca728d9f7624a7c", "hardware_activation": false, "mode": "native wallet-local QVL; archived signed fixtures"}
+   Compiling yamichain-tee-m20 v0.1.0 (/workspace/YamiNet/experiments/yamichain-tee-m20)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1.20s
+     Running tests/attestation_native.rs (experiments/yamichain-tee-m20/target/debug/deps/attestation_native-ff77f51861f7a2c7)
+
+running 8 tests
+test approved_measurements_debug_policy_and_reportdata_binding_are_mandatory ... ok
+test actual_wallet_cli_emits_challenges_but_no_payment_for_archived_evidence ... ok
+test archived_or_unverified_evidence_never_encrypts_or_submits_and_rounds_are_single_use ... ok
+test balance_queries_use_the_same_four_executor_gate ... ok
+REAL Intel QVL: archived authentic TDX fixture, all native stages STATUS_OK at 2025-06-20; no live authorization
+test genuine_intel_signed_fixture_verifies_at_archived_time_only ... ok
+test genuine_outdated_tcb_quote_is_not_relaxed_into_success ... ok
+test wallet_native_library_must_be_pinned_and_hardware_activation_stays_closed ... ok
+test signatures_collateral_revocation_data_and_lengths_are_not_host_assertions ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.31s
+
+   Compiling yamichain-tee-m20 v0.1.0 (/workspace/YamiNet/experiments/yamichain-tee-m20)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.57s
+     Running unittests src/lib.rs (experiments/yamichain-tee-m20/target/debug/deps/yamichain_tee_m20-11c1016ee726b175)
+
+running 1 test
+test attestation::tests::native_wallet_rounds_reject_deadlines_wrong_round_ids_and_backwards_time ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 2 filtered out; finished in 0.07s

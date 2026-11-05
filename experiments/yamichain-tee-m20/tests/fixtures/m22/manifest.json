@@ -1,0 +1,32 @@
+{
+  "upstream": "https://github.com/Phala-Network/dcap-qvl",
+  "commit": "05c200b752ecb824b73e5b1ae63cc047f1702ab2",
+  "normalization": {
+    "file": "tdx_quote",
+    "kept_prefix_bytes": 4936,
+    "removed_unsigned_zero_padding_bytes": 70,
+    "signed_bytes_changed": false
+  },
+  "files": {
+    "tdx_quote": {
+      "bytes": 4936,
+      "sha256": "f1c8503301126c30ab9863df145a8c328f0834a59817e77abc24d1db6e9fce24"
+    },
+    "tdx_quote_upstream_padded": {
+      "bytes": 5006,
+      "sha256": "c42f9164325024bca2757bc8819b11879a0a369132ea4e2b7c85df4805ea72db"
+    },
+    "tdx_quote_collateral.json": {
+      "bytes": 16072,
+      "sha256": "b0a5f5fd620a8881b1eda45261fdf30dd930b49aff93231556645c81fcb4c0bc"
+    },
+    "tdx_quote_outdated": {
+      "bytes": 5006,
+      "sha256": "4c453ea417a7863ed67c215fe4735d91e26f359c760e5984a277866d8d5758e9"
+    },
+    "tdx_quote_outdated_collateral.json": {
+      "bytes": 18793,
+      "sha256": "05e91466e56352166c15a73654147c3d95d6f4ffa62bd150c3c8cbb1d75c3b15"
+    }
+  }
+}

@@ -1,0 +1,8 @@
+{
+  "intel_source": "https://github.com/intel/SGX-TDX-DCAP-QuoteVerificationLibrary.git",
+  "intel_commit": "d12717e3f1f2ab81313f88001fd902b5ef5f9c8c",
+  "library": "/workspace/YamiNet/work/m22/native-build/libyami_intel_qvl.so",
+  "sha256": "8efd64acbff7165a3f73982b0885875c76374f1b37f953424ca728d9f7624a7c",
+  "hardware_activation": false,
+  "mode": "native wallet-local QVL; archived signed fixtures"
+}

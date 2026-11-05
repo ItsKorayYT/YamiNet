@@ -1,0 +1,2 @@
+    Checking yamichain-tee-m20 v0.1.0 (/workspace/YamiNet/experiments/yamichain-tee-m20)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 1.05s

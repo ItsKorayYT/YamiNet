@@ -1,5 +1,8 @@
 # Milestone 20: isolated TEE payment execution prototype
 
+M22 adds [real Intel QVL verification and the attestation-gated wallet](M22.md).
+Hardware/production activation remains closed; the M20/M21 reports are historical.
+
 M21 extends this working crate with a four-process 3-of-4 quorum. See
 [M21 implementation and security verdict](M21.md). The original M20 report below
 and its measurements remain the historical baseline.
