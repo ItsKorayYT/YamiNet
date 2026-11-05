@@ -1,0 +1,52 @@
+{
+  "date": "2026-11-05",
+  "timezone": "Europe/Berlin",
+  "base": "c1c2d549ee5247f267d4984fa764d5e94d564ce5",
+  "mode": "SOFTWARE ONLY",
+  "four_distinct_os_executor_processes": true,
+  "distinct_signing_keys": 4,
+  "distinct_transport_keys": 4,
+  "threshold": 3,
+  "m21_debug_integration_tests_passed": 11,
+  "m21_release_integration_tests_passed": 11,
+  "m20_security_tests_passed": 8,
+  "strict_all_target_clippy": "passed",
+  "format_check": "passed",
+  "production_rejected_u16_versions": 65536,
+  "financial_action_classes_tested": 2,
+  "one_byzantine_executor_attacks_rejected": [
+    "balance forgery",
+    "inflation",
+    "balanced theft",
+    "conflicting statements",
+    "false balance query response"
+  ],
+  "recovery_tests": [
+    "killed executor restart",
+    "durable vote lock",
+    "coordinator restart before commit dissemination",
+    "encrypted certified peer snapshot",
+    "counterfeit ledger with genuine QC rejected",
+    "historical recovery rejected"
+  ],
+  "trusted_anchor_model": "separate trusted filesystem files; no hardware or real remote witness",
+  "negative_boundary_test": "rewinding both snapshot and trusted anchor permits conflicting votes",
+  "tdx_guest_device_available": false,
+  "intel_dcap_library_available": false,
+  "native_dcap_integration_implemented": false,
+  "tdx_reportdata_key_binding": "implemented and tested; not quote verification",
+  "production_attestation_gate": "always rejects; unchanged M20 verifier",
+  "independent_trust_assumption": "at most one Byzantine executor out of four; honest persistent sign-once records; authenticated genesis and fixed roster",
+  "confidentiality_assumption": "all executors see all ledger plaintext; any compromised executor can disclose it",
+  "financial_activation": false,
+  "deployment": false,
+  "security_verdict": "conditional software quorum integrity demonstrated; NO-GO for production or financial safety claims",
+  "remaining_dependencies": [
+    "actual DCAP/TDX verification and isolation",
+    "independently operated honest executors",
+    "rollback-resistant witness and key custody",
+    "Byzantine view change/liveness",
+    "history retention and multi-step recovery",
+    "operational hardening and security review"
+  ]
+}

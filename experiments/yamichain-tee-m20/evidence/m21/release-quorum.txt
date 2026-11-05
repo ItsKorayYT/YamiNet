@@ -1,0 +1,19 @@
+   Compiling yamichain-tee-m20 v0.1.0 (/workspace/YamiNet/experiments/yamichain-tee-m20)
+    Finished `release` profile [optimized] target(s) in 2.41s
+     Running tests/quorum_e2e.rs (experiments/yamichain-tee-m20/target/release/deps/quorum_e2e-4a97de0a39ecfdb2)
+
+running 11 tests
+test certificates_bind_every_field_and_require_distinct_pinned_signers ... ok
+test durable_prepare_and_commit_fault_boundaries_fail_closed ... ok
+test encrypted_peer_recovery_resolves_pending_conflict_and_refuses_wrong_state_or_replay ... ok
+M21 SOFTWARE: four independent OS executor PIDs: {10176, 10177, 10178, 10179}; distinct signing and transport keys; no TDX
+test concurrent_valid_transfers_all_credit_offline_recipient_exactly_once ... ok
+test honest_sign_once_locks_survive_process_restart_and_prevent_conflicting_quorums ... ok
+test four_processes_offline_receive_concurrency_restart_and_recovery ... ok
+test malformed_delivery_invalid_wallet_and_unauthorized_queries_do_not_advance_state ... ok
+test rewinding_the_trusted_anchor_too_voids_the_software_rollback_guarantee ... ok
+test tdx_binding_covers_roster_identity_transport_chain_genesis_and_challenge ... ok
+test trusted_anchors_detect_snapshot_and_acceptor_rollback_after_process_death ... ok
+test one_malicious_process_cannot_inflate_steal_forge_or_equivocate ... ok
+
+test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.27s

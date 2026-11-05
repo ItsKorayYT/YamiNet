@@ -1,5 +1,9 @@
 # Milestone 20: isolated TEE payment execution prototype
 
+M21 extends this working crate with a four-process 3-of-4 quorum. See
+[M21 implementation and security verdict](M21.md). The original M20 report below
+and its measurements remain the historical baseline.
+
 **SOFTWARE ONLY. NO-GO for production, real funds, zero-trust custody or financial
 safety.** Base `22a57cf`, branch `development/yamichain`. No production module,
 consensus rule, Milestone 16 implementation or rejected proof version is changed.

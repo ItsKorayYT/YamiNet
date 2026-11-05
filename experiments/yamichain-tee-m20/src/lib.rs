@@ -419,3 +419,9 @@ impl QueryResponse {
         verify(pinned, &self.message(), &self.signature)
     }
 }
+
+/// M21 software-only 3-of-4 extension.
+pub mod quorum;
+
+/// Private process harness for reproducible software-only quorum tests.
+pub mod software_harness;
