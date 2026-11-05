@@ -1,0 +1,16 @@
+{
+  "modulus_bits": 2048,
+  "ciphertext_bytes": 512,
+  "rsa_prime_setup_ms": 18.419149000010293,
+  "encrypt_ms_median": 111.33246999997937,
+  "decrypt_ms_median": 111.36821200000213,
+  "samples": 5,
+  "full_u64_roundtrip": true,
+  "homomorphic_credit": true,
+  "proof_implemented": false,
+  "proof_bytes": null,
+  "proof_generation_ms": null,
+  "verifier_ms": null,
+  "reason": "Distinct per-account moduli cannot share the ElGamal common-randomness statement. Need proofs of well-formed keys, plaintext knowledge, cross-modulus equality/conservation, hidden selectors, ranges and authorization. No justified implementation of that composed proof here.",
+  "peak_rss_kib": 16128
+}

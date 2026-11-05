@@ -1,0 +1,155 @@
+[
+  {
+    "accounts": 16,
+    "controlled": 0,
+    "effective_candidates": 16,
+    "intersection_independent_sets": [
+      16,
+      2,
+      2,
+      2,
+      2,
+      2,
+      2,
+      2
+    ],
+    "fixed_cohort_intersection": 16,
+    "sybil_registrations_with_valid_possession": "accepted; possession does not imply independence"
+  },
+  {
+    "accounts": 16,
+    "controlled": 8,
+    "effective_candidates": 8,
+    "intersection_independent_sets": [
+      16,
+      2,
+      2,
+      2,
+      2,
+      2,
+      2,
+      2
+    ],
+    "fixed_cohort_intersection": 16,
+    "sybil_registrations_with_valid_possession": "accepted; possession does not imply independence"
+  },
+  {
+    "accounts": 16,
+    "controlled": 14,
+    "effective_candidates": 2,
+    "intersection_independent_sets": [
+      16,
+      2,
+      2,
+      2,
+      2,
+      2,
+      2,
+      2
+    ],
+    "fixed_cohort_intersection": 16,
+    "sybil_registrations_with_valid_possession": "accepted; possession does not imply independence"
+  },
+  {
+    "accounts": 64,
+    "controlled": 0,
+    "effective_candidates": 64,
+    "intersection_independent_sets": [
+      64,
+      2,
+      2,
+      2,
+      2,
+      2,
+      2,
+      2
+    ],
+    "fixed_cohort_intersection": 64,
+    "sybil_registrations_with_valid_possession": "accepted; possession does not imply independence"
+  },
+  {
+    "accounts": 64,
+    "controlled": 32,
+    "effective_candidates": 32,
+    "intersection_independent_sets": [
+      64,
+      2,
+      2,
+      2,
+      2,
+      2,
+      2,
+      2
+    ],
+    "fixed_cohort_intersection": 64,
+    "sybil_registrations_with_valid_possession": "accepted; possession does not imply independence"
+  },
+  {
+    "accounts": 64,
+    "controlled": 62,
+    "effective_candidates": 2,
+    "intersection_independent_sets": [
+      64,
+      2,
+      2,
+      2,
+      2,
+      2,
+      2,
+      2
+    ],
+    "fixed_cohort_intersection": 64,
+    "sybil_registrations_with_valid_possession": "accepted; possession does not imply independence"
+  },
+  {
+    "accounts": 128,
+    "controlled": 0,
+    "effective_candidates": 128,
+    "intersection_independent_sets": [
+      128,
+      7,
+      2,
+      2,
+      2,
+      2,
+      2,
+      2
+    ],
+    "fixed_cohort_intersection": 128,
+    "sybil_registrations_with_valid_possession": "accepted; possession does not imply independence"
+  },
+  {
+    "accounts": 128,
+    "controlled": 64,
+    "effective_candidates": 64,
+    "intersection_independent_sets": [
+      128,
+      7,
+      2,
+      2,
+      2,
+      2,
+      2,
+      2
+    ],
+    "fixed_cohort_intersection": 128,
+    "sybil_registrations_with_valid_possession": "accepted; possession does not imply independence"
+  },
+  {
+    "accounts": 128,
+    "controlled": 126,
+    "effective_candidates": 2,
+    "intersection_independent_sets": [
+      128,
+      7,
+      2,
+      2,
+      2,
+      2,
+      2,
+      2
+    ],
+    "fixed_cohort_intersection": 128,
+    "sybil_registrations_with_valid_possession": "accepted; possession does not imply independence"
+  }
+]

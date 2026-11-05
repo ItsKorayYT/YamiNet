@@ -1,0 +1,1 @@
+{"accounts":64,"constraints":227371,"memory_high_water":"VmHWM:\t  737396 kB","proof_bytes":192,"prove_ms":10780.494131,"recovery_bound":4294967295,"recovery_ms":654.8824880000001,"samples":1,"setup_ms":11002.158612000001,"state_bytes":10312,"transaction_bytes":8480,"verify_ms":93.34533}
