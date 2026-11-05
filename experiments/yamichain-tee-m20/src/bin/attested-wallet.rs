@@ -5,7 +5,7 @@ use std::{
     io::{self, BufRead, Read, Write},
     path::PathBuf,
 };
-use yamichain_tee_m20::{attestation::*, quorum::*, *};
+use yamichain_tee_m20::{attestation::*, quorum::*, witness::WitnessPolicy, *};
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Config {
@@ -14,6 +14,7 @@ struct Config {
     committee: Committee,
     genesis: Head,
     policies: [SoftwarePolicy; 4],
+    witness_policy: WitnessPolicy,
 }
 #[derive(Deserialize)]
 enum Operation {
@@ -24,7 +25,7 @@ enum Operation {
 #[serde(deny_unknown_fields)]
 struct Response {
     round: Id,
-    evidence: [Evidence; 4],
+    evidence: [Option<Evidence>; 4],
 }
 fn line(reader: &mut impl BufRead, limit: u64) -> Result<String> {
     let mut line = String::new();
@@ -40,7 +41,12 @@ fn main() -> Result<()> {
         .ok_or("usage: attested-wallet TRUSTED_CONFIG")?;
     let config: Config = serde_json::from_slice(&std::fs::read(path)?)?;
     let qvl = IntelQvl::load(&config.qvl_library, config.qvl_sha256)?;
-    let mut gate = WalletGate::new(qvl, config.committee, config.genesis, config.policies)?;
+    if config.witness_policy.committee != config.committee
+        || config.witness_policy.genesis != config.genesis
+    {
+        return Err("witness policy/configuration mismatch".into());
+    }
+    let mut gate = WalletGate::new_witnessed(qvl, config.witness_policy, config.policies)?;
     let input = io::stdin();
     let mut reader = input.lock();
     let operation: Operation = serde_json::from_str(&line(&mut reader, 64 * 1024)?)?;

@@ -46,7 +46,7 @@ impl Statement {
     pub fn message(&self) -> Vec<u8> {
         bytes(&("YAMI-M21-SOFTWARE-approval-v1", self))
     }
-    fn validate(&self, c: &Committee, previous: &Head) -> Result<()> {
+    pub(crate) fn validate(&self, c: &Committee, previous: &Head) -> Result<()> {
         check(
             self.committee == c.id()
                 && self.previous == *previous
@@ -129,7 +129,7 @@ pub struct Payment {
     pub committee: Id,
     pub previous: Head,
     pub transaction: Id,
-    pub envelopes: [Envelope; 4],
+    pub envelopes: [Option<Envelope>; 4],
 }
 fn tx_commit(d: &Delivery) -> Id {
     hash(&bytes(&("YAMI-M21-blinded-transaction-v1", d)))
@@ -137,7 +137,17 @@ fn tx_commit(d: &Delivery) -> Id {
 impl Payment {
     /// Wallet API for explicitly selected SOFTWARE development membership only.
     pub fn software(c: &Committee, previous: &Head, transfer: Signed) -> Result<Self> {
+        Self::software_selected(c, previous, transfer, [true; 4])
+    }
+    /// Explicit SOFTWARE protocol entry; this does not create hardware evidence.
+    pub fn software_selected(
+        c: &Committee,
+        previous: &Head,
+        transfer: Signed,
+        selected: [bool; 4],
+    ) -> Result<Self> {
         c.validate()?;
+        check(selected.iter().filter(|yes| **yes).count() >= 3)?;
         transfer.verify()?;
         check(previous.chain == c.chain && transfer.transfer.chain == c.chain)?;
         let mut blind = [0; 32];
@@ -146,8 +156,12 @@ impl Payment {
         let transaction = tx_commit(&d);
         let context = bytes(&(PAYMENT_DOMAIN, c.id(), previous, transaction));
         let mut envelopes = Vec::new();
-        for m in &c.members {
-            envelopes.push(encrypt(m.transport, &bytes(&d), &context)?);
+        for (i, m) in c.members.iter().enumerate() {
+            envelopes.push(if selected[i] {
+                Some(encrypt(m.transport, &bytes(&d), &context)?)
+            } else {
+                None
+            });
         }
         Ok(Self {
             committee: c.id(),
@@ -380,6 +394,63 @@ impl Replica {
             file,
         })
     }
+    /// M23 disposable cache interface: the external authenticated witness supplies authority.
+    pub(crate) fn checkpoint(&self) -> Result<Vec<u8>> {
+        let raw = fs::read(&self.file.path)?;
+        let envelope: Envelope = serde_json::from_slice(&raw)?;
+        let stored: ReplicaDisk = serde_json::from_slice(&open(
+            self.keys.storage,
+            &envelope,
+            b"YAMI-M21-replica-disk-v1",
+        )?)?;
+        // A hostile host may swap ciphertext after local preparation. Never confirm a
+        // recovery snapshot that differs from the actual private state being signed.
+        check(bytes(&stored) == bytes(&self.disk))?;
+        Ok(raw)
+    }
+    pub(crate) fn metadata(&self) -> Result<(Head, Option<Statement>, Option<Certificate>)> {
+        Ok((
+            self.head()?,
+            self.disk.pending.as_ref().map(|p| p.statement.clone()),
+            self.disk.certificate.clone(),
+        ))
+    }
+    pub(crate) fn cache_anchor(path: &Path) -> PathBuf {
+        let mut name = path.file_name().expect("snapshot file name").to_os_string();
+        name.push(".cache-anchor");
+        path.with_file_name(name)
+    }
+    pub(crate) fn restore_cache(
+        path: &Path,
+        c: Committee,
+        index: usize,
+        keys: ReplicaKeys,
+        blob: &[u8],
+    ) -> Result<Self> {
+        let anchor = Self::cache_anchor(path);
+        let lock = OpenOptions::new()
+            .create(true)
+            .truncate(false)
+            .read(true)
+            .write(true)
+            .open(path.with_extension("lock"))?;
+        fs2::FileExt::try_lock_exclusive(&lock)?;
+        atomic(path, blob)?;
+        atomic(&anchor, &bytes(&hash(blob)))?;
+        drop(lock);
+        Self::load(path, &anchor, c, index, keys)
+    }
+    pub(crate) fn resume_pending(&self) -> Result<Approval> {
+        check(!self.file.poisoned)?;
+        Ok(self.approval(
+            self.disk
+                .pending
+                .as_ref()
+                .ok_or("no prepared vote")?
+                .statement
+                .clone(),
+        ))
+    }
     pub fn head(&self) -> Result<Head> {
         Ok(state_head(&self.disk.state.state()?, self.keys.root_secret))
     }
@@ -408,7 +479,9 @@ impl Replica {
         // Every replica independently decrypts and validates before voting, even on retry.
         let d: Delivery = serde_json::from_slice(&decrypt(
             &self.keys.transport,
-            &p.envelopes[self.index],
+            p.envelopes[self.index]
+                .as_ref()
+                .ok_or("member was not selected for delivery")?,
             &p.context(),
         )?)?;
         check(tx_commit(&d) == p.transaction)?;
@@ -507,6 +580,37 @@ impl Replica {
             return Ok(());
         }
         data.certificate.verify(&self.committee, &self.head()?)?;
+        let mut disk = self.disk.clone();
+        disk.state = data.state;
+        disk.pending = None;
+        disk.certificate = Some(data.certificate);
+        self.file
+            .persist(&Self::packed(&disk, self.keys.storage)?, &mut |_| Ok(()))?;
+        self.disk = disk;
+        Ok(())
+    }
+    /// M23 bounded certified state-chain catch-up. Caller additionally verifies witness receipts.
+    pub(crate) fn recover_certified_chain(
+        &mut self,
+        envelope: &Envelope,
+        chain: &[Certificate],
+    ) -> Result<()> {
+        check(!self.file.poisoned && !chain.is_empty() && chain.len() <= 256)?;
+        let data: Recovery = serde_json::from_slice(&decrypt(
+            &self.keys.transport,
+            envelope,
+            b"YAMI-M21-recovery-v1",
+        )?)?;
+        check(data.committee == self.committee.id())?;
+        let mut head = self.head()?;
+        for certificate in chain {
+            certificate.verify(&self.committee, &head)?;
+            head = certificate.statement.next.clone();
+        }
+        check(
+            chain.last().map(|c| &c.statement) == Some(&data.certificate.statement)
+                && state_head(&data.state.state()?, self.keys.root_secret) == head,
+        )?;
         let mut disk = self.disk.clone();
         disk.state = data.state;
         disk.pending = None;

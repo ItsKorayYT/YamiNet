@@ -428,3 +428,6 @@ pub mod software_harness;
 
 /// M22 wallet-local Intel QVL verification and attestation-gated delivery.
 pub mod attestation;
+
+/// M23 authenticated independently deployable rollback witnesses.
+pub mod witness;

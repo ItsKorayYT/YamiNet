@@ -1,6 +1,10 @@
 //! M22: official Intel QVL executed INSIDE the wallet's trusted process.
 //! Offline cryptographic verification is separate from live challenge authorization.
-use crate::{quorum::*, *};
+use crate::{
+    quorum::*,
+    witness::{WitnessPolicy, WitnessedCertificate},
+    *,
+};
 use libloading::Library;
 use openssl::{
     asn1::Asn1Time,
@@ -428,9 +432,10 @@ pub struct WalletGate {
     genesis: Head,
     policies: [SoftwarePolicy; 4],
     pending: Option<Round>,
+    witness_policy: Option<WitnessPolicy>,
 }
 impl WalletGate {
-    pub fn new(
+    fn new(
         qvl: IntelQvl,
         committee: Committee,
         genesis: Head,
@@ -447,7 +452,24 @@ impl WalletGate {
             genesis,
             policies,
             pending: None,
+            witness_policy: None,
         })
+    }
+    /// M23 wallet profile: attestation also binds the independently pinned witness policy.
+    pub fn new_witnessed(
+        qvl: IntelQvl,
+        policy: WitnessPolicy,
+        policies: [SoftwarePolicy; 4],
+    ) -> Result<Self> {
+        policy.validate()?;
+        let mut gate = Self::new(
+            qvl,
+            policy.committee.clone(),
+            policy.genesis.clone(),
+            policies,
+        )?;
+        gate.witness_policy = Some(policy);
+        Ok(gate)
     }
     fn begin(&mut self, intent: Intent) -> Result<ChallengeSet> {
         check(self.pending.is_none())?;
@@ -465,7 +487,15 @@ impl WalletGate {
                     &self.committee,
                     i,
                     &self.genesis,
-                    self.policies[i].identity,
+                    self.witness_policy
+                        .as_ref()
+                        .map_or(self.policies[i].identity, |p| {
+                            hash(&bytes(&(
+                                "YAMI-M23-software-and-witness-policy-v1",
+                                self.policies[i].identity,
+                                p.id(),
+                            )))
+                        }),
                     *challenge,
                 )?
                 .to_vec(),
@@ -485,7 +515,7 @@ impl WalletGate {
         Ok(public)
     }
     /// Caller holds the wallet signing key and supplies the signed transfer; only this
-    /// attested delivery path encrypts after authenticating all four pinned executors.
+    /// attested delivery path encrypts after authenticating at least three pinned executors.
     pub fn begin_payment(&mut self, transfer: Signed, previous: Head) -> Result<ChallengeSet> {
         transfer.verify()?;
         check(
@@ -504,7 +534,7 @@ impl WalletGate {
     }
     /// Consume even a failed attempt. No quote/result/session can be replayed into a new round.
     /// Historical diagnostic VerifiedQuote values are deliberately NOT accepted here.
-    pub fn finish(&mut self, id: Id, evidence: &[Evidence; 4]) -> Result<WalletRequest> {
+    pub fn finish(&mut self, id: Id, evidence: &[Option<Evidence>; 4]) -> Result<WalletRequest> {
         let round = self
             .pending
             .take()
@@ -513,28 +543,47 @@ impl WalletGate {
         let now = wallet_time()?;
         check(now >= round.unix && now - round.unix <= TTL.as_secs())?;
         let mut seen = std::collections::BTreeSet::new();
-        for (i, e) in evidence.iter().enumerate() {
-            check(seen.insert(hash(&e.quote)))?;
-            let verified = self.qvl.verify_at(&e.quote, &e.collateral, now)?;
-            let expected: [u8; 64] = round.public.expected_report_data[i].as_slice().try_into()?;
-            verified.enforce(&self.policies[i], &expected)?;
+        let mut selected = [false; 4];
+        for (i, evidence) in evidence.iter().enumerate() {
+            if let Some(e) = evidence {
+                let result = (|| -> Result<()> {
+                    let verified = self.qvl.verify_at(&e.quote, &e.collateral, now)?;
+                    let expected: [u8; 64] =
+                        round.public.expected_report_data[i].as_slice().try_into()?;
+                    verified.enforce(&self.policies[i], &expected)?;
+                    check(seen.insert(verified.quote_hash()))
+                })();
+                selected[i] = result.is_ok();
+            }
         }
+        require_attested_quorum(selected)?;
         let end = wallet_time()?;
         check(round.started.elapsed() <= TTL && end >= now && end - round.unix <= TTL.as_secs())?;
-        // First encryption occurs here, after ALL four independent verifications.
+        // First encryption occurs here, only for the at least three genuinely verified members.
         match round.intent {
             Intent::Payment { transfer, previous } => Ok(WalletRequest::Payment(GatedPayment {
-                payment: Payment::software(&self.committee, &previous, transfer)?,
+                payment: Payment::software_selected(
+                    &self.committee,
+                    &previous,
+                    transfer,
+                    selected,
+                )?,
                 committee: self.committee.clone(),
+                witness_policy: self.witness_policy.clone(),
             })),
             Intent::Query(query) => {
                 let mut envelopes = Vec::new();
-                for member in &self.committee.members {
-                    envelopes.push(encrypt(member.transport, &bytes(&query), QUERY_DOMAIN)?);
+                for (i, member) in self.committee.members.iter().enumerate() {
+                    envelopes.push(if selected[i] {
+                        Some(encrypt(member.transport, &bytes(&query), QUERY_DOMAIN)?)
+                    } else {
+                        None
+                    });
                 }
                 Ok(WalletRequest::Queries(GatedQueries {
                     committee: self.committee.clone(),
                     query,
+                    witness_policy: self.witness_policy.clone(),
                     envelopes: envelopes.try_into().map_err(|_| "four queries")?,
                 }))
             }
@@ -543,7 +592,7 @@ impl WalletGate {
     pub fn finish_and_submit<T>(
         &mut self,
         id: Id,
-        evidence: &[Evidence; 4],
+        evidence: &[Option<Evidence>; 4],
         submit: impl FnOnce(WalletRequest) -> Result<T>,
     ) -> Result<T> {
         let request = self.finish(id, evidence)?;
@@ -561,6 +610,7 @@ pub enum WalletRequest {
 pub struct GatedPayment {
     payment: Payment,
     committee: Committee,
+    witness_policy: Option<WitnessPolicy>,
 }
 impl GatedPayment {
     pub fn packet(&self) -> &Payment {
@@ -568,20 +618,48 @@ impl GatedPayment {
     }
     /// Attestation authenticates executors; it never replaces financial quorum verification.
     pub fn verify_receipt(&self, qc: &Certificate) -> Result<()> {
+        check(self.witness_policy.is_none())?;
         qc.verify(&self.committee, &self.payment.previous)?;
         check(qc.statement.transaction == self.payment.transaction)
+    }
+    pub fn verify_witnessed_receipt(&self, qc: &WitnessedCertificate) -> Result<()> {
+        let p = self
+            .witness_policy
+            .as_ref()
+            .ok_or("not a witness-backed request")?;
+        qc.verify(p, &self.payment.previous)?;
+        check(qc.certificate.statement.transaction == self.payment.transaction)
     }
 }
 pub struct GatedQueries {
     committee: Committee,
+    witness_policy: Option<WitnessPolicy>,
     query: Query,
-    envelopes: [Envelope; 4],
+    envelopes: [Option<Envelope>; 4],
 }
 impl GatedQueries {
-    pub fn envelopes(&self) -> &[Envelope; 4] {
+    pub fn envelopes(&self) -> &[Option<Envelope>; 4] {
         &self.envelopes
     }
     pub fn verify_replies(&self, secret: &StaticSecret, replies: &[Envelope]) -> Result<Account> {
+        check(self.witness_policy.is_none())?;
+        verify_balance(&self.committee, &self.query, secret, replies)
+    }
+    pub fn verify_witnessed_replies(
+        &self,
+        secret: &StaticSecret,
+        replies: &[Envelope],
+        certificate: Option<&WitnessedCertificate>,
+    ) -> Result<Account> {
+        let p = self
+            .witness_policy
+            .as_ref()
+            .ok_or("not a witness-backed query")?;
+        if self.query.head != p.genesis {
+            let qc = certificate.ok_or("certified head required")?;
+            qc.verify(p, &qc.certificate.statement.previous)?;
+            check(qc.certificate.statement.next == self.query.head)?;
+        }
         verify_balance(&self.committee, &self.query, secret, replies)
     }
 }
@@ -644,6 +722,7 @@ mod tests {
         let context = GatedPayment {
             payment,
             committee: c.clone(),
+            witness_policy: None,
         };
         let mut qc = Certificate {
             statement: statement.clone(),
@@ -652,6 +731,27 @@ mod tests {
         assert!(context.verify_receipt(&qc).is_err());
         qc.approvals = approvals[..3].to_vec();
         context.verify_receipt(&qc).unwrap();
+        let witness_policy = WitnessPolicy {
+            committee: c.clone(),
+            genesis: previous.clone(),
+            authorities: std::array::from_fn(|_| wallet().verifying_key().to_bytes()),
+            observer: wallet().verifying_key().to_bytes(),
+        };
+        let secured = GatedPayment {
+            payment: context.payment.clone(),
+            committee: c.clone(),
+            witness_policy: Some(witness_policy),
+        };
+        assert!(
+            secured.verify_receipt(&qc).is_err(),
+            "M23 cannot downgrade to bare financial signatures"
+        );
+        assert!(secured
+            .verify_witnessed_receipt(&WitnessedCertificate {
+                certificate: qc.clone(),
+                confirmations: vec![]
+            })
+            .is_err());
         qc.approvals = vec![approvals[0].clone(); 3];
         assert!(context.verify_receipt(&qc).is_err());
         let mut another = statement;
@@ -728,12 +828,14 @@ mod tests {
             std::array::from_fn(|_| policy.clone()),
         )
         .unwrap();
-        let evidence: [Evidence; 4] = std::array::from_fn(|_| Evidence {
-            quote: vec![],
-            collateral: serde_json::from_str(include_str!(
-                "../tests/fixtures/m22/tdx_quote_collateral.json"
-            ))
-            .unwrap(),
+        let evidence: [Option<Evidence>; 4] = std::array::from_fn(|_| {
+            Some(Evidence {
+                quote: vec![],
+                collateral: serde_json::from_str(include_str!(
+                    "../tests/fixtures/m22/tdx_quote_collateral.json"
+                ))
+                .unwrap(),
+            })
         });
         for mode in 0..3 {
             let t = Signed::sign(
@@ -759,6 +861,25 @@ mod tests {
             assert!(gate.finish(id, &evidence).is_err());
             assert!(gate.pending.is_none());
             assert!(gate.finish(challenge.id, &evidence).is_err());
+        }
+    }
+}
+
+fn require_attested_quorum(selected: [bool; 4]) -> Result<()> {
+    check(selected.into_iter().filter(|yes| *yes).count() >= 3)
+}
+#[cfg(test)]
+mod m23_selection_tests {
+    use super::*;
+    #[test]
+    fn verification_selection_requires_three_independent_native_decisions() {
+        // Selection algorithm only; no fake quote or public verifier-success injection.
+        for mask in 0u8..16 {
+            let selected = std::array::from_fn(|i| mask & (1 << i) != 0);
+            assert_eq!(
+                require_attested_quorum(selected).is_ok(),
+                mask.count_ones() >= 3
+            );
         }
     }
 }

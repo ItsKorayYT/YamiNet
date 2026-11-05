@@ -1,5 +1,8 @@
 # Milestone 20: isolated TEE payment execution prototype
 
+M23 adds [3-of-4 delivery and authenticated external rollback witnesses](M23.md).
+Use that current profile; M20–M22 reports describe their historical baselines.
+
 M22 adds [real Intel QVL verification and the attestation-gated wallet](M22.md).
 Hardware/production activation remains closed; the M20/M21 reports are historical.
 

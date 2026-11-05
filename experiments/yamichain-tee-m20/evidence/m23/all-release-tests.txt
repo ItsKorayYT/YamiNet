@@ -1,0 +1,113 @@
+   Compiling yamichain-tee-m20 v0.1.0 (/workspace/YamiNet/experiments/yamichain-tee-m20)
+    Finished `release` profile [optimized] target(s) in 16.25s
+     Running unittests src/lib.rs (experiments/yamichain-tee-m20/target/release/deps/yamichain_tee_m20-1b7d3c6c7fae1370)
+
+running 4 tests
+test attestation::m23_selection_tests::verification_selection_requires_three_independent_native_decisions ... ok
+test attestation::tests::attestation_request_context_never_substitutes_for_three_financial_signatures ... ok
+test attestation::tests::native_wallet_rounds_reject_deadlines_wrong_round_ids_and_backwards_time ... ignored, requires explicitly pinned official Intel QVL native build
+test attestation::tests::unverified_quote_parser_is_bounded_and_not_an_authorization ... ok
+
+test result: ok. 3 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/bin/attested-wallet.rs (experiments/yamichain-tee-m20/target/release/deps/attested_wallet-52ade0c13075c016)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/bin/measure.rs (experiments/yamichain-tee-m20/target/release/deps/measure-7d97647534ff4d06)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/bin/quorum-worker.rs (experiments/yamichain-tee-m20/target/release/deps/quorum_worker-e3b6aaf9771243a4)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/bin/witness-node.rs (experiments/yamichain-tee-m20/target/release/deps/witness_node-dd3539f1e93d90c5)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/bin/witnessed-worker.rs (experiments/yamichain-tee-m20/target/release/deps/witnessed_worker-ab31df68bd6fdfd7)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/attestation_native.rs (experiments/yamichain-tee-m20/target/release/deps/attestation_native-821d2d698ab5b2d2)
+
+running 10 tests
+test actual_wallet_cli_emits_challenges_but_no_payment_for_archived_evidence ... ignored, requires explicitly pinned official Intel QVL native build
+test approved_measurements_debug_policy_and_reportdata_binding_are_mandatory ... ignored, requires explicitly pinned official Intel QVL native build
+test archived_or_unverified_evidence_never_encrypts_or_submits_and_rounds_are_single_use ... ignored, requires explicitly pinned official Intel QVL native build
+test balance_queries_use_the_same_three_executor_gate ... ignored, requires explicitly pinned official Intel QVL native build
+test genuine_intel_signed_fixture_verifies_at_archived_time_only ... ignored, requires explicitly pinned official Intel QVL native build
+test genuine_outdated_tcb_quote_is_not_relaxed_into_success ... ignored, requires explicitly pinned official Intel QVL native build
+test m23_attested_identity_binding_includes_the_witness_authority_policy ... ignored, requires explicitly pinned official Intel QVL native build
+test m23_missing_malicious_expired_and_mismatched_quotes_do_not_become_eligible ... ignored, requires explicitly pinned official Intel QVL native build
+test signatures_collateral_revocation_data_and_lengths_are_not_host_assertions ... ignored, requires explicitly pinned official Intel QVL native build
+test wallet_native_library_must_be_pinned_and_hardware_activation_stays_closed ... ignored, requires explicitly pinned official Intel QVL native build
+
+test result: ok. 0 passed; 0 failed; 10 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/quorum_e2e.rs (experiments/yamichain-tee-m20/target/release/deps/quorum_e2e-491f8335cd53187a)
+
+running 11 tests
+test certificates_bind_every_field_and_require_distinct_pinned_signers ... ok
+test concurrent_valid_transfers_all_credit_offline_recipient_exactly_once ... ok
+test durable_prepare_and_commit_fault_boundaries_fail_closed ... ok
+test encrypted_peer_recovery_resolves_pending_conflict_and_refuses_wrong_state_or_replay ... ok
+test four_processes_offline_receive_concurrency_restart_and_recovery ... M21 SOFTWARE: four independent OS executor PIDs: {26520, 26521, 26522, 26523}; distinct signing and transport keys; no TDX
+ok
+test honest_sign_once_locks_survive_process_restart_and_prevent_conflicting_quorums ... ok
+test malformed_delivery_invalid_wallet_and_unauthorized_queries_do_not_advance_state ... ok
+test one_malicious_process_cannot_inflate_steal_forge_or_equivocate ... ok
+test rewinding_the_trusted_anchor_too_voids_the_software_rollback_guarantee ... ok
+test tdx_binding_covers_roster_identity_transport_chain_genesis_and_challenge ... ok
+test trusted_anchors_detect_snapshot_and_acceptor_rollback_after_process_death ... ok
+
+test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.41s
+
+     Running tests/security.rs (experiments/yamichain-tee-m20/target/release/deps/security-941ae0cdce9dbebd)
+
+running 8 tests
+test attestation_policy_is_simulation_and_tdx_fails_closed ... ok
+test authorization_ranges_and_atomicity ... ok
+test compromised_enclave_can_forge_receipt_but_disclosed_auditor_rejects ... ok
+test concurrent_double_spend_serializes ... ok
+test concurrent_independent_senders_credit_offline_recipient ... ok
+test envelope_key_domain_and_payload_substitution_rejected ... ok
+test interrupted_commit_fails_closed_at_each_durability_boundary ... ok
+test offline_receive_query_recovery_and_host_attacks ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests/witness_e2e.rs (experiments/yamichain-tee-m20/target/release/deps/witness_e2e-25b3bcf3f545af19)
+
+running 11 tests
+test cloned_executors_cannot_obtain_conflicting_durable_confirmations ... ok
+test compromised_witness_storage_and_reused_authority_key_can_enable_equivocation ... ok
+test concurrent_credits_and_coordinator_rollback_recover_from_external_authorities ... ok
+test crash_boundaries_before_after_witness_and_between_certification_and_commit ... ok
+test encrypted_transfer_and_offline_receiving_survive_one_unavailable_executor ... M23 SOFTWARE: four executor processes and four authenticated TCP/SQLite witness services; loopback is NOT independent hardware trust
+ok
+test host_cannot_swap_ciphertext_between_preparation_and_remote_confirmation ... ok
+test restoring_both_local_snapshot_and_anchor_cannot_erase_the_remote_vote_lock ... ok
+test unsigned_or_altered_witness_confirmations_cannot_downgrade_the_certificate ... ok
+test witness_crash_after_sql_commit_before_reply_releases_no_vote_and_recovers ... ok
+test witness_requests_are_authenticated_replay_protected_and_compare_and_swap ... ok
+test witness_unavailability_is_fail_closed_without_any_local_cache_fallback ... ok
+
+test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.25s
+
+   Doc-tests yamichain_tee_m20
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s

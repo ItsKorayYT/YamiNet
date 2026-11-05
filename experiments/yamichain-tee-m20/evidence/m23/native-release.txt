@@ -1,0 +1,25 @@
+    Finished `release` profile [optimized] target(s) in 0.04s
+     Running tests/attestation_native.rs (experiments/yamichain-tee-m20/target/release/deps/attestation_native-821d2d698ab5b2d2)
+
+running 10 tests
+test approved_measurements_debug_policy_and_reportdata_binding_are_mandatory ... ok
+test archived_or_unverified_evidence_never_encrypts_or_submits_and_rounds_are_single_use ... ok
+test actual_wallet_cli_emits_challenges_but_no_payment_for_archived_evidence ... ok
+test balance_queries_use_the_same_three_executor_gate ... ok
+REAL Intel QVL: archived authentic TDX fixture, all native stages STATUS_OK at 2025-06-20; no live authorization
+test genuine_outdated_tcb_quote_is_not_relaxed_into_success ... ok
+test genuine_intel_signed_fixture_verifies_at_archived_time_only ... ok
+test m23_attested_identity_binding_includes_the_witness_authority_policy ... ok
+test m23_missing_malicious_expired_and_mismatched_quotes_do_not_become_eligible ... ok
+test wallet_native_library_must_be_pinned_and_hardware_activation_stays_closed ... ok
+test signatures_collateral_revocation_data_and_lengths_are_not_host_assertions ... ok
+
+test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.11s
+
+    Finished `release` profile [optimized] target(s) in 0.04s
+     Running unittests src/lib.rs (experiments/yamichain-tee-m20/target/release/deps/yamichain_tee_m20-1b7d3c6c7fae1370)
+
+running 1 test
+test attestation::tests::native_wallet_rounds_reject_deadlines_wrong_round_ids_and_backwards_time ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 3 filtered out; finished in 0.00s

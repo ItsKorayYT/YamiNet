@@ -569,7 +569,7 @@ fn malformed_delivery_invalid_wallet_and_unauthorized_queries_do_not_advance_sta
         }
     }
     let mut p = lab.packet(0, 1);
-    for e in &mut p.envelopes {
+    for e in p.envelopes.iter_mut().flatten() {
         e.ciphertext[0] ^= 1;
     }
     assert!(lab.votes(&p).is_empty());
@@ -594,7 +594,7 @@ fn malformed_delivery_invalid_wallet_and_unauthorized_queries_do_not_advance_sta
         committee: lab.committee.id(),
         previous: old.clone(),
         transaction,
-        envelopes,
+        envelopes: envelopes.map(Some),
     };
     assert!(lab.votes(&forged).is_empty());
     let reply = StaticSecret::random_from_rng(OsRng);

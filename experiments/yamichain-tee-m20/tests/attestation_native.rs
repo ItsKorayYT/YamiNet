@@ -53,13 +53,16 @@ fn setup() -> (WalletGate, SigningKey, Committee, Head) {
         epoch: 0,
         commitment: [7; 32],
     };
-    let gate = WalletGate::new(
-        qvl,
-        c.clone(),
-        genesis.clone(),
-        std::array::from_fn(|_| p.clone()),
-    )
-    .unwrap();
+    let witness_policy = yamichain_tee_m20::witness::WitnessPolicy {
+        committee: c.clone(),
+        genesis: genesis.clone(),
+        authorities: std::array::from_fn(|_| {
+            SigningKey::generate(&mut OsRng).verifying_key().to_bytes()
+        }),
+        observer: SigningKey::generate(&mut OsRng).verifying_key().to_bytes(),
+    };
+    let gate =
+        WalletGate::new_witnessed(qvl, witness_policy, std::array::from_fn(|_| p.clone())).unwrap();
     (gate, SigningKey::generate(&mut OsRng), c, genesis)
 }
 fn transfer(w: &SigningKey) -> Signed {
@@ -74,10 +77,12 @@ fn transfer(w: &SigningKey) -> Signed {
         w,
     )
 }
-fn evidence() -> [Evidence; 4] {
-    std::array::from_fn(|_| Evidence {
-        quote: RAW.to_vec(),
-        collateral: collateral(),
+fn evidence() -> [Option<Evidence>; 4] {
+    std::array::from_fn(|_| {
+        Some(Evidence {
+            quote: RAW.to_vec(),
+            collateral: collateral(),
+        })
     })
 }
 
@@ -225,7 +230,7 @@ fn archived_or_unverified_evidence_never_encrypts_or_submits_and_rounds_are_sing
         assert_eq!(next.expected_report_data[i].len(), 64);
     }
     let mut e = evidence();
-    e[0].quote = bytes(&SoftwareEvidence {
+    e[0].as_mut().unwrap().quote = bytes(&SoftwareEvidence {
         measurement: [1; 32],
         identity: [2; 32],
         key: [3; 32],
@@ -241,7 +246,7 @@ fn archived_or_unverified_evidence_never_encrypts_or_submits_and_rounds_are_sing
 
 #[test]
 #[ignore = "requires explicitly pinned official Intel QVL native build"]
-fn balance_queries_use_the_same_four_executor_gate() {
+fn balance_queries_use_the_same_three_executor_gate() {
     let (mut gate, wallet, _, head) = setup();
     let reply = StaticSecret::random_from_rng(OsRng);
     let mut q = Query {
@@ -286,7 +291,15 @@ fn actual_wallet_cli_emits_challenges_but_no_payment_for_archived_evidence() {
     let (_, wallet, c, head) = setup();
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("trusted-wallet-config.json");
-    let config = serde_json::json!({"qvl_library":std::env::var("YAMI_QVL_LIBRARY").unwrap(),"qvl_sha256":hex::decode(std::env::var("YAMI_QVL_SHA256").unwrap()).unwrap(),"committee":c,"genesis":head,"policies":[p.clone(),p.clone(),p.clone(),p]});
+    let witness_policy = yamichain_tee_m20::witness::WitnessPolicy {
+        committee: c.clone(),
+        genesis: head.clone(),
+        authorities: std::array::from_fn(|_| {
+            SigningKey::generate(&mut OsRng).verifying_key().to_bytes()
+        }),
+        observer: SigningKey::generate(&mut OsRng).verifying_key().to_bytes(),
+    };
+    let config = serde_json::json!({"qvl_library":std::env::var("YAMI_QVL_LIBRARY").unwrap(),"qvl_sha256":hex::decode(std::env::var("YAMI_QVL_SHA256").unwrap()).unwrap(),"committee":c,"genesis":head,"policies":[p.clone(),p.clone(),p.clone(),p],"witness_policy":witness_policy});
     let mut file = std::fs::OpenOptions::new()
         .write(true)
         .create_new(true)
@@ -326,8 +339,96 @@ fn actual_wallet_cli_emits_challenges_but_no_payment_for_archived_evidence() {
     output.read_to_string(&mut rest).unwrap();
     assert!(
         rest.is_empty(),
-        "wallet must not output ciphertext before all four verifications"
+        "wallet must not output ciphertext before three genuine verifications"
     );
     let status = child.wait().unwrap();
     assert!(!status.success());
+}
+
+#[test]
+#[ignore = "requires explicitly pinned official Intel QVL native build"]
+fn m23_missing_malicious_expired_and_mismatched_quotes_do_not_become_eligible() {
+    for bad in 0..4 {
+        let (mut gate, wallet, c, head) = setup();
+        let challenge = gate.begin_payment(transfer(&wallet), head.clone()).unwrap();
+        let mut supplied = evidence();
+        supplied[3] = None;
+        if bad == 0 {
+            supplied[0] = None;
+        }
+        if bad == 1 {
+            supplied[0].as_mut().unwrap().quote = bytes(&SoftwareEvidence {
+                measurement: [1; 32],
+                identity: [2; 32],
+                key: c.members[0].transport,
+                challenge: challenge.challenges[0],
+                issued: 0,
+                expires: u64::MAX,
+            });
+        }
+        if bad == 2 {
+            supplied[0].as_mut().unwrap().quote[48 + 520] ^= 1;
+        }
+        // Remaining authentic public quotes have expired collateral AND lack fresh key-bound REPORTDATA.
+        let called = AtomicBool::new(false);
+        assert!(gate
+            .finish_and_submit(challenge.id, &supplied, |_| {
+                called.store(true, Ordering::SeqCst);
+                Ok(())
+            })
+            .is_err());
+        assert!(!called.load(Ordering::SeqCst));
+    }
+}
+#[test]
+#[ignore = "requires explicitly pinned official Intel QVL native build"]
+fn m23_attested_identity_binding_includes_the_witness_authority_policy() {
+    let verified = native().verify_at(RAW, &collateral(), HISTORICAL).unwrap();
+    let p = policy(verified.report());
+    let (_, wallet, c, head) = setup();
+    let w = yamichain_tee_m20::witness::WitnessPolicy {
+        committee: c,
+        genesis: head.clone(),
+        authorities: std::array::from_fn(|_| {
+            SigningKey::generate(&mut OsRng).verifying_key().to_bytes()
+        }),
+        observer: SigningKey::generate(&mut OsRng).verifying_key().to_bytes(),
+    };
+    let mut gate =
+        WalletGate::new_witnessed(native(), w.clone(), std::array::from_fn(|_| p.clone())).unwrap();
+    let challenges = gate.begin_payment(transfer(&wallet), head).unwrap();
+    for i in 0..4 {
+        let identity = hash(&bytes(&(
+            "YAMI-M23-software-and-witness-policy-v1",
+            p.identity,
+            w.id(),
+        )));
+        let expected = tdx_report_data(
+            &w.committee,
+            i,
+            &w.genesis,
+            identity,
+            challenges.challenges[i],
+        )
+        .unwrap();
+        assert_eq!(expected.as_slice(), challenges.expected_report_data[i]);
+        let mut wrong = w.clone();
+        wrong.authorities[0] = SigningKey::generate(&mut OsRng).verifying_key().to_bytes();
+        let wrong_identity = hash(&bytes(&(
+            "YAMI-M23-software-and-witness-policy-v1",
+            p.identity,
+            wrong.id(),
+        )));
+        assert_ne!(
+            expected,
+            tdx_report_data(
+                &wrong.committee,
+                i,
+                &wrong.genesis,
+                wrong_identity,
+                challenges.challenges[i]
+            )
+            .unwrap()
+        );
+    }
 }
