@@ -1,0 +1,30 @@
+{
+  "milestone": 19,
+  "base_commit": "42cf6028afbbd4eb4435302ccc2d186159f12069",
+  "verdict": "NO-GO: examined ORAM/public-verification composition rejected before implementation",
+  "new_implementation": false,
+  "new_cryptographic_test": false,
+  "accounting_simulator": false,
+  "reviewed_prior_markdown_files": 20,
+  "upstream_repository": "https://github.com/rvassantlal/MVPORAM",
+  "upstream_commit": "6d51057bf3ccd50c9374703586be1a88bb88b08f",
+  "inspected_public_source_files_hashed": 9,
+  "existing_regression": {
+    "command": "cargo test --manifest-path experiments/yamichain-ypp-m18/Cargo.toml --release --locked --test production_boundary",
+    "result": "1 passed; 0 failed",
+    "production_library_cfg_test": false,
+    "u16_versions_checked": 65536,
+    "actions_checked": [
+      "confidential payment",
+      "confidential protocol action"
+    ]
+  },
+  "new_oram_payment_measurements": null,
+  "arithmetic_only": {
+    "illustrative_leaf_label_bits": 9500000,
+    "illustrative_leaf_label_bytes": 1187500,
+    "position_map_bytes_500000_entries": 8000004,
+    "position_map_bytes_524287_entries": 8388596,
+    "legacy_serialized_account_bytes_500000": 84000000
+  }
+}
