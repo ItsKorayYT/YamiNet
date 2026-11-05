@@ -1,0 +1,50 @@
+{
+  "passed": true,
+  "previous_ref": "f3fb721",
+  "previous_sha256": "829f2690166fef3b97d5da0f9a517b35724ff575a098c8687138311eec636c8c",
+  "current_sha256": "dcd526e869cf8d09a3b6a63a154a4bbdb5dd392c8d57317eb187b2d3cbcfe0a5",
+  "reader_sha256": "3e1f77a6176c136d18fb1a12bc557ad438d249035af47b173bd6cab5fbbaaf1d",
+  "cases": [
+    {
+      "mode": "old-to-new",
+      "v1_pruned_recovery": true,
+      "passed": true
+    },
+    {
+      "mode": "new-to-old",
+      "v1_pruned_recovery": true,
+      "passed": true
+    },
+    {
+      "mode": "previous-refuses-inactive-directory",
+      "passed": true,
+      "error": "yami-validator: experimental snapshot directories cannot be production journals"
+    },
+    {
+      "mode": "previous-refuses-inactive-envelope",
+      "passed": true,
+      "error": "yami-validator: compact checkpoint does not match independently pinned anchor/genesis"
+    },
+    {
+      "mode": "current-refuses-inactive-directory",
+      "passed": true,
+      "error": "yami-validator: experimental snapshot directories cannot be production journals"
+    },
+    {
+      "mode": "current-refuses-inactive-envelope",
+      "passed": true,
+      "error": "yami-validator: compact checkpoint does not match independently pinned anchor/genesis"
+    },
+    {
+      "mode": "previous-v1-250k-refusal-history-preserved",
+      "passed": true,
+      "error": "yami-validator: chain validation: Limit"
+    },
+    {
+      "mode": "inactive-reader-refuses-real-lab-store",
+      "passed": true,
+      "error": "Error: not a dedicated inactive store\n\nLocation:\n    crates/yami-chain-consensus/src/checkpoint_v2.rs:76:12"
+    }
+  ],
+  "source_archive_bytes_unchanged": true
+}

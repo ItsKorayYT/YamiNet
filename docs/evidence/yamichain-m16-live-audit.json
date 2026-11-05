@@ -1,0 +1,41 @@
+{
+  "passed": true,
+  "binary_sha256": "0f8d85006fc107df61fc4a92f022bcd2cf150efab337994c3b19da0e942d8ea7",
+  "independently_retained_live_target": {
+    "chain_id": "yamichain-local-0.2",
+    "height": 3907,
+    "block": "a9ef2331dad53bff5e90c3a2bd05323016c886174351904f587348ebb1ee57d2",
+    "state_root": "e2b348c1e47921ecdea3faf0d5bc78d68cb387ee4d99955309465d553ca39d7c",
+    "test_tlds": 250048,
+    "payments_enabled": false,
+    "production_ready": false
+  },
+  "source_files": 28,
+  "measurement": {
+    "inactive_v2": {
+      "save_seconds": 1.820170453,
+      "certified_ancestry_seconds": 1.031609154,
+      "recovery_seconds": 1.778388388,
+      "transfer_seconds": 1.794022005,
+      "entries": 250048,
+      "height": 3907,
+      "root": "e2b348c1e47921ecdea3faf0d5bc78d68cb387ee4d99955309465d553ca39d7c",
+      "production_active": false
+    },
+    "live_engine_history_verified": true,
+    "names": 250048,
+    "accounts": 250048,
+    "v2_save_verify_seconds": 1.856752264,
+    "v2_recovery_seconds": 1.775282335,
+    "v2_not_production_recovery": true,
+    "cpu_user_seconds": 71.559074,
+    "cpu_system_seconds": 0.44337499999999996,
+    "peak_rss_kib": 138560,
+    "seconds": 72.06557032099954,
+    "memory_peak_bytes": 223510528,
+    "cpu_max": "200000 100000",
+    "memory_max": "2147483648"
+  },
+  "original_archive_wal_signing_bytes_unchanged": true,
+  "source_tree_sha256": "e0bca115a2e632458a1cbc65bb18322dfd584b95e5a8db207e5d3f15b69c27df"
+}

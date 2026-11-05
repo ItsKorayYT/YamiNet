@@ -1,4 +1,7 @@
 //! Deterministic, non-financial chain foundation. No wallet or monetary state.
+/// Inactive reader codec; never selected by production recovery or pruning.
+#[cfg(feature = "inactive-checkpoint-v2")]
+pub mod checkpoint_v2;
 pub mod codec;
 pub mod committee;
 pub mod selection;

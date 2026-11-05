@@ -79,6 +79,58 @@ fn digest(text: &str) -> eyre::Result<yami_chain::Digest> {
     }
     Ok(yami_chain::Digest(b))
 }
+#[cfg(feature = "inactive-checkpoint-v2")]
+fn inactive_profile(
+    journal: &Journal,
+    state: &State,
+    path: &std::path::Path,
+) -> eyre::Result<String> {
+    use yami_chain::checkpoint_v2::{self as codec, InactiveState, StateAnchor};
+    use yami_chain_consensus::checkpoint_v2::{envelope, verify_context};
+    std::fs::create_dir_all(path)?;
+    let source = path.join("inactive-v2");
+    let received = path.join("inactive-v2-received");
+    let at = Instant::now();
+    let anchor = codec::store::save(&InactiveState::from_verified_state(state)?, &source)?;
+    let manifest = codec::Manifest::decode(&std::fs::read(source.join("manifest.bin"))?, anchor)?;
+    let record = journal
+        .record(state.height())?
+        .ok_or_else(|| eyre::eyre!("terminal missing"))?;
+    let bytes = envelope(state.genesis(), &record, &manifest)?;
+    std::fs::write(path.join("inactive-envelope.bin"), &bytes)?;
+    let save = at.elapsed().as_secs_f64();
+    let initial = State::new(state.genesis().clone())?;
+    let minimum = StateAnchor {
+        genesis: state.genesis().id(),
+        height: 0,
+        tip: initial.tip(),
+        root: initial.root(),
+    };
+    let at = Instant::now();
+    // Offline fixture: fail the benchmark on any archive read error. Own one
+    // encoded record at a time, not an allocated full-history ancestry vector.
+    let context = verify_context(
+        state.genesis(),
+        minimum,
+        &bytes,
+        (1..=state.height()).map(|h| {
+            journal
+                .record(h)
+                .expect("ancestry read")
+                .expect("ancestry gap")
+                .canonical()
+                .expect("ancestry encoding")
+        }),
+    )?;
+    let finality = at.elapsed().as_secs_f64();
+    let at = Instant::now();
+    assert_eq!(context.recover(&source)?.anchor(), anchor.state);
+    let recovery = at.elapsed().as_secs_f64();
+    let at = Instant::now();
+    assert_eq!(context.transfer(&source, &received)?.anchor(), anchor.state);
+    let transfer = at.elapsed().as_secs_f64();
+    Ok(format!("{{\"save_seconds\":{save},\"certified_ancestry_seconds\":{finality},\"recovery_seconds\":{recovery},\"transfer_seconds\":{transfer},\"entries\":{},\"height\":{},\"root\":\"{}\",\"production_active\":false}}", state.names().len(), state.height(), state.root()))
+}
 fn main() -> eyre::Result<()> {
     let args: Vec<_> = std::env::args().skip(1).collect();
     if args.len() == 4 && args[0] == "fence" {
@@ -111,7 +163,16 @@ fn main() -> eyre::Result<()> {
             store::recover(&path, net.genesis().clone(), a)?.anchor(),
             lab.anchor()
         );
-        println!("{{\"live_engine_history_verified\":true,\"names\":{},\"accounts\":{},\"v2_save_verify_seconds\":{save},\"v2_recovery_seconds\":{},\"v2_not_production_recovery\":true}}",lab.names(),lab.accounts(),at.elapsed().as_secs_f64());
+        let recovery = at.elapsed().as_secs_f64();
+        #[cfg(feature = "inactive-checkpoint-v2")]
+        let inactive = inactive_profile(
+            &journal,
+            &state,
+            &std::path::Path::new(&args[1]).with_extension("inactive-v2-audit"),
+        )?;
+        #[cfg(not(feature = "inactive-checkpoint-v2"))]
+        let inactive = "null";
+        println!("{{\"inactive_v2\":{inactive},\"live_engine_history_verified\":true,\"names\":{},\"accounts\":{},\"v2_save_verify_seconds\":{save},\"v2_recovery_seconds\":{recovery},\"v2_not_production_recovery\":true}}",lab.names(),lab.accounts());
         return Ok(());
     }
     if (args.len() == 8 && args[0] == "v2-recover") || (args.len() == 9 && args[0] == "v2-transfer")
@@ -348,6 +409,10 @@ fn main() -> eyre::Result<()> {
     assert_eq!(copied.anchor(), lab.anchor());
     let v2_transfer = at.elapsed().as_secs_f64();
     drop(copied);
+    #[cfg(feature = "inactive-checkpoint-v2")]
+    let inactive = inactive_profile(&journal, &state, &path)?;
+    #[cfg(not(feature = "inactive-checkpoint-v2"))]
+    let inactive = "null";
     drop(branches);
     drop(journal);
     let at = Instant::now();
@@ -355,6 +420,6 @@ fn main() -> eyre::Result<()> {
     assert_eq!(replay_certified(&journal, &genesis)?, state);
     let replay = at.elapsed().as_secs_f64();
     let footprint = journal.storage_footprint(1_000_000)?;
-    println!("{{\"entries\":{count},\"future_epoch\":{future_epoch},\"accounts\":{},\"pattern\":\"{}\",\"height\":{},\"root\":\"{root}\",\"tip\":\"{}\",\"v1_bytes\":{v1_bytes},\"generation_seconds\":{generation},\"propose_seconds\":{propose},\"execute_seconds\":{execute},\"certificate_persistence_seconds\":{persistence},\"cached_root_seconds\":{first_root},\"repeated_roots_100_seconds\":{repeated_root},\"clones_8_seconds\":{clone_seconds},\"lookups_1024_seconds\":{lookups},\"snapshot_serialization_seconds\":{serialization},\"retained_divergent_forks_8_seconds\":{fork_seconds},\"empty_proposal_hash_seconds\":{hash_seconds},\"uncached_retransmission_mean_seconds\":{uncached_admission},\"cached_retransmission_mean_seconds\":{cached_admission},\"v2_save_verify_seconds\":{v2_save},\"v2_recovery_seconds\":{v2_recover},\"v2_transfer_verify_seconds\":{v2_transfer},\"v2_manifest\":\"{}\",\"archive_replay_seconds\":{replay},\"archive_allocated_bytes\":{},\"archive_entries\":{},\"certificate_signers\":4,\"transactions_genuinely_signed\":true,\"certificates_verified\":true,\"live_engine_generated\":false,\"passed\":true}}",if distinct { count } else {1},args[2],state.height(),state.tip(),anchor.manifest,footprint.allocated_bytes,footprint.entries);
+    println!("{{\"inactive_v2\":{inactive},\"entries\":{count},\"future_epoch\":{future_epoch},\"accounts\":{},\"pattern\":\"{}\",\"height\":{},\"root\":\"{root}\",\"tip\":\"{}\",\"v1_bytes\":{v1_bytes},\"generation_seconds\":{generation},\"propose_seconds\":{propose},\"execute_seconds\":{execute},\"certificate_persistence_seconds\":{persistence},\"cached_root_seconds\":{first_root},\"repeated_roots_100_seconds\":{repeated_root},\"clones_8_seconds\":{clone_seconds},\"lookups_1024_seconds\":{lookups},\"snapshot_serialization_seconds\":{serialization},\"retained_divergent_forks_8_seconds\":{fork_seconds},\"empty_proposal_hash_seconds\":{hash_seconds},\"uncached_retransmission_mean_seconds\":{uncached_admission},\"cached_retransmission_mean_seconds\":{cached_admission},\"v2_save_verify_seconds\":{v2_save},\"v2_recovery_seconds\":{v2_recover},\"v2_transfer_verify_seconds\":{v2_transfer},\"v2_manifest\":\"{}\",\"archive_replay_seconds\":{replay},\"archive_allocated_bytes\":{},\"archive_entries\":{},\"certificate_signers\":4,\"transactions_genuinely_signed\":true,\"certificates_verified\":true,\"live_engine_generated\":false,\"passed\":true}}",if distinct { count } else {1},args[2],state.height(),state.tip(),anchor.manifest,footprint.allocated_bytes,footprint.entries);
     Ok(())
 }

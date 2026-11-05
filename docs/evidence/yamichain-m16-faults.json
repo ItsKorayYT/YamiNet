@@ -1,0 +1,16 @@
+{
+  "passed": true,
+  "binary_sha256": "c0c0ca4726ae14e944a03b95632a83bf98087d69f09a928ac23851e4d462f7f5",
+  "cases": [
+    {
+      "kind": "blocks",
+      "passed": true,
+      "stdout": "\nrunning 1 test\ntest checkpoint_v2::tests::actual_enospc_child ... \nrunning 1 test\ntest checkpoint_v2::tests::child ... ok\n\ntest result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 26 filtered out; finished in 0.05s\n\n"
+    },
+    {
+      "kind": "inodes",
+      "passed": true,
+      "stdout": "\nrunning 1 test\ntest checkpoint_v2::tests::actual_enospc_child ... \nrunning 1 test\ntest checkpoint_v2::tests::child ... ok\n\ntest result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 26 filtered out; finished in 0.02s\n\n"
+    }
+  ]
+}

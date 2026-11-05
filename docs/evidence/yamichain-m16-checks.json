@@ -1,0 +1,83 @@
+{
+  "base": "f3fb721",
+  "branch": "development/yamichain",
+  "timestamp_utc": "2026-11-05T14:05:43.607925+00:00",
+  "production_v2_active": false,
+  "checks": {
+    "fmt": {
+      "passed": true,
+      "log_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "clippy-default-final": {
+      "passed": true,
+      "log_sha256": "8fdd5acd0abb11237e369b06e6d66c108331707768130a7e43c3d1eb7082acac"
+    },
+    "clippy-features-final": {
+      "passed": true,
+      "log_sha256": "4757051ca0d81f5402ec5675a6e2b840f353b51d0360eb6272d41c2e79a3d1d6"
+    },
+    "build-workspace": {
+      "passed": true,
+      "log_sha256": "c4327b7b7e02fb08e8f73db1ac72224e2ea90d525b1b70c2fa2eb09b6ebc8a21"
+    },
+    "regressions": {
+      "passed": true,
+      "log_sha256": "cc2495660dbe82e4c58f04a23ce378ffe627f53c4e7134d6560a3b4fcffa02cf",
+      "passed_tests": 556,
+      "failed_tests": 0,
+      "ignored_tests": 10
+    },
+    "feature-tests": {
+      "passed": true,
+      "log_sha256": "9ce04a36c096884bb4d90a0b0a9f33f18c5e1fa905550a976e6046f640d1f6bd",
+      "passed_tests": 81,
+      "failed_tests": 0,
+      "ignored_tests": 1
+    },
+    "python-tests": {
+      "passed": true,
+      "log_sha256": "e9dbc1a31936475165af55356b566005547a03914ab93e4739e4aa9949799201",
+      "passed_tests": 6
+    },
+    "reader-release-build": {
+      "passed": true,
+      "log_sha256": "b832dbf707ee52a6c5c5fbce18739c9984c341e89b8b12a41dabd597cc65f227"
+    },
+    "inactive-audit-release-build": {
+      "passed": true,
+      "log_sha256": "ce336c9c5310d3694115ab6a8934a686b82d036043c8a8229ad3c1df8bdf293d"
+    },
+    "previous-reader-build": {
+      "passed": true,
+      "log_sha256": "cdbe9ed92ab8cafcbcf628f7d362a43f531b7a965b7020f14477e3038587529c"
+    }
+  },
+  "source_sha256": {
+    "crates/yami-chain-consensus/Cargo.toml": "5ef0296ea65e993de08b5922c34ba9e379d87ec3be92aeee4fa2b95474f7f6ec",
+    "crates/yami-chain-consensus/examples/checkpoint-v2-reader.rs": "dc705e0b8baa8448ed6aaf777f6127a2b55f51693b0596457aaeacc0dc284618",
+    "crates/yami-chain-consensus/examples/large-state-bench.rs": "b729c6bc267e000bceb42648d65fa2f345772bc944a95b8d373b84769b830207",
+    "crates/yami-chain-consensus/src/checkpoint_v2.rs": "a87089ced8fec470421d8fa5c522dd7a0de65a1c27fc226797edcbc6abf15e90",
+    "crates/yami-chain-consensus/src/checkpoint_v2/tests.rs": "aec1373e87447ab67b12972a7d6093e9b685cb15daf7b77da08627938691403f",
+    "crates/yami-chain-consensus/src/lib.rs": "fbef41e78f3be173a70aa79767d92294cfec9949a061d6ec8ab9ad4ba6e5d2ee",
+    "crates/yami-chain-storage/src/lib.rs": "c9d459ef2bcaae15e29022a40752e3361a5ee4513854182f91ceefef002829b4",
+    "crates/yami-chain/Cargo.toml": "707b0c6a9215176e1ddc2648da302b5ef383bae573883a6ba4a7f0a1739f4d61",
+    "crates/yami-chain/src/checkpoint_v2/mod.rs": "fdcd909919e5562bb6aa3886fd7c6924f5901fe94e9e1a8f8d32922e9e1d51d6",
+    "crates/yami-chain/src/checkpoint_v2/store.rs": "9e574e9815deacf8829ee7ec8dda942aaeed1de51db1f4f845bf0f29bc4af2a2",
+    "crates/yami-chain/src/checkpoint_v2/tests.rs": "f13e16cc5d8b83395984f8cab8408e851272c6525289d10c7e1baff45aba1f30",
+    "crates/yami-chain/src/lib.rs": "ae25d37948adcfd78c6b57cfb5dc58566ff83ab87132d200264aa074a78af78b",
+    "tools/yamichain-v2-compat.py": "713ae6915756f9a71626ada473639cd787e0520252dab6fbed718e7e58cbb276",
+    "tools/yamichain-v2-faults.py": "75f05cd58aed2a49749776cca11505a77f3fa1b869b8f84e4bfa3a05da599021",
+    "tools/yamichain-v2-integration.py": "d4ae9a3350721d015fc3ed0a405c1ef8ecfb42175375979e57aaeb9048f76c0d",
+    "tools/yamichain-v2-live-audit.py": "98cffcb3f7b52f834561720f56178f9b32fa34dc6e93495249cc4bcfcd8fb79d",
+    "tools/yamichain-v2-readers.py": "07199488174a7578d6d85e1f70d962d8d6cba804f987f7141b19d20bf363c282"
+  },
+  "binaries_sha256": {
+    "target/release/yami-validator": "dcd526e869cf8d09a3b6a63a154a4bbdb5dd392c8d57317eb187b2d3cbcfe0a5",
+    "target/release/examples/large-state-bench": "0f8d85006fc107df61fc4a92f022bcd2cf150efab337994c3b19da0e942d8ea7",
+    "target/release/deps/yami_chain-d47e5b074da12277": "c0c0ca4726ae14e944a03b95632a83bf98087d69f09a928ac23851e4d462f7f5",
+    "target/release/examples/checkpoint-v2-reader": "3e1f77a6176c136d18fb1a12bc557ad438d249035af47b173bd6cab5fbbaaf1d"
+  },
+  "rustc": "rustc 1.90.0 (1159e78c4 2025-09-14)",
+  "platform": "Linux-6.18.57-x86_64-with-glibc2.41",
+  "timing_freeze_note": "Signed-history phase timings use the frozen generation binary recorded in the history evidence, before the direct transport-helper pre-hash length guard. Consensus envelope callers already bounded those manifest slices. Final guarded readers, compatibility/pressure tests and real live-history audit are rebuilt and validated separately; no codec bytes, state roots or consensus formats changed. The final live-audit binary also freezes lab recovery timing before the separate inactive audit."
+}

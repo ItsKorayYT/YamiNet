@@ -125,9 +125,13 @@ impl Journal {
         if fs::symlink_metadata(path)?.file_type().is_symlink() {
             return Err(invalid("symlinked store"));
         }
-        if ["experimental-v2.bin", "lab.lock"]
-            .iter()
-            .any(|name| fs::symlink_metadata(path.join(name)).is_ok())
+        if [
+            "experimental-v2.bin",
+            "lab.lock",
+            "inactive-checkpoint-v2.bin",
+        ]
+        .iter()
+        .any(|name| fs::symlink_metadata(path.join(name)).is_ok())
         {
             return Err(invalid(
                 "experimental snapshot directories cannot be production journals",
@@ -988,7 +992,11 @@ mod experimental_boundary {
     use super::*;
     #[test]
     fn experimental_directories_are_refused_before_touching_safety_files() {
-        for marker in ["experimental-v2.bin", "lab.lock"] {
+        for marker in [
+            "experimental-v2.bin",
+            "lab.lock",
+            "inactive-checkpoint-v2.bin",
+        ] {
             let path = std::env::temp_dir().join(format!(
                 "production-refuses-v2-{}-{marker}",
                 std::process::id()

@@ -11,6 +11,7 @@ workspace = true
 [features]
 default = []
 experimental-snapshot-v2 = []
+inactive-checkpoint-v2 = []
 
 [dependencies]
 im = "15.1.0"

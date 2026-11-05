@@ -1,6 +1,8 @@
 //! Height-specific local Malachite adapter. NOT production-ready; no real money.
 mod candidates;
 mod checkpoint;
+#[cfg(feature = "inactive-checkpoint-v2")]
+pub mod checkpoint_v2;
 mod compact;
 pub use checkpoint::*;
 pub use compact::*;

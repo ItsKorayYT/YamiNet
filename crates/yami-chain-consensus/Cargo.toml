@@ -24,6 +24,7 @@ tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "signa
 
 [features]
 fuzzing = []
+inactive-checkpoint-v2 = ["yami-chain/inactive-checkpoint-v2"]
 large-state-lab = ["yami-chain/experimental-snapshot-v2"]
 
 [[example]]
@@ -33,3 +34,7 @@ required-features = ["fuzzing"]
 [[example]]
 name = "large-state-bench"
 required-features = ["large-state-lab"]
+
+[[example]]
+name = "checkpoint-v2-reader"
+required-features = ["inactive-checkpoint-v2"]
