@@ -1,0 +1,156 @@
+{
+  "population": 500000,
+  "cohort_width": 64,
+  "selected_cohorts": 4,
+  "claim": "candidate rejected; metadata attacks only",
+  "repeated_pair": {
+    "epochs": 8,
+    "surviving_cohorts": [
+      4,
+      2,
+      2,
+      2,
+      2,
+      2,
+      2,
+      2
+    ],
+    "linkage_assumption": "adversary is given same-pair/same-sender/same-recipient linkage, or chooses that challenge history"
+  },
+  "same_sender_rotating_recipient": {
+    "epochs": 8,
+    "surviving_cohorts": [
+      4,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1
+    ],
+    "linkage_assumption": "adversary is given same-pair/same-sender/same-recipient linkage, or chooses that challenge history"
+  },
+  "same_recipient_rotating_sender": {
+    "epochs": 8,
+    "surviving_cohorts": [
+      4,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1
+    ],
+    "linkage_assumption": "adversary is given same-pair/same-sender/same-recipient linkage, or chooses that challenge history"
+  },
+  "selective_censorship": {
+    "policy": "malicious proposer includes iff cohort 0 appears in public support",
+    "world0_inclusion_probability": 1.0,
+    "world1_inclusion_probability": 0.0002560491614389963,
+    "status": "analytic consequence of the same measured support classifier; no consensus liveness simulation"
+  },
+  "chosen_pair_game": {
+    "trials": 20000,
+    "wins": 19996,
+    "success_rate": 0.9998,
+    "uniform_cover_expected_success": 0.9998719754192805,
+    "advantage_over_half": 0.4998,
+    "uses_ciphertext_or_proof_break": false
+  },
+  "ideal_public_partition_refresh": {
+    "surviving_accounts": [
+      256,
+      2,
+      2,
+      2
+    ],
+    "materialized_permutations": 4,
+    "elapsed_s": 0.6010940160003884,
+    "same_pair_linkage_assumed": true,
+    "purpose": "unpredictability alone does not repair public support"
+  },
+  "reused_seed_control": {
+    "surviving_cohorts": 4,
+    "global_anonymity_restored": false
+  },
+  "colluding_accounts": [
+    {
+      "support_accounts": 256,
+      "controlled_accounts": 0,
+      "remaining_candidates": 256
+    },
+    {
+      "support_accounts": 256,
+      "controlled_accounts": 128,
+      "remaining_candidates": 128
+    },
+    {
+      "support_accounts": 256,
+      "controlled_accounts": 254,
+      "remaining_candidates": 2
+    }
+  ],
+  "sender_seed_grinding": {
+    "attempts_to_force_specific_cover_cohort": 11702,
+    "target_cohort": 42,
+    "selection_fairness_proved_by_base_proof": false
+  },
+  "support_bound": [
+    {
+      "N": 500000,
+      "support_limit": 16,
+      "uniform_pair_game_success": 0.9999859999439997,
+      "interpretation": "account-uniform cover comparator, not the grouped candidate"
+    },
+    {
+      "N": 500000,
+      "support_limit": 64,
+      "uniform_pair_game_success": 0.999937999751999,
+      "interpretation": "account-uniform cover comparator, not the grouped candidate"
+    },
+    {
+      "N": 500000,
+      "support_limit": 128,
+      "uniform_pair_game_success": 0.999873999495998,
+      "interpretation": "account-uniform cover comparator, not the grouped candidate"
+    },
+    {
+      "N": 500000,
+      "support_limit": 256,
+      "uniform_pair_game_success": 0.999745998983996,
+      "interpretation": "account-uniform cover comparator, not the grouped candidate"
+    }
+  ],
+  "exact_support_checks": {
+    "families": [
+      {
+        "N": 6,
+        "support_size": 2,
+        "common_valid_supports": 0
+      },
+      {
+        "N": 6,
+        "support_size": 3,
+        "common_valid_supports": 0
+      },
+      {
+        "N": 6,
+        "support_size": 4,
+        "common_valid_supports": 0
+      },
+      {
+        "N": 6,
+        "support_size": 5,
+        "common_valid_supports": 0
+      },
+      {
+        "N": 6,
+        "support_size": 6,
+        "common_valid_supports": 1
+      }
+    ],
+    "uniform_4_of_8_game_success": "5/6"
+  }
+}
