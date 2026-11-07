@@ -112,6 +112,32 @@ impl IntelQvl {
             })
         }
     }
+    /// Unverified quote certification data for retrieving collateral. This grants no authorization.
+    #[cfg(feature = "tdx-guest-devnet")]
+    pub fn unverified_pck_chain(&self, quote: &[u8]) -> Result<String> {
+        TdxReport::parse(quote)?;
+        let mut size = 0;
+        status("certification size", unsafe {
+            (self.get_size)(quote.as_ptr(), quote.len() as u32, &mut size)
+        })?;
+        check(size > 0 && size as usize <= MAX_TEXT)?;
+        let mut chain = vec![0; size as usize];
+        let mut kind = 0;
+        status("certification data", unsafe {
+            (self.get_data)(
+                quote.as_ptr(),
+                quote.len() as u32,
+                size,
+                chain.as_mut_ptr(),
+                &mut kind,
+            )
+        })?;
+        check(kind == 5)?;
+        if chain.last() == Some(&0) {
+            chain.pop();
+        }
+        Ok(String::from_utf8(chain)?)
+    }
     /// Offline diagnostic API. Historical time is allowed here ONLY for archived fixture tests.
     /// This result cannot create a wallet authorization; the live gate uses its own trusted clock.
     pub fn verify_at(
@@ -301,7 +327,7 @@ pub struct TdxReport {
 impl TdxReport {
     /// Strict supported profiles: v4 TDX 1.0; v5 TD10/TD15 (584/648-byte bodies).
     /// SGX, newer EX extensions, truncation, oversized lengths and trailing bytes reject.
-    fn parse(q: &[u8]) -> Result<Self> {
+    pub(crate) fn parse(q: &[u8]) -> Result<Self> {
         check(q.len() >= 636 && q.len() <= MAX_QUOTE)?;
         check(
             u16::from_le_bytes(q[2..4].try_into()?) == 2

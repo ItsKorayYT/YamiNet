@@ -1,0 +1,21 @@
+#!/bin/busybox sh
+# No interactive rescue shell, remote login, cloud-init or host-supplied executable.
+set -eu
+/bin/busybox --install -s /bin
+mount -t proc proc /proc
+mount -t sysfs sysfs /sys
+mount -t devtmpfs devtmpfs /dev
+mount -t tmpfs -o mode=0700,nosuid,nodev,noexec tmpfs /run
+mkdir -p /run/yami /sys/kernel/config
+ulimit -c 0
+mount -t configfs configfs /sys/kernel/config
+depmod -a
+modprobe virtio_pci
+modprobe virtio_net
+modprobe vmw_vsock_virtio_transport
+modprobe tdx_guest
+# Cloud NICs may use gVNIC instead of virtio-net.
+modprobe gve || true
+ifconfig lo up
+udhcpc -i eth0 -n -q -s /etc/yami/dhcp
+exec /usr/bin/tdx-executor /etc/yami/guest.json

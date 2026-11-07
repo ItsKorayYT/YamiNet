@@ -1,0 +1,15 @@
+#!/bin/busybox sh
+set -eu
+case "$1" in
+ deconfig) /bin/busybox ifconfig "$interface" 0.0.0.0 ;;
+ bound|renew)
+  /bin/busybox ifconfig "$interface" "$ip" netmask "$subnet"
+  for gw in $router; do
+   /bin/busybox route add -host "$gw" dev "$interface" || true
+   /bin/busybox route add default gw "$gw" dev "$interface"
+   break
+  done
+  : >/run/resolv.conf
+  for server in $dns; do echo "nameserver $server" >>/run/resolv.conf; done
+  ;;
+esac

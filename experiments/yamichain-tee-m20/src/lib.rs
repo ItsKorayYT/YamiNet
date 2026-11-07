@@ -431,3 +431,6 @@ pub mod attestation;
 
 /// M23 authenticated independently deployable rollback witnesses.
 pub mod witness;
+
+#[cfg(feature = "tdx-guest-devnet")]
+pub mod tdx_guest;

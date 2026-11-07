@@ -1,0 +1,114 @@
+#!/usr/bin/env python3
+"""Trusted wallet-local Intel DCAP path; no software fallback; disposable YAMI only."""
+import argparse
+import concurrent.futures
+import json
+import pathlib
+import runpy
+import subprocess
+import sys
+import urllib.request
+
+ROOT = pathlib.Path(__file__).resolve().parents[1]
+d = runpy.run_path(str(ROOT/'scripts/yamichain-devnet'))
+bridge, http, read = d['bridge'], d['http'], d['read']
+
+
+def gated(config, operation):
+    p = subprocess.Popen([str(d['BIN']/'attested-wallet'), str(config)], stdin=subprocess.PIPE,
+                         stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    try:
+        p.stdin.write(json.dumps(operation)+'\n')
+        p.stdin.flush()
+        line = p.stdout.readline()
+        if not line:
+            raise RuntimeError('wallet QVL/configuration rejected: '+p.stderr.read())
+        challenge = json.loads(line)
+        def collect(i):
+            try:
+                response = http(deployment['executors'][i]+'/attest',
+                                {'challenge': challenge['challenges'][i], 'enrollment': False}, timeout=20)
+                # Collateral is untrusted input; the wallet's pinned QVL verifies it and trusted time.
+                if deployment['collateral'][i] == 'intel-pcs':
+                    import importlib.util
+                    spec=importlib.util.spec_from_file_location('yami_collateral',ROOT/'deployment/tdx/collateral.py')
+                    module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module)
+                    collateral=module.retrieve(response['quote'],trusted)
+                else:
+                    collateral = http(deployment['collateral'][i], timeout=10)
+                return {'quote': response['quote'], 'collateral': collateral}
+            except Exception:
+                return None
+        with concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool:
+            evidence = list(pool.map(collect, range(4)))
+        out, err = p.communicate(json.dumps({'round': challenge['id'], 'evidence': evidence})+'\n', timeout=30)
+        if p.returncode:
+            raise RuntimeError('wallet-native DCAP gate rejected; no submission: '+err)
+        return json.loads(out)
+    finally:
+        if p.poll() is None:
+            p.kill()
+        p.wait()
+
+
+def head():
+    status = http(deployment['gateway']+'/status')
+    if http(deployment['gateway']+'/policy') != trusted['witness_policy']:
+        raise RuntimeError('gateway changed pinned committee or witness policy')
+    return status
+
+
+def balance(wallet):
+    s = head()
+    q = bridge('query', intent=True, secret=read(wallet)['secret'], head=s['head'], policy=trusted['witness_policy'])
+    authorized = gated(a.trusted_config, q['operation'])
+    replies = http(deployment['gateway']+'/query', {'envelopes': authorized['Queries']})
+    value = bridge('balance', policy=trusted['witness_policy'], query=q['query'], secret=q['secret'],
+                   replies=[r['Balance'] for r in replies if isinstance(r, dict) and 'Balance' in r])
+    # Query head must also belong to the complete authenticated native history.
+    records = [http(deployment['gateway']+'/history/'+str(h))['finality']['record'] for h in range(1, s['height']+1)]
+    if records:
+        history = http(deployment['gateway']+'/history/'+str(s['height']))
+        if history['certificate']['certificate']['statement']['next'] != s['head']:
+            raise RuntimeError('uncertified balance head')
+    bridge('audit-native', policy=trusted['witness_policy'], records=records)
+    return value
+
+
+p = argparse.ArgumentParser(description=__doc__)
+p.add_argument('--trusted-config', required=True, type=pathlib.Path)
+p.add_argument('--deployment', required=True, type=pathlib.Path)
+p.add_argument('command', choices=['balance','send','faucet'])
+p.add_argument('wallet', type=pathlib.Path)
+p.add_argument('recipient_or_amount', nargs='?')
+p.add_argument('amount', nargs='?', type=int)
+a = p.parse_args()
+trusted = read(a.trusted_config)
+deployment = read(a.deployment)
+print('TDX ATTESTATION REQUIRED; DISPOSABLE YAMI ONLY; PRODUCTION ACTIVATION CLOSED', file=sys.stderr)
+if len(deployment['executors']) != 4 or len(deployment['collateral']) != 4:
+    raise SystemExit('four pinned executor and collateral endpoints required')
+if a.command == 'balance':
+    print(json.dumps(balance(a.wallet)))
+else:
+    if a.command == 'faucet':
+        amount = int(a.recipient_or_amount)
+        recipient = read(a.wallet)['address']
+        wallet = pathlib.Path(deployment['treasury_wallet'])
+    else:
+        amount, recipient, wallet = a.amount, a.recipient_or_amount, a.wallet
+    b = balance(wallet)
+    s = head()
+    intent = bridge('payment', intent=True, policy=trusted['witness_policy'], head=s['head'],
+                    secret=read(wallet)['secret'], recipient=recipient, amount=amount, nonce=b['nonce'])
+    authorized = gated(a.trusted_config, intent)
+    receipt = http(deployment['gateway']+'/send', authorized['Payment'], timeout=120)
+    history = http(deployment['gateway']+'/history/'+str(receipt['height']))
+    statement = history['certificate']['certificate']['statement']
+    if statement['transaction'] != authorized['Payment']['transaction'] or statement['previous'] != s['head']:
+        raise RuntimeError('gateway finalized a different payment')
+    verified = bridge('finality', record=history['finality']['record'], height=receipt['height'],
+                      certificate=history['certificate'], policy=trusted['witness_policy'])
+    if verified['block'] != receipt['finality']['block'] or statement['next'] != receipt['head']:
+        raise RuntimeError('finality mismatch')
+    print(json.dumps(receipt, indent=2))

@@ -28,3 +28,14 @@ time = { version = "=0.3.44", features = ["parsing"] }
 tempfile = "3"
 [profile.release]
 overflow-checks = true
+
+[features]
+tdx-guest-devnet = []
+[[bin]]
+name = "tdx-executor"
+path = "src/bin/tdx-executor.rs"
+required-features = ["tdx-guest-devnet"]
+[[bin]]
+name = "tdx-admin"
+path = "src/bin/tdx-admin.rs"
+required-features = ["tdx-guest-devnet"]

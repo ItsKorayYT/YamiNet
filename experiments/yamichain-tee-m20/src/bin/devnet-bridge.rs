@@ -69,7 +69,11 @@ fn main() -> Result<()> {
                 },
                 &key,
             );
-            serde_json::to_value(Payment::software(&p.committee, &head, tx)?)?
+            if v["intent"].as_bool() == Some(true) {
+                serde_json::json!({"Payment":{"transfer":tx,"previous":head}})
+            } else {
+                serde_json::to_value(Payment::software(&p.committee, &head, tx)?)?
+            }
         }
         "query" => {
             let sk: Id = serde_json::from_value(v["secret"].clone())?;
@@ -87,6 +91,13 @@ fn main() -> Result<()> {
                 signature: vec![],
             };
             q.sign(&key);
+            if v["intent"].as_bool() == Some(true) {
+                println!(
+                    "{}",
+                    serde_json::json!({"operation":{"Query":q},"query":q,"secret":reply.to_bytes()})
+                );
+                return Ok(());
+            }
             let envelopes: Vec<_> = policy
                 .committee
                 .members

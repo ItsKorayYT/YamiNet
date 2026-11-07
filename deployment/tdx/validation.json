@@ -1,0 +1,42 @@
+{
+  "hardware_deployed": false,
+  "hardware_payment_demonstrated": false,
+  "hardware_endpoint": null,
+  "reason": "No TDX device/KVM, configured cloud credentials or outbound cloud identity; cloud/PCS API destinations are not configured.",
+  "guest_artifact": "work/tdx-guest-0/disk.raw",
+  "guest_manifest": "work/tdx-guest-0/manifest.json",
+  "kernel": "6.12.107+deb13-cloud-amd64",
+  "reproducible_identical_builds": 2,
+  "uki_sha256": "319096d3346ba5740d87467c2abafddffef8f164fa2ce4fda65f12202bcf730e",
+  "disk_sha256": "4040c8c945f2eeae71f8393cda349bbae000e48c3f459129b71b625588cf0b94",
+  "quote_generation_library_sha256": "fa9369e81621cefb41b7ad835a26f3d239445558004bae608015e5e6dac681a3",
+  "guest_security_tests_passed": 5,
+  "native_qvl_authentic_fixture_and_rejection_tests_passed": 10,
+  "native_wallet_deadline_replay_tests_passed": 1,
+  "production_financial_proof_versions_rejected": 65536,
+  "strict_clippy": "all experimental targets, tdx-guest-devnet, -D warnings: passed",
+  "ffi_abi": "official pinned tdx_attest.h prototypes/layout: passed",
+  "package_layout": {
+    "package_valid": true,
+    "hardware_tested": false,
+    "tdx_startup_rejected_without_hardware": true,
+    "uki_sha256": "319096d3346ba5740d87467c2abafddffef8f164fa2ce4fda65f12202bcf730e",
+    "disk_sha256": "4040c8c945f2eeae71f8393cda349bbae000e48c3f459129b71b625588cf0b94"
+  },
+  "not_exercised": [
+    "UEFI boot on real TDX",
+    "fresh hardware quote generation",
+    "live Intel PCS retrieval",
+    "GCP custom image import/VM launch",
+    "independent executor/witness deployment",
+    "hardware-attested Alice-to-Bob transfer and recovery"
+  ],
+  "external_requirements": [
+    "TDX-capable cloud projects/quota, deployment credentials and network API allowlist",
+    "At least three physically separated, independently administered executor placements and separate durable witness authorities",
+    "Provider QGS/configfs quote service and live Intel PCS access or approved collateral mirror",
+    "Independently approved MRTD/RTMR boot profiles for the exact UKIs and provider firmware",
+    "Independent per-executor custodians to hold encrypted recovery capsules and recovery keys"
+  ],
+  "production_activation": false
+}
