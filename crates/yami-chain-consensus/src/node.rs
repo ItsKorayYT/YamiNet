@@ -32,6 +32,26 @@ use std::{
 use yami_chain::{development_key, Block, Digest, Genesis, State};
 use yami_chain_storage::{FinalizedRecord, Journal};
 
+fn native_devnet() -> bool {
+    #[cfg(feature = "insecure-devnet-input")]
+    {
+        std::env::var_os("YAMI_NATIVE_POLICY").is_some()
+    }
+    #[cfg(not(feature = "insecure-devnet-input"))]
+    {
+        false
+    }
+}
+#[cfg(feature = "insecure-devnet-input")]
+fn publish_native_record(journal: &Journal, record: &FinalizedRecord) -> Result<()> {
+    if native_devnet() {
+        journal.write_once(
+            &format!("native-finalized-{}.bin", record.block.header.height),
+            &record.canonical()?,
+        )?;
+    }
+    Ok(())
+}
 #[derive(Clone)]
 struct Config {
     moniker: String,
@@ -82,6 +102,35 @@ fn config(index: u8, base: u16, peer_base: u16, genesis: &Genesis, sparse: bool)
             Ok(format!("/ip4/127.0.0.1/tcp/{}/p2p/{peer}", peer_base + u16::from(i)).parse()?)
         })
         .collect::<Result<_>>()?;
+    #[cfg(feature = "insecure-devnet-input")]
+    if native_devnet() {
+        if let Ok(raw) = std::env::var("YAMI_NATIVE_VALIDATOR_ENDPOINTS") {
+            let addresses = raw
+                .split(',')
+                .map(str::parse::<std::net::SocketAddrV4>)
+                .collect::<std::result::Result<Vec<_>, _>>()?;
+            if addresses.len() != 4
+                || addresses
+                    .iter()
+                    .any(|a| !(a.ip().is_private() || a.ip().is_loopback()) || a.port() < 1024)
+            {
+                return Err(eyre!(
+                    "four private IPv4 devnet validator endpoints required"
+                ));
+            }
+            let own = addresses[index as usize];
+            consensus.p2p.listen_addr = format!("/ip4/{}/tcp/{}", own.ip(), own.port()).parse()?;
+            consensus.p2p.persistent_peers = addresses
+                .iter()
+                .enumerate()
+                .filter(|(i, _)| *i != index as usize)
+                .map(|(i, a)| {
+                    let peer = transport(i as u8)?.public().to_peer_id();
+                    Ok(format!("/ip4/{}/tcp/{}/p2p/{peer}", a.ip(), a.port()).parse()?)
+                })
+                .collect::<Result<_>>()?;
+        }
+    }
     consensus.p2p.persistent_peers_only = true;
     consensus.p2p.discovery.enabled = false;
     consensus.p2p.pubsub_max_size = bytesize::ByteSize::kib(128);
@@ -112,6 +161,21 @@ fn params(genesis: &Genesis, height: u64, timing: Duration) -> Result<m::HeightP
             prevote: timing / 2,
             precommit: timing / 2,
             rebroadcast: timing * 2,
+            propose_delta: if native_devnet() {
+                Duration::ZERO
+            } else {
+                Duration::from_millis(500)
+            },
+            prevote_delta: if native_devnet() {
+                Duration::ZERO
+            } else {
+                Duration::from_millis(500)
+            },
+            precommit_delta: if native_devnet() {
+                Duration::ZERO
+            } else {
+                Duration::from_millis(500)
+            },
             ..Default::default()
         },
         Some(Duration::from_millis(400)),
@@ -207,7 +271,7 @@ pub async fn run_node_with_storage(options: NodeOptions, storage: StorageOptions
         || options.base_port < 1024
         || options.base_port > 65436
         || options.target_height == 0
-        || options.target_height > 100_000
+        || (options.target_height > 100_000 && !native_devnet())
     {
         return Err(eyre!(
             "invalid local options: scheduled identity, ports 1024..65436, height 1..100000, timeout 1..3600s, linger 0..60s, round timeout 800..60000ms"
@@ -244,7 +308,21 @@ pub async fn run_node_with_storage(options: NodeOptions, storage: StorageOptions
             "archive mode cannot reopen a pruned store; select pruned mode"
         ));
     }
+    if native_devnet() && storage.checkpoint_interval.is_some() {
+        return Err(eyre!("native devnet requires complete archive history"));
+    }
     let state = crate::replay_certified(&journal, &options.genesis)?;
+    #[cfg(feature = "insecure-devnet-input")]
+    if native_devnet() {
+        for height in 1..=state.height() {
+            publish_native_record(
+                &journal,
+                &journal
+                    .record(height)?
+                    .ok_or_else(|| eyre!("missing native history"))?,
+            )?;
+        }
+    }
     if state.height() >= options.target_height {
         return Ok(state);
     }
@@ -437,12 +515,18 @@ async fn app_loop(
 ) -> Result<State> {
     let mut candidates = Candidates::new(journal.clone());
     let mut history_min = crate::history_min_height(&journal, state.genesis())?;
-    let mut storage_tick = tokio::time::interval(Duration::from_secs(2));
+    let mut storage_tick = tokio::time::interval(if native_devnet() {
+        Duration::from_millis(100)
+    } else {
+        Duration::from_secs(2)
+    });
     let mut active_round = m::Round::Nil;
     // One bounded observation, only for the explicit distinct-account lab workload.
     let mut proposal_observation: Option<(Digest, std::time::Instant, bool)> = None;
     let consensus_deadline = tokio::time::Instant::now() + options.timeout;
     let mut serve_deadline = None;
+    #[cfg(feature = "insecure-devnet-input")]
+    let mut pending_value: Option<AppMsg<Context>> = None;
     let mut _held_final_reply = None;
     let mut discovery_tick = tokio::time::interval(Duration::from_secs(2));
     discovery_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
@@ -463,10 +547,24 @@ async fn app_loop(
     let mut packet = [0u8; 1762];
     let mut page_cursor = 0usize;
     loop {
-        let deadline = serve_deadline.unwrap_or(consensus_deadline);
+        let deadline = serve_deadline.unwrap_or_else(|| {
+            if native_devnet() {
+                tokio::time::Instant::now() + options.timeout
+            } else {
+                consensus_deadline
+            }
+        });
         let received = tokio::select! {
             result = tokio::time::timeout_at(deadline, channels.consensus.recv()) => result,
-            _ = storage_tick.tick() => { journal.ensure_capacity(0)?; continue; },
+            _ = storage_tick.tick() => {
+                journal.ensure_capacity(0)?;
+                #[cfg(feature="insecure-devnet-input")]
+                if matches!(&pending_value, Some(AppMsg::GetValue {height,..}) if options.directory.join(format!("devnet-payment-{}.json",height.0)).exists()) {
+                    Ok(pending_value.take())
+                } else { continue; }
+                #[cfg(not(feature="insecure-devnet-input"))]
+                continue;
+            },
             _ = discovery_tick.tick(), if network_view.is_some() => {
                 let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)?.as_secs();
                 let n = network_view.as_ref().expect("isolated profile");
@@ -522,6 +620,13 @@ async fn app_loop(
             }
         };
         let Some(msg) = msg else { break };
+        #[cfg(feature = "insecure-devnet-input")]
+        if native_devnet()
+            && matches!(&msg, AppMsg::GetValue {height,..} if !options.directory.join(format!("devnet-payment-{}.json",height.0)).exists())
+        {
+            pending_value = Some(msg);
+            continue;
+        }
         match msg {
             AppMsg::ConsensusReady { reply } => {
                 let _ = reply.send((
@@ -539,6 +644,10 @@ async fn app_loop(
                     return Err(eyre!("height/membership mismatch"));
                 }
                 active_round = round;
+                #[cfg(feature = "insecure-devnet-input")]
+                {
+                    pending_value = None;
+                }
                 // Recover the exact authenticated metadata for this round, never
                 // relabel arbitrary cached blocks as a fresh proposal.
                 let proposals = candidates
@@ -558,27 +667,33 @@ async fn app_loop(
                     return Err(eyre!("proposal height mismatch"));
                 }
                 let proposal_began = options.test_distinct_accounts.then(std::time::Instant::now);
-                let block = if options.test_distinct_accounts {
-                    state.development_distinct_workload_block(options.test_transactions)?
-                } else {
-                    state.development_workload_block(options.test_transactions)?
-                };
-                #[cfg(feature = "insecure-devnet-input")]
-                let block = {
-                    let path = options.directory.join(format!("devnet-label-{}", height.0));
-                    if path.exists() {
-                        let label = std::fs::read_to_string(path)?;
-                        let owner = yami_chain::development_key("registry", 0);
-                        let tx = yami_chain::Transaction::sign(
-                            label.trim(),
-                            state.nonce(&owner.verifying_key().to_bytes()),
-                            height.0,
-                            &owner,
-                        )?;
-                        state.propose(vec![tx])?
+                let legacy_block = || {
+                    if options.test_distinct_accounts {
+                        state.development_distinct_workload_block(options.test_transactions)
                     } else {
-                        block
+                        state.development_workload_block(options.test_transactions)
                     }
+                };
+                #[cfg(not(feature = "insecure-devnet-input"))]
+                let block = legacy_block()?;
+                #[cfg(feature = "insecure-devnet-input")]
+                let block = if native_devnet() {
+                    let payload = yami_chain_storage::read_bounded(
+                        &options
+                            .directory
+                            .join(format!("devnet-payment-{}.json", height.0)),
+                        30000,
+                    )?;
+                    let owner = yami_chain::development_key("registry", 0);
+                    let tx = yami_chain::Transaction::devnet_certificate(
+                        payload,
+                        state.nonce(&owner.verifying_key().to_bytes()),
+                        height.0,
+                        &owner,
+                    )?;
+                    state.propose(vec![tx])?
+                } else {
+                    legacy_block()?
                 };
                 if let Some(at) = proposal_began {
                     proposal_observation = Some((block.id()?, at, true));
@@ -675,10 +790,13 @@ async fn app_loop(
                 verify_certificate(state.genesis(), &block, &certificate)?;
                 let next = candidates.execute(&state, &block)?;
                 maybe_crash(&journal, options.crash, CrashPoint::BeforeCommit)?;
-                journal.append(&FinalizedRecord {
+                let record = FinalizedRecord {
                     block,
                     certificate: encode_certificate(state.genesis(), &certificate)?,
-                })?;
+                };
+                journal.append(&record)?;
+                #[cfg(feature = "insecure-devnet-input")]
+                publish_native_record(&journal, &record)?;
                 state = next;
                 let _ = reply.send(());
             }

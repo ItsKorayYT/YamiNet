@@ -10,10 +10,12 @@ workspace = true
 
 [features]
 default = []
+insecure-devnet-input = ["dep:yamichain-devnet-cert"]
 experimental-snapshot-v2 = []
 inactive-checkpoint-v2 = []
 
 [dependencies]
+yamichain-devnet-cert = { path = "../yami-chain-devnet-cert", optional = true }
 im = "15.1.0"
 sha2 = "0.11.1"
 ed25519-dalek = "3.0.0"

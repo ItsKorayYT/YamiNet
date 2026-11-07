@@ -1,7 +1,6 @@
 //! Local wallet/bootstrap adapter for the INSECURE disposable devnet.
 use ed25519_dalek::SigningKey;
 use rand::{rngs::OsRng, RngCore};
-use std::path::Path;
 use std::{collections::BTreeMap, io::Read};
 use x25519_dalek::{PublicKey, StaticSecret};
 use yamichain_tee_m20::{quorum::*, witness::*, *};
@@ -113,26 +112,47 @@ fn main() -> Result<()> {
             let h: Head = serde_json::from_value(v["head"].clone())?;
             let votes: Vec<WitnessedApproval> = serde_json::from_value(v["votes"].clone())?;
             let qc = WitnessedCertificate::collect(&p, &h, votes)?;
-            let digest = hash(&bytes(&qc));
-            serde_json::json!({"certificate":qc,"label":format!("test-{}",&hex::encode(digest)[..58])})
+            serde_json::json!({"certificate":qc,"payload":bytes(&qc)})
+        }
+        "audit-native" => {
+            let mut state = yami_chain::State::insecure_devnet(
+                yami_chain::Genesis::local(),
+                &serde_json::to_vec(&v["policy"])?,
+            )?;
+            let records: Vec<Vec<u8>> = serde_json::from_value(v["records"].clone())?;
+            for raw in records {
+                let record = yami_chain_storage::FinalizedRecord::decode(&raw)?;
+                yami_chain_consensus::verify_record(state.genesis(), &record)?;
+                state = state.execute(&record.block)?;
+            }
+            let before = state.root();
+            let accepted = if v["candidate"].is_null() {
+                false
+            } else {
+                let owner = yami_chain::development_key("registry", 0);
+                let tx = yami_chain::Transaction::devnet_certificate(
+                    serde_json::to_vec(&v["candidate"])?,
+                    state.nonce(&owner.verifying_key().to_bytes()),
+                    state.height() + 1,
+                    &owner,
+                )?;
+                state.propose(vec![tx]).is_ok()
+            };
+            serde_json::json!({"height":state.height(),"root":before.to_string(),"candidate_accepted":accepted,"state_unchanged":before==state.root()})
         }
         "finality" => {
-            let path = v["directory"].as_str().ok_or("directory")?;
             let height = v["height"].as_u64().ok_or("height")?;
-            let journal = yami_chain_storage::Journal::open(Path::new(path))?;
-            let record = journal.record(height)?.ok_or("not finalized")?;
+            let raw: Vec<u8> = serde_json::from_value(v["record"].clone())?;
+            let record = yami_chain_storage::FinalizedRecord::decode(&raw)?;
+            if record.block.header.height != height {
+                return Err("height mismatch".into());
+            }
             yami_chain_consensus::verify_record(&yami_chain::Genesis::local(), &record)?;
             let qc: WitnessedCertificate = serde_json::from_value(v["certificate"].clone())?;
             let policy: WitnessPolicy = serde_json::from_value(v["policy"].clone())?;
             qc.verify(&policy, &qc.certificate.statement.previous)?;
-            let expected = format!("test-{}", &hex::encode(hash(&bytes(&qc)))[..58]);
-            let label = expected.as_str();
-            if !record.block.transactions.iter().any(
-                |t| matches!(&t.action,yami_chain::Action::RegisterTestTld{label:l} if l==label),
-            ) {
-                return Err("commitment absent".into());
-            }
-            serde_json::json!({"height":height,"block":record.block.id()?.to_string(),"commitment":label,"consensus":"YamiChain Malachite commit certificate"})
+            if !record.block.transactions.iter().any(|t| matches!(&t.action,yami_chain::Action::PrivatePaymentCertificateV1{certificate} if *certificate==bytes(&qc))) {return Err("native certificate absent".into());}
+            serde_json::json!({"height":height,"block":record.block.id()?.to_string(),"action":"PrivatePaymentCertificateV1","certificate":qc,"record":raw,"consensus":"YamiChain Malachite commit certificate"})
         }
         _ => return Err("unknown operation".into()),
     };

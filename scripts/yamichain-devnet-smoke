@@ -1,0 +1,79 @@
+#!/usr/bin/env python3
+"""Actual native payment, certificate rejection, continuous validators and restart smoke.
+Run on the disposable local devnet only. Leaves the network running.
+"""
+import copy
+import json
+import pathlib
+import runpy
+import subprocess
+import time
+
+ROOT = pathlib.Path(__file__).resolve().parents[1]
+d = runpy.run_path(str(ROOT / 'scripts/yamichain-devnet'))
+DATA, URL = d['DATA'], d['URL']
+http, bridge, read = d['http'], d['bridge'], d['read']
+cli = str(ROOT / 'scripts/yamichain-devnet')
+
+
+def command(*args):
+    p = subprocess.run([cli, *map(str, args)], check=True, capture_output=True, text=True)
+    return p.stdout.strip()
+
+
+command('start')
+alice = ROOT / f'work/smoke-alice-{time.time_ns()}.wallet'
+bob = ROOT / f'work/smoke-bob-{time.time_ns()}.wallet'
+a = command('wallet', alice)
+b = command('wallet', bob)
+start = http(URL)['height']
+pids = [http(v)['consensus_pid'] for v in d['VALIDATORS']]
+funded = json.loads(command('faucet', alice, 1000))
+# Bob has only generated keys; no balance query or online recipient participation.
+paid = json.loads(command('send', alice, b, 100))
+assert funded['height'] == start+1 and paid['height'] == start+2
+assert paid['finality']['action'] == 'PrivatePaymentCertificateV1'
+assert [http(v)['consensus_pid'] for v in d['VALIDATORS']] == pids
+assert json.loads(command('balance', alice))['balance'] == 900
+assert json.loads(command('balance', bob))['balance'] == 100
+records = [http(URL+'/history/'+str(h))['finality']['record'] for h in range(1, start+3)]
+qc = http(URL+'/history/'+str(start+2))['certificate']
+policy = http(URL+'/policy')
+valid = bridge('audit-native', policy=policy, records=records[:-1], candidate=qc)
+assert valid['candidate_accepted'] and valid['state_unchanged']
+attacks = {}
+for name in ('executor_signature', 'witness_signature', 'duplicate_approval', 'missing_witness', 'committee', 'previous_state', 'sequence', 'resulting_state'):
+    c = copy.deepcopy(qc)
+    cert = c['certificate']
+    if name == 'executor_signature': cert['approvals'][0]['signature'][0] ^= 1
+    elif name == 'witness_signature': c['confirmations'][0]['signature'][0] ^= 1
+    elif name == 'duplicate_approval': cert['approvals'][1] = copy.deepcopy(cert['approvals'][0])
+    elif name == 'missing_witness': c['confirmations'].pop()
+    elif name == 'committee': cert['statement']['committee'][0] ^= 1
+    elif name == 'previous_state': cert['statement']['previous']['commitment'][0] ^= 1
+    elif name == 'sequence': cert['statement']['next']['epoch'] += 1
+    elif name == 'resulting_state': cert['statement']['next']['commitment'][0] ^= 1
+    result = bridge('audit-native', policy=policy, records=records[:-1], candidate=c)
+    assert not result['candidate_accepted'] and result['state_unchanged']
+    attacks[name] = 'rejected by native State execution; accepted state unchanged'
+replay = bridge('audit-native', policy=policy, records=records, candidate=qc)
+assert not replay['candidate_accepted'] and replay['state_unchanged']
+attacks['replay'] = 'rejected after complete authenticated history replay'
+validator_records = [http(v+'/record/'+str(start+2)) for v in d['VALIDATORS']]
+for raw in validator_records:
+    verified = bridge('finality', record=raw, height=start+2, certificate=qc, policy=policy)
+    assert verified['block'] == paid['finality']['block']
+command('stop')
+command('start')
+after = http(URL)
+assert after['head'] == paid['head'] and after['finality'] == paid['finality']
+assert json.loads(command('balance', alice))['balance'] == 900
+assert json.loads(command('balance', bob))['balance'] == 100
+assert http(URL+'/history/'+str(start+2))['finality']['record'] == records[-1]
+for v, raw in zip(d['VALIDATORS'], validator_records):
+    assert http(v+'/record/'+str(start+2)) == raw
+result = dict(insecure=True, endpoint=URL, alice=a, bob=b, alice_wallet=str(alice.relative_to(ROOT)), bob_wallet=str(bob.relative_to(ROOT)), alice_balance=900, bob_balance=100,
+              funded_height=start+1, payment_height=start+2, payment_finality=paid['finality'],
+              continuous_validator_pids=pids, restart_preserved=True, full_certificate_available=True,
+              attacks=attacks)
+print(json.dumps(result, indent=2))

@@ -25,7 +25,10 @@ pub use yami_chain_privacy as privacy;
 pub const CHAIN_ID: &str = "yamichain-local-0.2";
 pub const PROTOCOL: u16 = 2;
 pub const MAX_BLOCK_BYTES: usize = 65_536;
+#[cfg(not(feature = "insecure-devnet-input"))]
 pub const MAX_TX_BYTES: usize = 1024;
+#[cfg(feature = "insecure-devnet-input")]
+pub const MAX_TX_BYTES: usize = 32768;
 pub const MAX_TXS: usize = 64;
 pub const MAX_CERTIFICATE_BYTES: usize = 16_384;
 
@@ -147,7 +150,13 @@ fn domain(chain: &str, protocol: u16, features: u64) -> Result<()> {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Action {
-    RegisterTestTld { label: String },
+    RegisterTestTld {
+        label: String,
+    },
+    #[cfg(feature = "insecure-devnet-input")]
+    PrivatePaymentCertificateV1 {
+        certificate: Vec<u8>,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -179,6 +188,15 @@ impl Transaction {
                 }
                 w.u8(1);
                 w.bytes(label.as_bytes())?;
+            }
+            #[cfg(feature = "insecure-devnet-input")]
+            Action::PrivatePaymentCertificateV1 { certificate } => {
+                if certificate.len() > 30000 {
+                    return Err(Error::Limit);
+                }
+                w.u8(240);
+                w.u16(1);
+                w.bytes(certificate)?;
             }
         }
         Ok(w.0)
@@ -226,6 +244,15 @@ impl Transaction {
                     .map_err(|_| Error::Encoding)?
                     .into(),
             },
+            #[cfg(feature = "insecure-devnet-input")]
+            240 => {
+                if r.u16()? != 1 {
+                    return Err(Error::Version);
+                }
+                Action::PrivatePaymentCertificateV1 {
+                    certificate: r.bytes(30000)?.to_vec(),
+                }
+            }
             _ => return Err(Error::Unsupported),
         };
         let signature = r.array()?;
@@ -331,9 +358,17 @@ pub struct State {
     tip: Digest,
     nonces: OrdMap<[u8; 32], u64>,
     names: TestNames,
+    #[cfg(feature = "insecure-devnet-input")]
+    native: Option<yamichain_devnet_cert::Ledger>,
 }
 impl PartialEq for State {
     fn eq(&self, other: &Self) -> bool {
+        #[cfg(feature = "insecure-devnet-input")]
+        if self.native.as_ref().map(|n| n.commitment())
+            != other.native.as_ref().map(|n| n.commitment())
+        {
+            return false;
+        }
         self.genesis == other.genesis
             && self.height == other.height
             && self.tip == other.tip
@@ -345,7 +380,30 @@ impl Eq for State {}
 impl State {
     pub fn new(genesis: Genesis) -> Result<Self> {
         genesis.validate()?;
-        Ok(Self::from_validated_genesis(genesis))
+        let state = Self::from_validated_genesis(genesis);
+        #[cfg(feature = "insecure-devnet-input")]
+        let state = {
+            let mut state = state;
+            if let Some(path) = std::env::var_os("YAMI_NATIVE_POLICY") {
+                let raw = std::fs::read(path).map_err(|_| Error::Genesis)?;
+                let policy = serde_json_policy(&raw)?;
+                state.native =
+                    Some(yamichain_devnet_cert::Ledger::new(policy).map_err(|_| Error::Genesis)?);
+            }
+            state
+        };
+        Ok(state)
+    }
+    /// Separate, opt-in insecure network profile; absent from production builds.
+    #[cfg(feature = "insecure-devnet-input")]
+    pub fn insecure_devnet(genesis: Genesis, policy: &[u8]) -> Result<Self> {
+        genesis.validate()?;
+        let mut state = Self::from_validated_genesis(genesis);
+        state.native = Some(
+            yamichain_devnet_cert::Ledger::new(serde_json_policy(policy)?)
+                .map_err(|_| Error::Genesis)?,
+        );
+        Ok(state)
     }
     fn from_validated_genesis(genesis: Genesis) -> Self {
         let genesis_id = genesis.id();
@@ -371,6 +429,8 @@ impl State {
             height: 0,
             nonces: OrdMap::new(),
             names: TestNames::default(),
+            #[cfg(feature = "insecure-devnet-input")]
+            native: None,
         }
     }
     pub fn height(&self) -> u64 {
@@ -404,10 +464,17 @@ impl State {
         self.nonces.get(owner).copied().unwrap_or(0)
     }
     fn application_bytes(&self) -> usize {
-        4 + self.nonces.len() * 40 + 4 + self.names.encoded_bytes()
+        let size = 4 + self.nonces.len() * 40 + 4 + self.names.encoded_bytes();
+        #[cfg(feature = "insecure-devnet-input")]
+        let size = size + self.native.as_ref().map_or(0, |n| n.commitment().len());
+        size
     }
     // Identical sorted canonical stream for hashing and checkpoint serialization.
     fn visit_application_bytes(&self, mut write: impl FnMut(&[u8])) {
+        #[cfg(feature = "insecure-devnet-input")]
+        if let Some(n) = &self.native {
+            write(&n.commitment());
+        }
         write(&(self.nonces.len() as u32).to_be_bytes());
         let mut nonce_bytes = [0; 40];
         for (key, nonce) in &self.nonces {
@@ -425,6 +492,13 @@ impl State {
         }
     }
     fn stage(&self, txs: &[Transaction]) -> Result<Self> {
+        #[cfg(feature = "insecure-devnet-input")]
+        if self.native.is_some()
+            && (txs.len() != 1
+                || !matches!(&txs[0].action, Action::PrivatePaymentCertificateV1 { .. }))
+        {
+            return Err(Error::Unsupported);
+        }
         if txs.len() > MAX_TXS {
             return Err(Error::Limit);
         }
@@ -450,6 +524,13 @@ impl State {
             }
             // Version 1 module dispatch: only the non-financial test naming module.
             match &tx.action {
+                #[cfg(feature = "insecure-devnet-input")]
+                Action::PrivatePaymentCertificateV1 { certificate } => next
+                    .native
+                    .as_mut()
+                    .ok_or(Error::Unsupported)?
+                    .apply(certificate)
+                    .map_err(|_| Error::Signature)?,
                 Action::RegisterTestTld { label } => next
                     .names
                     .register(label, tx.registry_owner)
@@ -562,3 +643,22 @@ impl State {
 
 #[cfg(test)]
 mod scalability_tests;
+
+#[cfg(feature = "insecure-devnet-input")]
+fn serde_json_policy(raw: &[u8]) -> Result<yamichain_devnet_cert::WitnessPolicy> {
+    yamichain_devnet_cert::parse_policy(raw).map_err(|_| Error::Genesis)
+}
+#[cfg(feature = "insecure-devnet-input")]
+impl Transaction {
+    pub fn devnet_certificate(
+        certificate: Vec<u8>,
+        nonce: u64,
+        expiry: u64,
+        owner: &SigningKey,
+    ) -> Result<Self> {
+        let mut tx = Self::sign("test-unused", nonce, expiry, owner)?;
+        tx.action = Action::PrivatePaymentCertificateV1 { certificate };
+        tx.signature = owner.sign(&tx.signing_bytes()?).to_bytes();
+        Ok(tx)
+    }
+}

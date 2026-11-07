@@ -71,6 +71,8 @@ impl Reference {
                 return Err(Error::Nonce);
             }
             match &tx.action {
+                #[cfg(feature = "insecure-devnet-input")]
+                Action::PrivatePaymentCertificateV1 { .. } => return Err(Error::Unsupported),
                 Action::RegisterTestTld { label } => {
                     yami_chain_naming::validate_label(label).map_err(|_| Error::Naming)?;
                     if next.names.contains_key(label) {
@@ -152,6 +154,10 @@ fn cached_persistent_execution_matches_legacy_roots_bytes_errors_and_forks() {
             let mut bad = transactions.clone();
             let t = &transactions[0];
             let label = match &t.action {
+                #[cfg(feature = "insecure-devnet-input")]
+                Action::PrivatePaymentCertificateV1 { .. } => {
+                    unreachable!("naming reference fixture")
+                }
                 Action::RegisterTestTld { label } => label,
             };
             let owner = development_key("registry", ((rng >> 32) as u8) % 16);

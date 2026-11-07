@@ -6360,6 +6360,7 @@ dependencies = [
  "sha2 0.11.1",
  "yami-chain-naming",
  "yami-chain-privacy",
+ "yamichain-devnet-cert",
 ]
 
 [[package]]
@@ -6570,6 +6571,16 @@ dependencies = [
  "yami-identity",
  "ynp",
  "ynp-tls",
+]
+
+[[package]]
+name = "yamichain-devnet-cert"
+version = "0.1.0"
+dependencies = [
+ "ed25519-dalek 2.2.0",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
 ]
 
 [[package]]

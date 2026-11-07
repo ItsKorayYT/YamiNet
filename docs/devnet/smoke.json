@@ -1,22 +1,51 @@
 {
   "insecure": true,
   "endpoint": "http://127.0.0.1:28780",
-  "height": 2,
-  "finality": {
-    "block": "23b2277e3eeee74fcfc593b77b1f5e4d4e88564b7d388e7fb3590bb7314557e0",
-    "commitment": "test-40fe01682be9e1167d569f0afd42a68665ad68eeda465c3ca645e1fb18",
+  "alice": "241ebb6ed28c8e0c10deb600526ce2ba643aca9fec9164c1cdbb95932bebe6a3",
+  "bob": "5f165676ca808ecc5420ab3b8f52b9e7c2b65e00ab55b37a9c71a75039277749",
+  "alice_wallet": "work/smoke-alice-1794044162390105878.wallet",
+  "bob_wallet": "work/smoke-bob-1794044162390124566.wallet",
+  "alice_balance": 900,
+  "bob_balance": 100,
+  "funded_height": 5,
+  "payment_height": 6,
+  "payment_finality": {
+    "action": "PrivatePaymentCertificateV1",
+    "block": "0d8b28e1d65bc6171bdb1f5cb71178cc2e025b02d14ee6a09af0a5cb9a5a4937",
     "consensus": "YamiChain Malachite commit certificate",
-    "height": 2
+    "height": 6
   },
-  "alice": {
-    "balance": 975,
-    "nonce": 1
+  "continuous_validator_pids": [
+    25170,
+    25176,
+    25182,
+    25188
+  ],
+  "restart_preserved": true,
+  "full_certificate_available": true,
+  "attacks": {
+    "executor_signature": "rejected by native State execution; accepted state unchanged",
+    "witness_signature": "rejected by native State execution; accepted state unchanged",
+    "duplicate_approval": "rejected by native State execution; accepted state unchanged",
+    "missing_witness": "rejected by native State execution; accepted state unchanged",
+    "committee": "rejected by native State execution; accepted state unchanged",
+    "previous_state": "rejected by native State execution; accepted state unchanged",
+    "sequence": "rejected by native State execution; accepted state unchanged",
+    "resulting_state": "rejected by native State execution; accepted state unchanged",
+    "replay": "rejected after complete authenticated history replay"
   },
-  "bob": {
-    "balance": 25,
-    "nonce": 0
+  "live_after_validation": {
+    "height": 6,
+    "healthy_executors": 4,
+    "healthy_validators": 4,
+    "reachable_witnesses": 4
   },
-  "restart_persistence": "passed",
-  "healthy_executors": 4,
-  "consensus_integration": "finalized certificate commitment; production financial actions remain disabled"
+  "checks": [
+    "native end-to-end smoke with restart and nine certificate/replay attacks",
+    "13 malformed certificate field/quorum cases in verifier unit tests",
+    "default and feature-enabled native action wire boundary",
+    "default canonical vectors, atomicity and legacy state reference",
+    "all 65536 payment and protocol-action proof versions rejected",
+    "strict Clippy: root native targets and devnet bridge/witness/worker"
+  ]
 }

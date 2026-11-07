@@ -5,6 +5,10 @@ pub const MAX_STATE_SNAPSHOT_BYTES: usize = 16 * 1024 * 1024;
 pub const MAX_STATE_SNAPSHOT_ENTRIES: usize = 100_000;
 impl State {
     pub fn snapshot_len(&self) -> Result<usize> {
+        #[cfg(feature = "insecure-devnet-input")]
+        if self.native.is_some() {
+            return Err(Error::Unsupported);
+        }
         if self.nonces.len() > MAX_STATE_SNAPSHOT_ENTRIES
             || self.names.len() > MAX_STATE_SNAPSHOT_ENTRIES
         {
@@ -58,6 +62,10 @@ impl State {
         root: Digest,
         bytes: &[u8],
     ) -> Result<Self> {
+        #[cfg(feature = "insecure-devnet-input")]
+        if std::env::var_os("YAMI_NATIVE_POLICY").is_some() {
+            return Err(Error::Unsupported);
+        }
         genesis.validate()?;
         let mut state = Self::from_validated_genesis(genesis);
         let mut r = Reader::new(bytes, MAX_STATE_SNAPSHOT_BYTES)?;

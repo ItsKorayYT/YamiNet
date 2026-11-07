@@ -23,7 +23,7 @@ eyre = "0.6"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "signal", "net"] }
 
 [features]
-insecure-devnet-input = []
+insecure-devnet-input = ["yami-chain/insecure-devnet-input"]
 fuzzing = []
 inactive-checkpoint-v2 = ["yami-chain/inactive-checkpoint-v2"]
 large-state-lab = ["yami-chain/experimental-snapshot-v2"]
