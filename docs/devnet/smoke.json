@@ -1,0 +1,22 @@
+{
+  "insecure": true,
+  "endpoint": "http://127.0.0.1:28780",
+  "height": 2,
+  "finality": {
+    "block": "23b2277e3eeee74fcfc593b77b1f5e4d4e88564b7d388e7fb3590bb7314557e0",
+    "commitment": "test-40fe01682be9e1167d569f0afd42a68665ad68eeda465c3ca645e1fb18",
+    "consensus": "YamiChain Malachite commit certificate",
+    "height": 2
+  },
+  "alice": {
+    "balance": 975,
+    "nonce": 1
+  },
+  "bob": {
+    "balance": 25,
+    "nonce": 0
+  },
+  "restart_persistence": "passed",
+  "healthy_executors": 4,
+  "consensus_integration": "finalized certificate commitment; production financial actions remain disabled"
+}

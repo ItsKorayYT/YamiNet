@@ -1,0 +1,163 @@
+#!/usr/bin/env python3
+"""INSECURE local disposable YAMI devnet. No production financial activation."""
+import argparse, fcntl, json, os, pathlib, signal, subprocess, sys, time, urllib.request
+from http.server import BaseHTTPRequestHandler, HTTPServer
+ROOT=pathlib.Path(__file__).resolve().parents[1]
+DATA=pathlib.Path(os.environ.get('YAMI_DEVNET_DIR',ROOT/'work/yamichain-devnet')).resolve()
+BIN=ROOT/'experiments/yamichain-tee-m20/target/release'
+URL='http://127.0.0.1:28780'
+CARGO=os.environ.get('CARGO','/workspace/.yami-tools/cargo/bin/cargo' if pathlib.Path('/workspace/.yami-tools/cargo/bin/cargo').exists() else 'cargo')
+if pathlib.Path('/workspace/.yami-tools/cargo').exists():
+ os.environ.setdefault('CARGO_HOME','/workspace/.yami-tools/cargo');os.environ.setdefault('RUSTUP_HOME','/workspace/.yami-tools/rustup')
+def read(p): return json.loads(pathlib.Path(p).read_text())
+def save(p,v):
+ p=pathlib.Path(p); tmp=p.with_suffix('.tmp'); fd=os.open(tmp,os.O_WRONLY|os.O_CREAT|os.O_TRUNC,0o600)
+ with os.fdopen(fd,'w') as f: json.dump(v,f); f.flush(); os.fsync(f.fileno())
+ os.replace(tmp,p)
+ fd=os.open(p.parent,os.O_RDONLY);os.fsync(fd);os.close(fd)
+def bridge(op,**kw):
+ p=subprocess.run([str(BIN/'devnet-bridge')],input=json.dumps(dict(op=op,**kw)),text=True,capture_output=True)
+ if p.returncode: raise RuntimeError(p.stderr.strip())
+ return json.loads(p.stdout)
+def http(url,value=None):
+ data=None if value is None else json.dumps(value).encode()
+ with urllib.request.urlopen(urllib.request.Request(url,data=data,headers={'Content-Type':'application/json'}),timeout=90) as r:return json.load(r)
+def worker(i,cmd):return http(f'http://127.0.0.1:{28790+i}',cmd)
+def wait(url):
+ for _ in range(200):
+  try:return http(url)
+  except Exception:time.sleep(.1)
+ raise RuntimeError('unreachable '+url)
+def startchild(args,name):
+ f=open(DATA/(name+'.log'),'a');p=subprocess.Popen(args,stdout=f,stderr=f);children.append(p);save(DATA/(name+'.pid'),p.pid);return p
+def bootstrap():
+ if (DATA/'policy.json').exists():return
+ treasury=bridge('key');save(DATA/'treasury.wallet',treasury)
+ keys=[bridge('key') for _ in range(4)];auth=[bridge('key') for _ in range(4)];observer=bridge('key');root=list(os.urandom(32));allocations=[(list(bytes.fromhex(treasury['address'])),1000000000000)]
+ committee={'chain':24,'members':[{'signing':list(bytes.fromhex(k['address'])),'transport':k['transport_public']} for k in keys]}
+ genesis=bridge('genesis',allocations=allocations,root=root)
+ policy=dict(committee=committee,genesis=genesis,authorities=[list(bytes.fromhex(k['address'])) for k in auth],observer=list(bytes.fromhex(observer['address'])))
+ for i in range(4):
+  save(DATA/f'witness-{i}.json',dict(listen=f'127.0.0.1:{28800+i}',database=str(DATA/f'witness-{i}.sqlite'),policy=policy,index=i,signing_secret=auth[i]['secret']))
+  save(DATA/f'executor-{i}.json',dict(snapshot=str(DATA/f'executor-{i}.state'),policy=policy,index=i,authority=f'127.0.0.1:{28800+i}',signing_secret=keys[i]['secret'],transport_secret=keys[i]['transport'],storage_secret=list(os.urandom(32)),root_secret=root,software_protocol_only=True))
+ save(DATA/'allocations.json',allocations);save(DATA/'state.json',dict(head=genesis,height=0));save(DATA/'policy.json',policy)
+def finalize(pending):
+ qc=pending['certificate'];height=pending['height'];label=pending['label'];receipts=[]
+ # A block must actually contain the exact certificate commitment; merely increasing height is insufficient.
+ try:
+  receipts=[bridge('finality',directory=str(DATA/f'validator-{i}'),height=height,label=label,certificate=qc,policy=read(DATA/'policy.json')) for i in range(4)]
+ except Exception:
+  processes=[]; start=int(time.time()*1000)+1500
+  for i in range(4):
+   directory=DATA/f'validator-{i}';directory.mkdir(exist_ok=True);(directory/f'devnet-label-{height}').write_text(label)
+   log=open(DATA/f'validator-{i}.log','a')
+   processes.append(subprocess.Popen([str(ROOT/'target/release/yami-validator'),'run','--dir',str(directory),'--index',str(i),'--base-port','28900','--height',str(height),'--timeout','45','--start-at-ms',str(start),'--linger','2'],stdout=log,stderr=log))
+  children.extend(processes)
+  for p in processes:
+   if p.wait(timeout=60):raise RuntimeError('consensus failed; inspect validator logs')
+  receipts=[bridge('finality',directory=str(DATA/f'validator-{i}'),height=height,label=label,certificate=qc,policy=read(DATA/'policy.json')) for i in range(4)]
+ if len({r['block'] for r in receipts})!=1:raise RuntimeError('validator finality mismatch')
+ committed=0
+ for i in range(4):
+  try:
+   if worker(i,{'Commit':qc})=='Committed':committed+=1
+  except Exception:pass
+ if committed<3:raise RuntimeError('insufficient durable executor commits')
+ state={'head':qc['certificate']['statement']['next'],'height':height,'finality':receipts[0],'insecure':True}
+ save(DATA/'state.json',state);save(DATA/f'receipt-{height}.json',dict(certificate=qc,finality=receipts[0]));(DATA/'pending.json').unlink(missing_ok=True)
+ return state
+class Handler(BaseHTTPRequestHandler):
+ def log_message(self,*args):pass
+ def do_GET(self):self.handle_request(None)
+ def do_POST(self):
+  n=int(self.headers.get('Content-Length','0'))
+  if n>32*1024*1024:self.send_error(413);return
+  self.handle_request(json.loads(self.rfile.read(n)))
+ def handle_request(self,value):
+  try:
+   if role=='executor':
+    if value is None:
+     proc.stdin.write(json.dumps('Head')+'\n');proc.stdin.flush();r=json.loads(proc.stdout.readline());
+     if not isinstance(r,dict) or 'Head' not in r:raise RuntimeError('executor/witness not ready')
+     result={'insecure':True,'executor':index,'head':r['Head']}
+    else:
+     proc.stdin.write(json.dumps(value)+'\n');proc.stdin.flush();line=proc.stdout.readline()
+     if not line:raise RuntimeError('executor stopped')
+     result=json.loads(line)
+   elif value is None:
+    state=read(DATA/'state.json');healthy=0
+    for i in range(4):
+     try:healthy+=worker(i,'Head').get('Head')==state['head']
+     except Exception:pass
+    if healthy<3:raise RuntimeError('fewer than three synchronized executors')
+    result=dict(state,healthy_executors=healthy,warning='INSECURE SOFTWARE DEVNET; TEST YAMI ONLY; NO HARDWARE PROTECTION',endpoint=URL)
+   elif self.path=='/query':
+    result=[]
+    for i,e in enumerate(value['envelopes']):
+     try:result.append(worker(i,{'Query':e}))
+     except Exception:pass
+   elif self.path=='/send':
+    if (DATA/'pending.json').exists():finalize(read(DATA/'pending.json'))
+    state=read(DATA/'state.json');votes=[]
+    for i in range(4):
+     try:r=worker(i,{'Prepare':value})
+     except Exception:continue
+     if isinstance(r,dict) and 'Approval'in r:votes.append(r['Approval'])
+    c=bridge('certificate',policy=read(DATA/'policy.json'),head=state['head'],votes=votes)
+    pending=dict(c,height=state['height']+1);save(DATA/'pending.json',pending);result=finalize(pending)
+   else:raise RuntimeError('unknown endpoint')
+   data=json.dumps(result).encode();self.send_response(200)
+  except Exception as e:data=json.dumps({'error':str(e),'insecure':True}).encode();self.send_response(500)
+  self.send_header('Content-Type','application/json');self.send_header('Content-Length',str(len(data)));self.end_headers();self.wfile.write(data)
+def balance(wallet):
+ w=read(wallet);state=http(URL);q=bridge('query',secret=w['secret'],head=state['head'],policy=read(DATA/'policy.json'));responses=http(URL+'/query',{'envelopes':q['envelopes']});replies=[r['Balance'] for r in responses if isinstance(r,dict) and 'Balance'in r]
+ return bridge('balance',policy=read(DATA/'policy.json'),query=q['query'],secret=q['secret'],replies=replies)
+def send(wallet,address,amount):
+ b=balance(wallet);p=bridge('payment',policy=read(DATA/'policy.json'),head=http(URL)['head'],secret=read(wallet)['secret'],recipient=address,amount=amount,nonce=b['nonce']);return http(URL+'/send',p)
+children=[];role='';index=0
+if __name__=='__main__':
+ parser=argparse.ArgumentParser(description=__doc__);parser.add_argument('command',choices=['start','stop','status','wallet','faucet','send','balance','supervise','executor']);parser.add_argument('args',nargs='*');a=parser.parse_args();DATA.mkdir(parents=True,exist_ok=True);os.chmod(DATA,0o700)
+ if a.command not in ('executor','supervise'):print('INSECURE SOFTWARE DEVNET — disposable test YAMI only; no hardware protection',file=sys.stderr)
+ if a.command=='start':
+  try:print(json.dumps(http(URL)));sys.exit(0)
+  except Exception:pass
+  subprocess.run([CARGO,'build','--release','--manifest-path',str(ROOT/'experiments/yamichain-tee-m20/Cargo.toml'),'--bin','devnet-bridge','--bin','witness-node','--bin','witnessed-worker'],check=True)
+  subprocess.run([CARGO,'build','--release','-p','yami-validator','--features','insecure-devnet-input'],cwd=ROOT,check=True)
+  f=open(DATA/'supervisor.log','a');p=subprocess.Popen([sys.executable,str(pathlib.Path(__file__).resolve()),'supervise'],stdout=f,stderr=f,start_new_session=True);save(DATA/'supervisor.pid',p.pid);print(json.dumps(wait(URL)))
+ elif a.command=='supervise':
+  role='gateway';lock=open(DATA/'supervisor.lock','w');fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB);bootstrap()
+  def shutdown(*_):
+   for p in children:p.terminate()
+   for p in children:
+    try:p.wait(timeout=5)
+    except subprocess.TimeoutExpired:p.kill()
+   sys.exit(0)
+  signal.signal(signal.SIGTERM,shutdown)
+  for i in range(4):startchild([str(BIN/'witness-node'),str(DATA/f'witness-{i}.json')],f'witness-{i}')
+  time.sleep(.5)
+  for i in range(4):
+   if not (DATA/f'executor-{i}.state').exists():bridge('init',config=read(DATA/f'executor-{i}.json'),allocations=read(DATA/'allocations.json'))
+   startchild([sys.executable,str(pathlib.Path(__file__).resolve()),'executor',str(i)],f'executor-{i}');wait(f'http://127.0.0.1:{28790+i}')
+  if (DATA/'pending.json').exists():finalize(read(DATA/'pending.json'))
+  state=read(DATA/'state.json');heads=[worker(i,'Head')['Head'] for i in range(4)]
+  for i,h in enumerate(heads):
+   if h!=state['head']:
+    source=next(j for j,v in enumerate(heads) if v==state['head']);bundle=worker(source,{'ExportSince':{'index':i,'after':h['epoch']}})['Recovery'];assert worker(i,{'Recover':bundle})=='Committed'
+  HTTPServer(('127.0.0.1',28780),Handler).serve_forever()
+ elif a.command=='executor':
+  role='executor';index=int(a.args[0]);proc=subprocess.Popen([str(BIN/'witnessed-worker'),str(DATA/f'executor-{index}.json')],stdin=subprocess.PIPE,stdout=subprocess.PIPE,text=True);signal.signal(signal.SIGTERM,lambda *_:(proc.terminate(),sys.exit(0)));HTTPServer(('127.0.0.1',28790+index),Handler).serve_forever()
+ elif a.command=='stop':
+  try:
+   pid=read(DATA/'supervisor.pid');cmd=pathlib.Path(f'/proc/{pid}/cmdline').read_bytes()
+   if not any(pathlib.Path(os.fsdecode(arg)).resolve()==pathlib.Path(__file__).resolve() for arg in cmd.split(b'\0') if b'yamichain-devnet' in arg) or b'supervise' not in cmd.split(b'\0'):raise RuntimeError('refusing stale/unrelated PID')
+   os.kill(pid,signal.SIGTERM)
+  except (ProcessLookupError,FileNotFoundError):pass
+  time.sleep(1);print('Stopped; persistent state retained in '+str(DATA))
+ elif a.command=='status':print(json.dumps(http(URL),indent=2))
+ elif a.command=='wallet':
+  path=pathlib.Path(a.args[0]);
+  if path.exists():raise SystemExit('wallet already exists')
+  w=bridge('key');save(path,w);print(w['address'])
+ elif a.command=='balance':print(json.dumps(balance(a.args[0])))
+ elif a.command=='send':print(json.dumps(send(a.args[0],a.args[1],int(a.args[2])),indent=2))
+ elif a.command=='faucet':print(json.dumps(send(DATA/'treasury.wallet',read(a.args[0])['address'],int(a.args[1])),indent=2))

@@ -563,6 +563,23 @@ async fn app_loop(
                 } else {
                     state.development_workload_block(options.test_transactions)?
                 };
+                #[cfg(feature = "insecure-devnet-input")]
+                let block = {
+                    let path = options.directory.join(format!("devnet-label-{}", height.0));
+                    if path.exists() {
+                        let label = std::fs::read_to_string(path)?;
+                        let owner = yami_chain::development_key("registry", 0);
+                        let tx = yami_chain::Transaction::sign(
+                            label.trim(),
+                            state.nonce(&owner.verifying_key().to_bytes()),
+                            height.0,
+                            &owner,
+                        )?;
+                        state.propose(vec![tx])?
+                    } else {
+                        block
+                    }
+                };
                 if let Some(at) = proposal_began {
                     proposal_observation = Some((block.id()?, at, true));
                 }
