@@ -27,3 +27,5 @@ pub use fuzzing::{fuzz_decode, fuzz_seeds};
 
 #[cfg(feature = "large-state-lab")]
 pub use candidates::profile_candidate_retransmission;
+
+pub mod equivocation;

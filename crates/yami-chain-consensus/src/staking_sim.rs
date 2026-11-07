@@ -354,33 +354,22 @@ impl Simulation {
         b: &m::SignedMessage<Context, Vote>,
         basis_points: u16,
     ) -> Result<()> {
+        let left = crate::wire::encode(
+            self.genesis.id(),
+            &malachite_core::SignedConsensusMsg::<Context>::Vote(a.clone()),
+        )?;
+        let right = crate::wire::encode(
+            self.genesis.id(),
+            &malachite_core::SignedConsensusMsg::<Context>::Vote(b.clone()),
+        )?;
+        crate::equivocation::verify_double_vote(&self.genesis, &left, &right)?;
         let va = &a.message;
-        let vb = &b.message;
         if basis_points == 0
             || basis_points > 10_000
-            || va.height != vb.height
-            || va.round != vb.round
-            || va.step != vb.step
-            || va.address != vb.address
-            || va.value == vb.value
             || va.height.0 > self.height
             || self.height - va.height.0 > self.evidence_age
-            || va.extension.is_some()
-            || vb.extension.is_some()
-            || self
-                .genesis
-                .committee_at(va.height.0)?
-                .member(&va.address.0 .0)
-                .is_none()
         {
             return Err(Error::Signature);
-        }
-        for v in [a, b] {
-            verify(
-                &v.message.address.0 .0,
-                &vote_preimage_for(&self.genesis, &v.message)?,
-                &v.signature,
-            )?;
         }
         let evidence = (
             va.address.0 .0,
