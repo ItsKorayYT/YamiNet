@@ -301,6 +301,7 @@ impl Ledger {
     pub fn apply(&mut self, payload: &[u8]) -> Result<()> {
         check(payload.len() <= 30000)?;
         let qc: WitnessedCertificate = serde_json::from_slice(payload)?;
+        check(bytes(&qc) == payload)?;
         qc.verify(&self.policy, &self.head)?;
         self.head = qc.certificate.statement.next;
         Ok(())

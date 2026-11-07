@@ -1,0 +1,49 @@
+{
+  "software_only": true,
+  "production_activation": false,
+  "live_pos_activation": false,
+  "endpoint": "http://127.0.0.1:29780/status",
+  "private_payment": {
+    "action": "PrivatePaymentCertificateV1",
+    "block": "dbff972739b761b1efdffe6b1dde60c5dcfd977616b1c1b4859074ef77ce40c9",
+    "consensus": "YamiChain Malachite commit certificate",
+    "height": 2
+  },
+  "alice_after_payment": 898,
+  "bob_after_payment": 100,
+  "alice_after_staking": {
+    "balance": 783,
+    "nonce": 6,
+    "portfolio": {
+      "bonded": 100,
+      "unbonding": 0,
+      "withdrawable": 0,
+      "withdrawals": []
+    }
+  },
+  "bob_after_maintenance": {
+    "balance": 105,
+    "nonce": 0,
+    "portfolio": {
+      "bonded": 0,
+      "unbonding": 0,
+      "withdrawable": 0,
+      "withdrawals": []
+    }
+  },
+  "fee_revenue": 29,
+  "validator_rewards": [
+    7,
+    8,
+    8,
+    6
+  ],
+  "unbonding_and_double_withdrawal_rejected": true,
+  "restart_preserved": true,
+  "finality": {
+    "action": "PrivatePaymentCertificateV1",
+    "block": "420b9b29e3eac2cff761c0c10110a9c20f691abf5ee8a98139b0ea2ff11e7dba",
+    "consensus": "YamiChain Malachite commit certificate",
+    "height": 12
+  }
+}

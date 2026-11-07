@@ -1,0 +1,15 @@
+{
+  "encrypted_wallet": true,
+  "alice": "10a5a2483201b982bc4939a745e3aebd4c3a8a1b24ce92b88aa5183cf26de04f",
+  "bob": "b9ac9941a22eb1e98bd1d5d5b8c4816c3cc644086b1bdda326a967058f704db5",
+  "alice_balance": 898,
+  "bob_balance": 100,
+  "encrypted_backup_restore": true,
+  "finality": {
+    "verified": true,
+    "height": 14,
+    "block": "c18209660015652412acea5f0f31191ad9f2ffa746f32e74c1783bb4005214ef",
+    "production_security": false
+  },
+  "production_security": false
+}

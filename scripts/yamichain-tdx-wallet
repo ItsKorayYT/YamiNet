@@ -60,7 +60,7 @@ def head():
 
 def balance(wallet):
     s = head()
-    q = bridge('query', intent=True, secret=read(wallet)['secret'], head=s['head'], policy=trusted['witness_policy'])
+    q = bridge('query', intent=True, secret=d['wallet_secret'](wallet), head=s['head'], policy=trusted['witness_policy'])
     authorized = gated(a.trusted_config, q['operation'])
     replies = http(deployment['gateway']+'/query', {'envelopes': authorized['Queries']})
     value = bridge('balance', policy=trusted['witness_policy'], query=q['query'], secret=q['secret'],
@@ -100,7 +100,7 @@ else:
     b = balance(wallet)
     s = head()
     intent = bridge('payment', intent=True, policy=trusted['witness_policy'], head=s['head'],
-                    secret=read(wallet)['secret'], recipient=recipient, amount=amount, nonce=b['nonce'])
+                    secret=d['wallet_secret'](wallet), recipient=recipient, amount=amount, nonce=b['nonce'],finance=({'fee_limit':fee_policy['base_fee']+fee_policy['unit_fee'],'action':'Transfer'} if (fee_policy:=http(deployment['gateway']+'/fees')) else None))
     authorized = gated(a.trusted_config, intent)
     receipt = http(deployment['gateway']+'/send', authorized['Payment'], timeout=120)
     history = http(deployment['gateway']+'/history/'+str(receipt['height']))

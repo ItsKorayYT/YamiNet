@@ -179,6 +179,43 @@ fn main() -> Result<()> {
             let qc = WitnessedCertificate::collect(&p, &h, votes)?;
             serde_json::json!({"certificate":qc,"payload":bytes(&qc)})
         }
+        "validate-certificate" => {
+            let payload: Vec<u8> = serde_json::from_value(v["payload"].clone())?;
+            if payload.len() > 30000 {
+                return Err("certificate byte limit".into());
+            }
+            let qc: WitnessedCertificate = serde_json::from_slice(&payload)?;
+            if bytes(&qc) != payload {
+                return Err("noncanonical certificate".into());
+            }
+            let policy: WitnessPolicy = serde_json::from_value(v["policy"].clone())?;
+            let height = v["height"].as_u64().filter(|h| *h > 0).ok_or("height")?;
+            let previous = if height == 1 {
+                policy.genesis.clone()
+            } else {
+                let raw: Vec<u8> = serde_json::from_value(v["previous_record"].clone())?;
+                let record = yami_chain_storage::FinalizedRecord::decode(&raw)?;
+                yami_chain_consensus::verify_record(&yami_chain::Genesis::local(), &record)?;
+                if record.block.header.height.checked_add(1) != Some(height)
+                    || record.block.transactions.len() != 1
+                {
+                    return Err("previous record height".into());
+                }
+                let yami_chain::Action::PrivatePaymentCertificateV1 { certificate } =
+                    &record.block.transactions[0].action
+                else {
+                    return Err("previous action".into());
+                };
+                let old: WitnessedCertificate = serde_json::from_slice(certificate)?;
+                old.verify(&policy, &old.certificate.statement.previous)?;
+                old.certificate.statement.next
+            };
+            if previous.epoch.checked_add(1) != Some(height) {
+                return Err("certificate sequence".into());
+            }
+            qc.verify(&policy, &previous)?;
+            serde_json::json!({"valid":true})
+        }
         "audit-native" => {
             let mut state = yami_chain::State::insecure_devnet(
                 yami_chain::Genesis::local(),
@@ -216,8 +253,19 @@ fn main() -> Result<()> {
             let qc: WitnessedCertificate = serde_json::from_value(v["certificate"].clone())?;
             let policy: WitnessPolicy = serde_json::from_value(v["policy"].clone())?;
             qc.verify(&policy, &qc.certificate.statement.previous)?;
-            if !record.block.transactions.iter().any(|t| matches!(&t.action,yami_chain::Action::PrivatePaymentCertificateV1{certificate} if *certificate==bytes(&qc))) {return Err("native certificate absent".into());}
-            serde_json::json!({"height":height,"block":record.block.id()?.to_string(),"action":"PrivatePaymentCertificateV1","certificate":qc,"record":raw,"consensus":"YamiChain Malachite commit certificate"})
+            let mut accepted = None;
+            for t in &record.block.transactions {
+                if let yami_chain::Action::PrivatePaymentCertificateV1 { certificate } = &t.action {
+                    let candidate: WitnessedCertificate = serde_json::from_slice(certificate)?;
+                    candidate.verify(&policy, &qc.certificate.statement.previous)?;
+                    if candidate.certificate.statement == qc.certificate.statement {
+                        accepted = Some(candidate);
+                        break;
+                    }
+                }
+            }
+            let accepted = accepted.ok_or("native transition certificate absent")?;
+            serde_json::json!({"height":height,"block":record.block.id()?.to_string(),"action":"PrivatePaymentCertificateV1","certificate":accepted,"record":raw,"consensus":"YamiChain Malachite commit certificate"})
         }
         _ => return Err("unknown operation".into()),
     };

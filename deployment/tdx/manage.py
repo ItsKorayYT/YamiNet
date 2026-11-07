@@ -31,10 +31,11 @@ elif a.command=='plan':
     authorities=read(a.authorities)
     if len(authorities)!=4 or len({tuple(k) for k in authorities})!=4:raise SystemExit('four distinct independent witness keys required')
     treasury=bridge('key');root=list(os.urandom(32));allocations=[(list(bytes.fromhex(treasury['address'])),1_000_000_000_000)]
-    genesis=bridge('genesis',allocations=allocations,root=root)
-    policy=dict(committee=dict(chain=24,members=[id['member'] for id in identities]),genesis=genesis,authorities=authorities,observer=list(bytes.fromhex(bridge('key')['address'])))
+    genesis=bridge('genesis',allocations=allocations,root=root,chain=network.get('chain',24),economics=network.get('economics'))
+    policy=dict(committee=dict(chain=network.get('chain',24),members=[id['member'] for id in identities]),genesis=genesis,authorities=authorities,observer=list(bytes.fromhex(bridge('key')['address'])))
     save(a.data/'policy.json',policy);save(a.data/'state.json',dict(head=genesis,height=0));save(a.data/'treasury.wallet',treasury)
-    save(a.data/'provision.json',dict(root=root,allocations=allocations,restored=None))
+    save(a.data/'provision.json',dict(root=root,allocations=allocations,restored=None,**({'economics':network['economics']} if network.get('economics') else {})))
+    save(a.data/'economic-policy.json',network.get('economics'))
     save(a.data/'identities.json',identities)
     print('Provisional public committee pinned. Each custodian MUST verify enrollment before provisioning. No attestation has been accepted yet.')
 elif a.command=='provision':

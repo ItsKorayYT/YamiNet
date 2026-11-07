@@ -1,0 +1,11 @@
+{
+  "software_only": true,
+  "malformed_certificates_rejected_by_all_four": true,
+  "queue_unchanged": true,
+  "finalized_state_unchanged": true,
+  "old_consensus_pid": 44659,
+  "new_consensus_pid": 44699,
+  "automatic_recovery": true,
+  "retained_height": 14,
+  "healthy_validators": 4
+}

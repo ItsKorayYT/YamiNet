@@ -62,6 +62,25 @@ def bridge(op, **kw):
     return json.loads(p.stdout)
 
 
+_wallet_cache={}
+def wallet_secret(path):
+    value=read(path)
+    if 'ciphertext' not in value:return value['secret']
+    key=str(pathlib.Path(path).resolve())
+    if key not in _wallet_cache:
+        if 'YAMI_WALLET_PASSWORD_FILE' in os.environ:
+            source=pathlib.Path(os.environ['YAMI_WALLET_PASSWORD_FILE'])
+            if source.stat().st_mode&0o077:raise RuntimeError('password file must have mode 0600')
+            password=source.read_text().removesuffix('\n')
+        else:
+            import getpass
+            password=getpass.getpass('Wallet password: ')
+        p=subprocess.run([str(BIN/'wallet-vault')],input=json.dumps(dict(op='unlock',password=password,vault=value)),capture_output=True,text=True)
+        if p.returncode:raise RuntimeError(p.stderr.strip())
+        _wallet_cache[key]=json.loads(p.stdout)['secret']
+    return _wallet_cache[key]
+
+
 def http(url, value=None, timeout=90):
     data = None if value is None else json.dumps(value).encode()
     req = urllib.request.Request(url, data=data, headers={'Content-Type': 'application/json'})
@@ -83,6 +102,7 @@ def wait(url):
 
 
 def startchild(args, name, env=None):
+    children[:]=[p for p in children if p.poll() is None]
     f = open(DATA / (name + '.log'), 'a')
     p = subprocess.Popen(args, stdout=f, stderr=f, env=env)
     children.append(p)
@@ -97,6 +117,9 @@ def own(command, i=None):
 
 def bootstrap():
     if (DATA / 'policy.json').exists():
+        pinned=read(DATA/'economic-policy.json') if (DATA/'economic-policy.json').exists() else None
+        if read(DATA/'policy.json')['committee']['chain']!=CONFIG.get('chain',24):raise RuntimeError('chain ID is pinned at genesis')
+        if pinned!=CONFIG.get('economics'):raise RuntimeError('economic policy is pinned at genesis; choose a new devnet directory')
         return
     treasury = bridge('key')
     save(DATA / 'treasury.wallet', treasury)
@@ -105,14 +128,15 @@ def bootstrap():
     observer = bridge('key')
     root = list(os.urandom(32))
     allocations = [(list(bytes.fromhex(treasury['address'])), 1_000_000_000_000)]
-    committee = {'chain': 24, 'members': [{'signing': list(bytes.fromhex(k['address'])), 'transport': k['transport_public']} for k in keys]}
-    genesis = bridge('genesis', allocations=allocations, root=root)
+    committee = {'chain': CONFIG.get('chain',24), 'members': [{'signing': list(bytes.fromhex(k['address'])), 'transport': k['transport_public']} for k in keys]}
+    genesis = bridge('genesis', allocations=allocations, root=root, economics=CONFIG.get('economics'), chain=committee['chain'])
     policy = dict(committee=committee, genesis=genesis, authorities=[list(bytes.fromhex(k['address'])) for k in auth], observer=list(bytes.fromhex(observer['address'])))
     for i in range(4):
         save(DATA / f'witness-{i}.json', dict(listen=WITNESSES[i], database=str(DATA / f'witness-{i}.sqlite'), policy=policy, index=i, signing_secret=auth[i]['secret']))
-        save(DATA / f'executor-{i}.json', dict(snapshot=str(DATA / f'executor-{i}.state'), policy=policy, index=i, authority=WITNESSES[i], signing_secret=keys[i]['secret'], transport_secret=keys[i]['transport'], storage_secret=list(os.urandom(32)), root_secret=root, software_protocol_only=True))
+        save(DATA / f'executor-{i}.json', dict(snapshot=str(DATA / f'executor-{i}.state'), policy=policy, index=i, authority=WITNESSES[i], signing_secret=keys[i]['secret'], transport_secret=keys[i]['transport'], storage_secret=list(os.urandom(32)), root_secret=root, software_protocol_only=True, economics=CONFIG.get('economics')))
     save(DATA / 'allocations.json', allocations)
     save(DATA / 'state.json', dict(head=genesis, height=0))
+    save(DATA / 'economic-policy.json', CONFIG.get('economics'))
     save(DATA / 'policy.json', policy)
 
 
@@ -140,6 +164,9 @@ def finalize(pending):
         time.sleep(.25)
     if len(receipts) < 3 or len({r['block'] for r in receipts}) != 1:
         raise RuntimeError('native consensus finality unavailable; durable pending request retained')
+    # Signer subsets/order may differ for the same authenticated transition. Commit
+    # the exact complete certificate retained in the finalized native block.
+    qc=receipts[0]['certificate']
     committed = 0
     for i in range(4):
         try:
@@ -206,6 +233,10 @@ class Handler(BaseHTTPRequestHandler):
                     payload = bytes(value['payload'])
                     # Only data availability here; the Rust State execution verifies every approval and witness.
                     json.loads(payload)
+                    previous=None
+                    if height>1:
+                        previous=list((DATA/f'validator-{index}/native-finalized-{height-1}.bin').read_bytes())
+                    bridge('validate-certificate',payload=list(payload),policy=read(DATA/'policy.json'),height=height,previous_record=previous)
                     p = DATA / f'validator-{index}/devnet-payment-{height}.json'
                     if p.exists() and p.read_bytes() != payload:
                         raise RuntimeError('conflicting queued certificate')
@@ -228,6 +259,8 @@ class Handler(BaseHTTPRequestHandler):
                 result = json.loads(line)
                 if value is None and (not isinstance(result, dict) or 'Head' not in result):
                     raise RuntimeError('executor/witness not ready')
+            elif self.path == '/fees' and value is None:
+                result=read(DATA/'economic-policy.json') if (DATA/'economic-policy.json').exists() else None
             elif self.path == '/policy' and value is None:
                 result = read(DATA / 'policy.json')
             elif self.path.startswith('/history/') and value is None:
@@ -302,16 +335,30 @@ def policy():
 def balance(wallet):
     w, p = read(wallet), policy()
     state = http(URL)
-    q = bridge('query', secret=w['secret'], head=state['head'], policy=p)
+    q = bridge('query', secret=wallet_secret(wallet), head=state['head'], policy=p)
     responses = http(URL + '/query', {'envelopes': q['envelopes']})
     replies = [r['Balance'] for r in responses if isinstance(r, dict) and 'Balance' in r]
     return bridge('balance', policy=p, query=q['query'], secret=q['secret'], replies=replies)
 
 
-def send(wallet, address, amount):
-    b = balance(wallet)
-    p = bridge('payment', policy=policy(), head=http(URL)['head'], secret=read(wallet)['secret'], recipient=address, amount=amount, nonce=b['nonce'])
-    return http(URL + '/send', p, timeout=120)
+def fee_estimate(action='Transfer'):
+    policy=http(URL+'/fees')
+    if not policy:return {'fee':0,'units':1,'economics_enabled':False}
+    units={'Transfer':1,'Register':4,'Bond':2,'Unbond':2,'Withdraw':1,'Exit':1}[action]
+    return {'fee':policy['base_fee']+policy['unit_fee']*units,'units':units,'economics_enabled':True}
+
+
+def send(wallet, address, amount, action='Transfer'):
+    b=balance(wallet)
+    name=action if isinstance(action,str) else next(iter(action))
+    estimate=fee_estimate(name)
+    finance={'fee_limit':estimate['fee'],'action':action} if estimate['economics_enabled'] else None
+    if finance is None and name!='Transfer':raise RuntimeError('staking requires an economics-enabled genesis')
+    p=bridge('payment',policy=policy(),head=http(URL)['head'],secret=wallet_secret(wallet),recipient=address,amount=amount,nonce=b['nonce'],finance=finance)
+    result=http(URL+'/send',p,timeout=120)
+    result['fee']=estimate['fee']
+    if name=='Unbond':result['withdrawal_ticket']=b['nonce']
+    return result
 
 
 def cleanup():
@@ -352,7 +399,7 @@ def recover():
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('command', choices=['start', 'stop', 'status', 'wallet', 'faucet', 'send', 'balance', 'history', 'supervise', 'executor', 'witness', 'validator', 'gateway', 'bootstrap'])
+    parser.add_argument('command', choices=['start', 'stop', 'status', 'wallet', 'faucet', 'send', 'balance', 'history', 'supervise', 'executor', 'witness', 'validator', 'gateway', 'bootstrap', 'fee', 'validator-key', 'register', 'stake', 'unstake', 'withdraw', 'exit'])
     parser.add_argument('args', nargs='*')
     a = parser.parse_args()
     DATA.mkdir(parents=True, exist_ok=True)
@@ -365,11 +412,10 @@ if __name__ == '__main__':
             sys.exit(0)
         except Exception:
             pass
-        subprocess.run([CARGO, 'build', '--release', '--manifest-path', str(ROOT / 'experiments/yamichain-tee-m20/Cargo.toml'), '--bin', 'devnet-bridge', '--bin', 'witness-node', '--bin', 'witnessed-worker'], check=True)
+        subprocess.run([CARGO, 'build', '--release', '--manifest-path', str(ROOT / 'experiments/yamichain-tee-m20/Cargo.toml'), '--bin', 'devnet-bridge', '--bin', 'witness-node', '--bin', 'witnessed-worker', '--bin', 'wallet-vault'], check=True)
         subprocess.run([CARGO, 'build', '--release', '-p', 'yami-validator', '--features', 'insecure-devnet-input'], cwd=ROOT, check=True)
         f = open(DATA / 'supervisor.log', 'a')
         p = subprocess.Popen(own('supervise'), stdout=f, stderr=f, start_new_session=True)
-        save(DATA / 'supervisor.pid', p.pid)
         print(json.dumps(wait(URL)))
     elif a.command == 'bootstrap':
         bootstrap()
@@ -378,6 +424,7 @@ if __name__ == '__main__':
         role = 'gateway'
         lock = open(DATA / 'supervisor.lock', 'w')
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        save(DATA/'supervisor.pid',os.getpid())
         bootstrap()
         signal.signal(signal.SIGTERM, shutdown)
         for i in range(4):
@@ -405,7 +452,17 @@ if __name__ == '__main__':
         else:
             proc = validator_start(index)
         signal.signal(signal.SIGTERM, shutdown)
-        HTTPServer(listen(EXECUTORS[index] if role == 'executor' else VALIDATORS[index]), Handler).serve_forever()
+        server=HTTPServer(listen(EXECUTORS[index] if role == 'executor' else VALIDATORS[index]), Handler)
+        server.timeout=1
+        delay=1;next_restart=0
+        while True:
+            server.handle_request()
+            if role=='validator' and proc.poll() is not None and time.monotonic()>=next_restart:
+                # Reopen the SAME durable journal, WAL and signing reservations.
+                # Storage/configuration refusal remains fail-closed; never recreate safety state.
+                next_restart=time.monotonic()+delay;delay=min(delay*2,60)
+                proc=validator_start(index)
+
     elif a.command == 'gateway':
         role = 'gateway'
         recover()
@@ -436,5 +493,20 @@ if __name__ == '__main__':
         print(json.dumps(send(a.args[0], a.args[1], int(a.args[2])), indent=2))
     elif a.command == 'faucet':
         print(json.dumps(send(DATA / 'treasury.wallet', read(a.args[0])['address'], int(a.args[1])), indent=2))
+    elif a.command == 'fee':
+        print(json.dumps(fee_estimate(a.args[0] if a.args else 'Transfer')))
+    elif a.command == 'validator-key':
+        path=pathlib.Path(a.args[0])
+        if path.exists():raise SystemExit('validator key exists')
+        key=bridge('validator-key');save(path,key);print(key['consensus'])
+    elif a.command == 'register':
+        w=read(a.args[0]);v=read(a.args[1]);b=balance(a.args[0])
+        action=bridge('registration',owner=w['address'],nonce=b['nonce'],validator=v,chain=policy()['committee']['chain'])
+        print(json.dumps(send(a.args[0],v['consensus'],0,action),indent=2))
+    elif a.command in ('stake','unstake','exit'):
+        name={'stake':'Bond','unstake':'Unbond','exit':'Exit'}[a.command]
+        print(json.dumps(send(a.args[0],a.args[1],int(a.args[2]) if len(a.args)>2 else 0,{name:{'validator':list(bytes.fromhex(a.args[1]))}}),indent=2))
+    elif a.command == 'withdraw':
+        print(json.dumps(send(a.args[0],read(a.args[0])['address'],0,{'Withdraw':{'ticket':int(a.args[1])}}),indent=2))
     elif a.command == 'history':
         print(json.dumps(http(URL + '/history/' + str(int(a.args[0])))))

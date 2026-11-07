@@ -472,3 +472,5 @@ impl State {
         Ok(())
     }
 }
+
+pub mod vault;

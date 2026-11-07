@@ -1,0 +1,52 @@
+#!/usr/bin/env python3
+"""Real encrypted native-chain economics flow; explicitly software-only and no live PoS activation."""
+import json,pathlib,subprocess,time,urllib.request
+ROOT=pathlib.Path(__file__).resolve().parents[1]
+CLI=ROOT/'scripts/yamichain-economic-devnet'
+BRIDGE=ROOT/'experiments/yamichain-tee-m20/target/release/devnet-bridge'
+def run(*args,success=True):
+ p=subprocess.run([str(CLI),*map(str,args)],capture_output=True,text=True)
+ if success and p.returncode:raise RuntimeError(p.stderr)
+ if not success:assert p.returncode!=0;return None
+ return p.stdout.strip()
+def bridge(**v):
+ p=subprocess.run([str(BRIDGE)],input=json.dumps(v),capture_output=True,text=True,check=True);return json.loads(p.stdout)
+def get(path='/status'):
+ with urllib.request.urlopen('http://127.0.0.1:29780'+path,timeout=10) as r:return json.load(r)
+run('start');start=get()['height']
+assert start==0,'run on the fresh dedicated economics devnet'
+a=ROOT/'work/econ-alice.wallet';b=ROOT/'work/econ-bob.wallet';vk=ROOT/'work/econ-validator.key'
+run('wallet',a);bob=run('wallet',b);validator=run('validator-key',vk)
+run('faucet',a,1000);payment=json.loads(run('send',a,bob,100));assert payment['finality']['action']=='PrivatePaymentCertificateV1'
+assert json.loads(run('balance',a))['balance']==898
+assert json.loads(run('balance',b))['balance']==100
+run('register',a,vk);run('stake',a,validator,200)
+view=json.loads(run('balance',a));assert view['portfolio']['bonded']==200
+unbond=json.loads(run('unstake',a,validator,100));ticket=unbond['withdrawal_ticket'];before=get()
+run('withdraw',a,ticket,success=False);assert get()['head']==before['head']
+for _ in range(5):run('faucet',b,1)
+run('withdraw',a,ticket);run('exit',a,validator)
+run('withdraw',a,ticket,success=False)
+alice=json.loads(run('balance',a));bob_balance=json.loads(run('balance',b))
+assert alice['balance']==783 and alice['portfolio']['bonded']==100 and alice['portfolio']['unbonding']==0
+assert bob_balance['balance']==105
+fee_schedule=[2,2,5,3,3,2,2,2,2,2,2,2]
+expected=[0]*4
+for height,fee in enumerate(fee_schedule,1):
+ for i in range(4):expected[i]+=fee//4
+ for j in range(fee%4):expected[(height-1+j)%4]+=1
+rewards=[]
+for i in range(4):
+ wallet=ROOT/f'work/econ-reward-{i}.wallet';value=bridge(op='development-validator-wallet',index=i)
+ fd=__import__('os').open(wallet,__import__('os').O_WRONLY|__import__('os').O_CREAT|__import__('os').O_EXCL,0o600)
+ with __import__('os').fdopen(fd,'w') as f:json.dump(value,f)
+ rewards.append(json.loads(run('balance',wallet))['balance'])
+assert rewards==expected and sum(rewards)==29
+for h in range(1,13):
+ certificate=get('/history/'+str(h))['certificate']
+ raw=json.dumps(certificate)
+ assert all(word not in raw for word in ('sender','recipient','amount','balance','portfolio'))
+final=get();run('stop');run('start');assert get()['head']==final['head']
+assert json.loads(run('balance',a))==alice
+assert json.loads(run('balance',b))==bob_balance
+print(json.dumps(dict(software_only=True,production_activation=False,live_pos_activation=False,endpoint='http://127.0.0.1:29780/status',private_payment=payment['finality'],alice_after_payment=898,bob_after_payment=100,alice_after_staking=alice,bob_after_maintenance=bob_balance,fee_revenue=29,validator_rewards=rewards,unbonding_and_double_withdrawal_rejected=True,restart_preserved=True,finality=get()['finality']),indent=2))

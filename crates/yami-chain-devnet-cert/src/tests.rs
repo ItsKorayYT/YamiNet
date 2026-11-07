@@ -130,3 +130,15 @@ fn hostile_certificate_fields_cannot_change_state() {
     foreign.committee.members[3].transport = [55; 32];
     assert!(Ledger::new(foreign).unwrap().apply(&bytes(&qc)).is_err());
 }
+
+#[test]
+fn alternate_certificate_serializations_cannot_poison_native_queue_identity() {
+    let (policy, qc) = fixture();
+    let mut ledger = Ledger::new(policy).unwrap();
+    let before = ledger.commitment();
+    assert!(ledger
+        .apply(&serde_json::to_vec_pretty(&qc).unwrap())
+        .is_err());
+    assert_eq!(before, ledger.commitment());
+    ledger.apply(&bytes(&qc)).unwrap();
+}
