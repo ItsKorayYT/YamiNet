@@ -41,6 +41,8 @@ pub struct Transfer {
     pub amount: u64,
     pub nonce: u64,
     pub chain: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub finance: Option<economics::Intent>,
 }
 #[derive(Clone, Serialize, Deserialize)]
 pub struct Signed {
@@ -130,42 +132,64 @@ pub struct State {
     pub chain: u64,
     pub epoch: u64,
     pub accounts: BTreeMap<Id, Account>,
+    pub economics: Option<economics::Economics>,
 }
 // JSON map keys cannot represent byte arrays: canonical ordered sequence wire format.
 #[derive(Serialize, Deserialize)]
-struct StateWire(u64, u64, Vec<(Id, Account)>);
+struct StateWire(
+    u64,
+    u64,
+    Vec<(Id, Account)>,
+    #[serde(default, skip_serializing_if = "Option::is_none")] Option<economics::Economics>,
+);
 fn encode(s: &State) -> Vec<u8> {
     bytes(&StateWire(
         s.chain,
         s.epoch,
         s.accounts.iter().map(|(k, v)| (*k, v.clone())).collect(),
+        s.economics.clone(),
     ))
 }
 fn decode(b: &[u8]) -> Result<State> {
-    let StateWire(chain, epoch, a) = serde_json::from_slice(b)?;
+    let StateWire(chain, epoch, a, economics) = serde_json::from_slice(b)?;
     let len = a.len();
     let accounts: BTreeMap<_, _> = a.into_iter().collect();
     check(accounts.len() == len)?;
+    if let Some(e) = &economics {
+        e.invariant(&accounts)?;
+    }
     Ok(State {
         chain,
         epoch,
         accounts,
+        economics,
     })
 }
 pub fn transition(old: &State, tx: &Signed) -> Result<State> {
     tx.verify()?;
     let t = &tx.transfer;
-    check(t.chain == old.chain && t.amount > 0 && t.sender != t.recipient)?;
+    check(t.chain == old.chain)?;
     let mut s = old.clone();
+    check(s.accounts.get(&t.sender).ok_or("unknown sender")?.nonce == t.nonce)?;
+    match s.economics.take() {
+        Some(mut e) => {
+            let intent = t.finance.as_ref().ok_or("fee authorization required")?;
+            e.apply(&mut s, t, intent)?;
+            s.economics = Some(e);
+        }
+        None => {
+            check(t.finance.is_none() && t.amount > 0 && t.sender != t.recipient)?;
+            let a = s.accounts.get_mut(&t.sender).ok_or("unknown sender")?;
+            a.balance = a
+                .balance
+                .checked_sub(t.amount)
+                .ok_or("insufficient funds")?;
+            let b = s.accounts.entry(t.recipient).or_default();
+            b.balance = b.balance.checked_add(t.amount).ok_or("balance overflow")?;
+        }
+    }
     let a = s.accounts.get_mut(&t.sender).ok_or("unknown sender")?;
-    check(a.nonce == t.nonce)?;
-    a.balance = a
-        .balance
-        .checked_sub(t.amount)
-        .ok_or("insufficient funds")?;
     a.nonce = a.nonce.checked_add(1).ok_or("nonce overflow")?;
-    let b = s.accounts.entry(t.recipient).or_default();
-    b.balance = b.balance.checked_add(t.amount).ok_or("balance overflow")?;
     s.epoch = s.epoch.checked_add(1).ok_or("epoch overflow")?;
     Ok(s)
 }
@@ -434,3 +458,17 @@ pub mod witness;
 
 #[cfg(feature = "tdx-guest-devnet")]
 pub mod tdx_guest;
+
+pub mod economics;
+
+impl State {
+    pub fn enable_economics(&mut self, policy: economics::Policy) -> Result<()> {
+        check(
+            self.epoch == 0
+                && self.economics.is_none()
+                && self.accounts.values().all(|a| a.nonce == 0),
+        )?;
+        self.economics = Some(economics::Economics::new(policy, &self.accounts)?);
+        Ok(())
+    }
+}

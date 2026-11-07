@@ -40,6 +40,8 @@ pub fn enrollment_data(id: &Identity, challenge: Id) -> [u8; 64] {
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Provision {
+    #[serde(default)]
+    pub economics: Option<crate::economics::Policy>,
     pub root: Id,
     pub allocations: Vec<(Id, u64)>,
     pub restored: Option<Seeds>,
@@ -285,11 +287,16 @@ impl Guest {
             for (id, balance) in provision.allocations {
                 check(accounts.insert(id, Account { balance, nonce: 0 }).is_none())?;
             }
-            let state = State {
+            let mut state = State {
+                economics: None,
+
                 chain: c.policy.committee.chain,
                 epoch: 0,
                 accounts,
             };
+            if let Some(policy) = provision.economics {
+                state.enable_economics(policy)?;
+            }
             check(state_head(&state, keys.root_secret) == c.policy.genesis)?;
             WitnessedReplica::create(path, client, keys, &state)?
         };
@@ -487,6 +494,7 @@ mod tests {
             observer: SigningKey::generate(&mut OsRng).verifying_key().to_bytes(),
         };
         let body = Provision {
+            economics: None,
             root: [6; 32],
             allocations: vec![([7; 32], 1000)],
             restored: None,

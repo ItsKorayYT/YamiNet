@@ -37,6 +37,7 @@ fn main() -> Result<()> {
                         return Err("attacker fixture disabled".into());
                     }
                     let mut response = BalanceReply {
+                        portfolio: None,
                         committee: c.committee.id(),
                         member: c.committee.members[c.index].signing,
                         account,

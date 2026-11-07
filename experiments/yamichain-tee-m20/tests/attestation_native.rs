@@ -68,6 +68,8 @@ fn setup() -> (WalletGate, SigningKey, Committee, Head) {
 fn transfer(w: &SigningKey) -> Signed {
     Signed::sign(
         Transfer {
+            finance: None,
+
             sender: w.verifying_key().to_bytes(),
             recipient: SigningKey::generate(&mut OsRng).verifying_key().to_bytes(),
             amount: 10,

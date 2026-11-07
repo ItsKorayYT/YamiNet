@@ -273,13 +273,19 @@ impl AnchoredFile {
     }
 }
 #[derive(Clone, Serialize, Deserialize)]
-struct LedgerWire(u64, u64, Vec<(Id, Account)>);
+struct LedgerWire(
+    u64,
+    u64,
+    Vec<(Id, Account)>,
+    #[serde(default, skip_serializing_if = "Option::is_none")] Option<crate::economics::Economics>,
+);
 impl LedgerWire {
     fn from_state(s: &State) -> Self {
         Self(
             s.chain,
             s.epoch,
             s.accounts.iter().map(|(k, v)| (*k, v.clone())).collect(),
+            s.economics.clone(),
         )
     }
     fn state(&self) -> Result<State> {
@@ -632,6 +638,10 @@ impl Replica {
             committee: self.committee.id(),
             member: self.committee.members[self.index].signing,
             account: state.accounts.get(&q.account).cloned().unwrap_or_default(),
+            portfolio: state
+                .economics
+                .as_ref()
+                .map(|e| e.portfolio(q.account, state.epoch)),
             query_hash: hash(&q.message()),
             signature: vec![],
         };
@@ -721,11 +731,23 @@ pub struct BalanceReply {
     pub committee: Id,
     pub member: Id,
     pub account: Account,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub portfolio: Option<crate::economics::Portfolio>,
     pub query_hash: Id,
     pub signature: Vec<u8>,
 }
 impl BalanceReply {
     pub fn message(&self) -> Vec<u8> {
+        if let Some(portfolio) = &self.portfolio {
+            return bytes(&(
+                "YAMI-private-portfolio-reply-v1",
+                self.committee,
+                self.member,
+                &self.account,
+                portfolio,
+                self.query_hash,
+            ));
+        }
         bytes(&(
             "YAMI-M21-balance-reply-v1",
             self.committee,
@@ -735,12 +757,27 @@ impl BalanceReply {
         ))
     }
 }
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct VerifiedAccount {
+    #[serde(flatten)]
+    pub account: Account,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub portfolio: Option<crate::economics::Portfolio>,
+}
 pub fn verify_balance(
     c: &Committee,
     q: &Query,
     secret: &StaticSecret,
     replies: &[Envelope],
 ) -> Result<Account> {
+    Ok(verify_portfolio(c, q, secret, replies)?.account)
+}
+pub fn verify_portfolio(
+    c: &Committee,
+    q: &Query,
+    secret: &StaticSecret,
+    replies: &[Envelope],
+) -> Result<VerifiedAccount> {
     c.validate()?;
     check(
         q.head.chain == c.chain
@@ -750,7 +787,7 @@ pub fn verify_balance(
     )?;
     verify(q.account, &q.message(), &q.signature)?;
     let mut seen = BTreeSet::new();
-    let mut groups: Vec<(Account, usize)> = Vec::new();
+    let mut groups: Vec<(VerifiedAccount, usize)> = Vec::new();
     for envelope in replies {
         // Invalid/offline/malicious replies count for nothing; never poison honest matching replies.
         let parsed = (|| -> Result<BalanceReply> {
@@ -766,10 +803,14 @@ pub fn verify_balance(
         })();
         if let Ok(r) = parsed {
             if seen.insert(r.member) {
-                if let Some(g) = groups.iter_mut().find(|g| g.0 == r.account) {
+                let verified = VerifiedAccount {
+                    account: r.account,
+                    portfolio: r.portfolio,
+                };
+                if let Some(g) = groups.iter_mut().find(|g| g.0 == verified) {
                     g.1 += 1;
                 } else {
-                    groups.push((r.account, 1));
+                    groups.push((verified, 1));
                 }
             }
         }

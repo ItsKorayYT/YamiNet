@@ -187,6 +187,8 @@ impl Lab {
             );
         }
         let genesis = State {
+            economics: None,
+
             chain: 23,
             epoch: 0,
             accounts,
@@ -219,6 +221,7 @@ impl Lab {
             let mut k = keys[i].clone();
             k.root_secret = root;
             let config = WorkerConfig {
+                economics: None,
                 snapshot: host.join(format!("executor-{i}.json")),
                 policy: policy.clone(),
                 index: i,
@@ -257,6 +260,8 @@ impl Lab {
     fn signed(&self, w: &SigningKey, recipient: &SigningKey, nonce: u64, amount: u64) -> Signed {
         Signed::sign(
             Transfer {
+                finance: None,
+
                 sender: w.verifying_key().to_bytes(),
                 recipient: recipient.verifying_key().to_bytes(),
                 amount,

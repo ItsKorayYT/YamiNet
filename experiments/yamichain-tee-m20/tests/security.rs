@@ -11,6 +11,8 @@ fn wallet() -> SigningKey {
 }
 fn state(a: &SigningKey) -> State {
     State {
+        economics: None,
+
         chain: 20,
         epoch: 0,
         accounts: BTreeMap::from([(
@@ -25,6 +27,8 @@ fn state(a: &SigningKey) -> State {
 fn tx(a: &SigningKey, b: &SigningKey, nonce: u64, amount: u64) -> Signed {
     Signed::sign(
         Transfer {
+            finance: None,
+
             sender: a.verifying_key().to_bytes(),
             recipient: b.verifying_key().to_bytes(),
             amount,
@@ -314,6 +318,8 @@ fn concurrent_independent_senders_credit_offline_recipient() {
     let e = Engine::create(
         &d.path().join("db"),
         State {
+            economics: None,
+
             chain: 20,
             epoch: 0,
             accounts,

@@ -718,6 +718,8 @@ mod tests {
         };
         let transfer = Signed::sign(
             Transfer {
+                finance: None,
+
                 sender: owner.verifying_key().to_bytes(),
                 recipient: recipient.verifying_key().to_bytes(),
                 amount: 1,
@@ -866,6 +868,8 @@ mod tests {
         for mode in 0..3 {
             let t = Signed::sign(
                 Transfer {
+                    finance: None,
+
                     sender: owner.verifying_key().to_bytes(),
                     recipient: wallet().verifying_key().to_bytes(),
                     amount: 1,

@@ -15,6 +15,49 @@ fn main() -> Result<()> {
             let t = StaticSecret::random_from_rng(OsRng);
             serde_json::json!({"secret":k.to_bytes(),"address":hex::encode(k.verifying_key().to_bytes()),"transport":t.to_bytes(),"transport_public":PublicKey::from(&t).to_bytes()})
         }
+        "validator-key" => {
+            let consensus = SigningKey::generate(&mut OsRng);
+            let transport = SigningKey::generate(&mut OsRng);
+            serde_json::json!({"consensus":hex::encode(consensus.verifying_key().to_bytes()),"transport":hex::encode(transport.verifying_key().to_bytes()),"consensus_secret":consensus.to_bytes(),"transport_secret":transport.to_bytes()})
+        }
+        "registration" => {
+            use ed25519_dalek::Signer;
+            let owner: Id = hex::decode(v["owner"].as_str().ok_or("owner")?)?
+                .try_into()
+                .map_err(|_| "owner")?;
+            let c = SigningKey::from_bytes(&serde_json::from_value(
+                v["validator"]["consensus_secret"].clone(),
+            )?);
+            let t = SigningKey::from_bytes(&serde_json::from_value(
+                v["validator"]["transport_secret"].clone(),
+            )?);
+            let msg = economics::registration_message(
+                v["chain"].as_u64().unwrap_or(24),
+                owner,
+                v["nonce"].as_u64().ok_or("nonce")?,
+                c.verifying_key().to_bytes(),
+                t.verifying_key().to_bytes(),
+            );
+            serde_json::to_value(economics::Action::Register {
+                consensus: c.verifying_key().to_bytes(),
+                transport: t.verifying_key().to_bytes(),
+                consensus_proof: c.sign(&msg).to_bytes().to_vec(),
+                transport_proof: t.sign(&msg).to_bytes().to_vec(),
+            })?
+        }
+        "development-validator-wallet" => {
+            let i = u8::try_from(v["index"].as_u64().ok_or("index")?)?;
+            if i >= 4 {
+                return Err("fixture index".into());
+            }
+            let k = yami_chain::development_key("consensus", i);
+            serde_json::json!({"secret":k.to_bytes(),"address":hex::encode(k.verifying_key().to_bytes()),"insecure_public_fixture":true})
+        }
+        "reward-addresses" => serde_json::json!((0..4)
+            .map(|i| yami_chain::development_key("consensus", i)
+                .verifying_key()
+                .to_bytes())
+            .collect::<Vec<_>>()),
         "init" => {
             let c: WorkerConfig = serde_json::from_value(v["config"].clone())?;
             let allocations: Vec<(Id, u64)> = serde_json::from_value(v["allocations"].clone())?;
@@ -22,11 +65,16 @@ fn main() -> Result<()> {
                 .into_iter()
                 .map(|(id, balance)| (id, Account { balance, nonce: 0 }))
                 .collect();
-            let s = State {
-                chain: 24,
+            let mut s = State {
+                economics: None,
+
+                chain: c.policy.committee.chain,
                 epoch: 0,
                 accounts,
             };
+            if let Some(policy) = c.economics.clone() {
+                s.enable_economics(policy)?;
+            }
             drop(WitnessedReplica::create(
                 &c.snapshot,
                 c.client()?,
@@ -42,14 +90,18 @@ fn main() -> Result<()> {
                 .into_iter()
                 .map(|(id, balance)| (id, Account { balance, nonce: 0 }))
                 .collect();
-            serde_json::to_value(state_head(
-                &State {
-                    chain: 24,
-                    epoch: 0,
-                    accounts,
-                },
-                root,
-            ))?
+            let mut state = State {
+                chain: v["chain"].as_u64().unwrap_or(24),
+                epoch: 0,
+                accounts,
+                economics: None,
+            };
+            if let Some(policy) =
+                serde_json::from_value::<Option<economics::Policy>>(v["economics"].clone())?
+            {
+                state.enable_economics(policy)?;
+            }
+            serde_json::to_value(state_head(&state, root))?
         }
         "payment" => {
             let p: WitnessPolicy = serde_json::from_value(v["policy"].clone())?;
@@ -61,11 +113,13 @@ fn main() -> Result<()> {
             let key = SigningKey::from_bytes(&sk);
             let tx = Signed::sign(
                 Transfer {
+                    finance: serde_json::from_value(v["finance"].clone())?,
+
                     sender: key.verifying_key().to_bytes(),
                     recipient,
                     amount: v["amount"].as_u64().ok_or("amount")?,
                     nonce: v["nonce"].as_u64().ok_or("nonce")?,
-                    chain: 24,
+                    chain: p.committee.chain,
                 },
                 &key,
             );
@@ -111,7 +165,7 @@ fn main() -> Result<()> {
             let q: Query = serde_json::from_value(v["query"].clone())?;
             let secret: Id = serde_json::from_value(v["secret"].clone())?;
             let replies: Vec<Envelope> = serde_json::from_value(v["replies"].clone())?;
-            serde_json::to_value(verify_balance(
+            serde_json::to_value(verify_portfolio(
                 &p.committee,
                 &q,
                 &StaticSecret::from(secret),

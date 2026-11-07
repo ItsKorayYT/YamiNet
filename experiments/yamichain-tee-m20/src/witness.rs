@@ -935,6 +935,8 @@ pub struct WorkerConfig {
     pub root_secret: Id,
     pub software_protocol_only: bool,
     #[serde(default)]
+    pub economics: Option<crate::economics::Policy>,
+    #[serde(default)]
     pub fault_injection: bool,
 }
 impl WorkerConfig {

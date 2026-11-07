@@ -26,6 +26,8 @@ fn wallet() -> SigningKey {
 fn signed(a: &SigningKey, b: &SigningKey, nonce: u64, amount: u64) -> Signed {
     Signed::sign(
         Transfer {
+            finance: None,
+
             sender: a.verifying_key().to_bytes(),
             recipient: b.verifying_key().to_bytes(),
             amount,
@@ -136,6 +138,8 @@ impl Lab {
             );
         }
         let genesis = State {
+            economics: None,
+
             chain: 21,
             epoch: 0,
             accounts,

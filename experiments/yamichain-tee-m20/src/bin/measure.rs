@@ -28,6 +28,8 @@ fn main() -> Result<()> {
     let mut e = Engine::create(
         &path,
         State {
+            economics: None,
+
             chain: 20,
             epoch: 0,
             accounts,
@@ -40,6 +42,8 @@ fn main() -> Result<()> {
     for nonce in 0..1000 {
         let t = Signed::sign(
             Transfer {
+                finance: None,
+
                 sender: a.verifying_key().to_bytes(),
                 recipient: b.verifying_key().to_bytes(),
                 amount: 1,
