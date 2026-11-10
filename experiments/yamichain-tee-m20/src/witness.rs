@@ -7,6 +7,7 @@ use std::{
     time::Duration,
 };
 const MAX_FRAME: usize = 32 * 1024 * 1024;
+pub const HISTORY_PAGE_SIZE: usize = 32;
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct WitnessPolicy {
     pub committee: Committee,
@@ -171,6 +172,38 @@ pub struct Record {
     pub snapshot: Vec<u8>,
     #[serde(default)]
     pub history: Vec<WitnessedCertificate>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub recovery: Option<RecoveryProgress>,
+}
+/// Durable verification progress, never an installed ledger or signing authority.
+#[derive(Clone, Serialize, Deserialize)]
+pub struct RecoveryProgress {
+    pub base: Head,
+    pub target: Head,
+    pub certificate: WitnessedCertificate,
+}
+#[derive(Clone, Serialize, Deserialize)]
+pub struct HistoryPage {
+    pub after: Head,
+    pub through: Head,
+    pub certificates: Vec<WitnessedCertificate>,
+}
+impl HistoryPage {
+    pub fn validate(&self, policy: &WitnessPolicy) -> Result<()> {
+        check(
+            self.after.chain == policy.committee.chain
+                && self.through.chain == self.after.chain
+                && self.after.epoch < self.through.epoch
+                && !self.certificates.is_empty()
+                && self.certificates.len() <= HISTORY_PAGE_SIZE,
+        )?;
+        let mut head = self.after.clone();
+        for qc in &self.certificates {
+            qc.verify(policy, &head)?;
+            head = qc.certificate.statement.next.clone();
+        }
+        check(head.epoch < self.through.epoch || head == self.through)
+    }
 }
 impl Record {
     pub fn validate(&self, p: &WitnessPolicy, index: usize) -> Result<()> {
@@ -208,6 +241,17 @@ impl Record {
         if let Some(head) = previous {
             check(head == self.head)?;
         }
+        if let Some(progress) = &self.recovery {
+            let qc = &progress.certificate;
+            qc.verify(p, &qc.certificate.statement.previous)?;
+            let tip = &qc.certificate.statement.next;
+            check(
+                progress.base == self.head
+                    && progress.target.chain == self.head.chain
+                    && tip.epoch > self.head.epoch
+                    && (tip.epoch < progress.target.epoch || *tip == progress.target),
+            )?;
+        }
         Ok(())
     }
 }
@@ -216,6 +260,18 @@ pub enum Operation {
     Get,
     History {
         after: u64,
+    },
+    HistoryPage {
+        after: Head,
+        through: Head,
+    },
+    StageHistory {
+        target: Head,
+        certificates: Vec<WitnessedCertificate>,
+    },
+    InstallStaged {
+        certificate: WitnessedCertificate,
+        snapshot: Vec<u8>,
     },
     CatchUp {
         certificates: Vec<WitnessedCertificate>,
@@ -280,6 +336,7 @@ impl Request {
 #[derive(Clone, Serialize, Deserialize)]
 pub enum Outcome {
     Record(Box<Record>),
+    HistoryPage(Box<HistoryPage>),
     Rejected(String),
 }
 #[derive(Clone, Serialize, Deserialize)]
@@ -307,6 +364,29 @@ impl Response {
                 Ok((**r).clone())
             }
             Outcome::Rejected(reason) => Err(format!("witness refused: {reason}").into()),
+            Outcome::HistoryPage(_) => Err("unexpected history page".into()),
+        }
+    }
+    fn verify_page(
+        &self,
+        p: &WitnessPolicy,
+        index: usize,
+        request: &Request,
+    ) -> Result<HistoryPage> {
+        p.validate()?;
+        check(index < 4 && self.request_hash == hash(&bytes(request)))?;
+        verify(p.authorities[index], &self.message(), &self.signature)?;
+        let Operation::HistoryPage { after, through } = &request.operation else {
+            return Err("history page request required".into());
+        };
+        match &self.outcome {
+            Outcome::HistoryPage(page) => {
+                check(page.after == *after && page.through == *through)?;
+                page.validate(p)?;
+                Ok((**page).clone())
+            }
+            Outcome::Rejected(reason) => Err(format!("witness refused: {reason}").into()),
+            _ => Err("unexpected history response".into()),
         }
     }
 }
@@ -368,6 +448,17 @@ impl Client {
     pub fn get(&self) -> Result<Record> {
         self.call(0, Operation::Get)
     }
+    pub fn history_page(&self, after: &Head, through: &Head) -> Result<HistoryPage> {
+        let request = self.request(
+            0,
+            Operation::HistoryPage {
+                after: after.clone(),
+                through: through.clone(),
+            },
+        )?;
+        self.exchange(&request)?
+            .verify_page(&self.policy, self.index, &request)
+    }
 }
 #[derive(Clone, Serialize, Deserialize)]
 pub struct ServiceConfig {
@@ -401,7 +492,7 @@ impl Service {
             .open(config.database.with_extension("lock"))?;
         fs2::FileExt::try_lock_exclusive(&lock)?;
         let connection = Connection::open(&config.database)?;
-        connection.execute_batch("PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; CREATE TABLE IF NOT EXISTS metadata(id INTEGER PRIMARY KEY, policy BLOB NOT NULL, member BLOB NOT NULL); CREATE TABLE IF NOT EXISTS state(id INTEGER PRIMARY KEY, payload BLOB NOT NULL); CREATE TABLE IF NOT EXISTS nonces(nonce BLOB PRIMARY KEY); CREATE TABLE IF NOT EXISTS votes(sequence INTEGER PRIMARY KEY, statement BLOB NOT NULL, confirmation BLOB NOT NULL); CREATE TABLE IF NOT EXISTS certificates(sequence INTEGER PRIMARY KEY, certificate BLOB NOT NULL);")?;
+        connection.execute_batch("PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; CREATE TABLE IF NOT EXISTS metadata(id INTEGER PRIMARY KEY, policy BLOB NOT NULL, member BLOB NOT NULL); CREATE TABLE IF NOT EXISTS state(id INTEGER PRIMARY KEY, payload BLOB NOT NULL); CREATE TABLE IF NOT EXISTS nonces(nonce BLOB PRIMARY KEY); CREATE TABLE IF NOT EXISTS votes(sequence INTEGER PRIMARY KEY, statement BLOB NOT NULL, confirmation BLOB NOT NULL); CREATE TABLE IF NOT EXISTS certificates(sequence INTEGER PRIMARY KEY, certificate BLOB NOT NULL); CREATE TABLE IF NOT EXISTS recovery_progress(id INTEGER PRIMARY KEY, revision INTEGER NOT NULL, progress BLOB NOT NULL);")?;
         let member = config.policy.member(config.index)?;
         let policy = config.policy.id();
         connection.execute(
@@ -421,7 +512,7 @@ impl Service {
             _lock: lock,
         })
     }
-    fn apply(&mut self, request: &Request) -> Result<Record> {
+    fn apply(&mut self, request: &Request) -> Result<Outcome> {
         let policy = &self.config.policy;
         let index = self.config.index;
         let member = policy.member(index)?;
@@ -431,7 +522,7 @@ impl Service {
         verify(request.actor, &request.message(), &request.signature)?;
         let read_only = matches!(
             request.operation,
-            Operation::Get | Operation::History { .. }
+            Operation::Get | Operation::History { .. } | Operation::HistoryPage { .. }
         );
         check(request.actor == member || (read_only && request.actor == policy.observer))?;
         let tx = self
@@ -447,16 +538,70 @@ impl Service {
             .query_row("SELECT payload FROM state WHERE id=1", [], |r| r.get(0))
             .optional()?;
         let mut current: Option<Record> = old.map(|b| serde_json::from_slice(&b)).transpose()?;
+        let staged: Option<(i64, Vec<u8>)> = tx
+            .query_row(
+                "SELECT revision,progress FROM recovery_progress WHERE id=1",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .optional()?;
+        if let Some((revision, progress)) = staged {
+            let r = current.as_mut().ok_or("orphaned recovery progress")?;
+            let revision = u64::try_from(revision)?;
+            check(revision > r.revision && r.recovery.is_none())?;
+            r.revision = revision;
+            r.recovery = Some(serde_json::from_slice(&progress)?);
+        }
         if let Some(r) = &current {
             r.validate(policy, index)?;
         }
+        if let Operation::HistoryPage { after, through } = &request.operation {
+            let r = current.ok_or("witness not initialized")?;
+            check(through.epoch <= r.head.epoch)?;
+            let terminal: Vec<u8> = tx.query_row(
+                "SELECT certificate FROM certificates WHERE sequence=?1",
+                params![i64::try_from(through.epoch)?],
+                |r| r.get(0),
+            )?;
+            let terminal: WitnessedCertificate = serde_json::from_slice(&terminal)?;
+            check(terminal.certificate.statement.next == *through)?;
+            let mut page = HistoryPage {
+                after: after.clone(),
+                through: through.clone(),
+                certificates: vec![],
+            };
+            {
+                let mut statement = tx.prepare("SELECT certificate FROM certificates WHERE sequence>?1 AND sequence<=?2 ORDER BY sequence LIMIT ?3")?;
+                let rows = statement.query_map(
+                    params![
+                        i64::try_from(after.epoch)?,
+                        i64::try_from(through.epoch)?,
+                        HISTORY_PAGE_SIZE as u64
+                    ],
+                    |r| r.get::<_, Vec<u8>>(0),
+                )?;
+                for row in rows {
+                    page.certificates.push(serde_json::from_slice(&row?)?);
+                }
+            }
+            page.validate(policy)?;
+            tx.execute(
+                "INSERT INTO nonces VALUES(?1)",
+                params![request.nonce.as_slice()],
+            )?;
+            tx.commit()?;
+            return Ok(Outcome::HistoryPage(Box::new(page)));
+        }
         let record = match &request.operation {
+            Operation::HistoryPage { .. } => unreachable!("handled above"),
             Operation::Get => current.ok_or("witness not initialized")?,
             Operation::History { after } => {
                 let mut record = current.ok_or("witness not initialized")?;
-                let mut statement=tx.prepare("SELECT certificate FROM certificates WHERE sequence>?1 ORDER BY sequence LIMIT 257")?;
-                let rows = statement
-                    .query_map(params![i64::try_from(*after)?], |r| r.get::<_, Vec<u8>>(0))?;
+                let mut statement=tx.prepare("SELECT certificate FROM certificates WHERE sequence>?1 AND sequence<=?2 ORDER BY sequence LIMIT 257")?;
+                let rows = statement.query_map(
+                    params![i64::try_from(*after)?, i64::try_from(record.head.epoch)?],
+                    |r| r.get::<_, Vec<u8>>(0),
+                )?;
                 for row in rows {
                     record.history.push(serde_json::from_slice(&row?)?);
                 }
@@ -469,6 +614,7 @@ impl Service {
                 let mut r = current.take().ok_or("witness not initialized")?;
                 check(
                     request.expected_revision == r.revision
+                        && r.recovery.is_none()
                         && !certificates.is_empty()
                         && certificates.len() <= 256,
                 )?;
@@ -497,6 +643,7 @@ impl Service {
                     certificate: None,
                     snapshot: snapshot.clone(),
                     history: vec![],
+                    recovery: None,
                 }
             }
             Operation::Prepare {
@@ -504,7 +651,7 @@ impl Service {
                 snapshot,
             } => {
                 let mut r = current.take().ok_or("witness not initialized")?;
-                check(request.expected_revision == r.revision)?;
+                check(request.expected_revision == r.revision && r.recovery.is_none())?;
                 statement.validate(&policy.committee, &r.head)?;
                 if let Some(locked) = &r.pending {
                     check(
@@ -551,7 +698,7 @@ impl Service {
                 snapshot,
             } => {
                 let mut r = current.take().ok_or("witness not initialized")?;
-                check(request.expected_revision == r.revision)?;
+                check(request.expected_revision == r.revision && r.recovery.is_none())?;
                 if r.certificate.as_ref().is_some_and(|old| {
                     old.certificate.statement == certificate.certificate.statement
                 }) {
@@ -572,13 +719,104 @@ impl Service {
                     r
                 }
             }
+            Operation::StageHistory {
+                target,
+                certificates,
+            } => {
+                let mut r = current.take().ok_or("witness not initialized")?;
+                check(
+                    request.expected_revision == r.revision
+                        && target.chain == r.head.chain
+                        && target.epoch > r.head.epoch
+                        && !certificates.is_empty()
+                        && certificates.len() <= HISTORY_PAGE_SIZE,
+                )?;
+                let mut cursor = r.head.clone();
+                if let Some(progress) = &r.recovery {
+                    check(target.epoch > progress.target.epoch || *target == progress.target)?;
+                    cursor = progress.certificate.certificate.statement.next.clone();
+                }
+                let mut previous = certificates[0].certificate.statement.previous.clone();
+                check(previous.epoch >= r.head.epoch && previous.epoch <= cursor.epoch)?;
+                for qc in certificates {
+                    qc.verify(policy, &previous)?;
+                    let next = &qc.certificate.statement.next;
+                    check(next.epoch < target.epoch || *next == *target)?;
+                    if next.epoch <= cursor.epoch {
+                        let stored: Vec<u8> = tx.query_row(
+                            "SELECT certificate FROM certificates WHERE sequence=?1",
+                            params![i64::try_from(next.epoch)?],
+                            |r| r.get(0),
+                        )?;
+                        let stored: WitnessedCertificate = serde_json::from_slice(&stored)?;
+                        check(stored.certificate.statement == qc.certificate.statement)?;
+                    } else {
+                        qc.verify(policy, &cursor)?;
+                        tx.execute(
+                            "INSERT INTO certificates VALUES(?1,?2)",
+                            params![i64::try_from(next.epoch)?, bytes(qc)],
+                        )?;
+                        cursor = next.clone();
+                    }
+                    previous = next.clone();
+                }
+                let stored: Vec<u8> = tx.query_row(
+                    "SELECT certificate FROM certificates WHERE sequence=?1",
+                    params![i64::try_from(cursor.epoch)?],
+                    |r| r.get(0),
+                )?;
+                r.recovery = Some(RecoveryProgress {
+                    base: r.head.clone(),
+                    target: target.clone(),
+                    certificate: serde_json::from_slice(&stored)?,
+                });
+                r.revision = r.revision.checked_add(1).ok_or("revision exhausted")?;
+                r
+            }
+            Operation::InstallStaged {
+                certificate,
+                snapshot,
+            } => {
+                let mut r = current.take().ok_or("witness not initialized")?;
+                check(request.expected_revision == r.revision)?;
+                let progress = r.recovery.take().ok_or("no staged history")?;
+                certificate.verify(policy, &certificate.certificate.statement.previous)?;
+                check(
+                    progress.base == r.head
+                        && progress.target == certificate.certificate.statement.next
+                        && progress.certificate.certificate.statement
+                            == certificate.certificate.statement,
+                )?;
+                tx.execute("DELETE FROM recovery_progress", [])?;
+                r.head = progress.target;
+                r.certificate = Some(certificate.clone());
+                r.pending = None;
+                r.snapshot = snapshot.clone();
+                r.revision = r.revision.checked_add(1).ok_or("revision exhausted")?;
+                r
+            }
         };
         record.validate(policy, index)?;
         tx.execute(
             "INSERT INTO nonces VALUES(?1)",
             params![request.nonce.as_slice()],
         )?;
-        if !read_only {
+        if matches!(request.operation, Operation::StageHistory { .. }) {
+            // Each page appends only new certificates and this small cursor.
+            // Do not rewrite the encrypted full-state snapshot on every page.
+            tx.execute(
+                "INSERT OR REPLACE INTO recovery_progress VALUES(1,?1,?2)",
+                params![
+                    i64::try_from(record.revision)?,
+                    bytes(
+                        record
+                            .recovery
+                            .as_ref()
+                            .ok_or("missing recovery progress")?
+                    )
+                ],
+            )?;
+        } else if !read_only {
             tx.execute(
                 "INSERT OR REPLACE INTO state VALUES(1,?1)",
                 params![bytes(&record)],
@@ -586,12 +824,12 @@ impl Service {
         }
         // SQLite WAL synchronous=FULL: durable state, nonce and sign-once record precede ANY reply.
         tx.commit()?;
-        Ok(record)
+        Ok(Outcome::Record(Box::new(record)))
     }
     pub fn handle(&mut self, request: &Request) -> Response {
         let result = self.apply(request);
         let outcome = match result {
-            Ok(r) => Outcome::Record(Box::new(r)),
+            Ok(outcome) => outcome,
             Err(e) => Outcome::Rejected(e.to_string()),
         };
         let mut response = Response {
@@ -732,6 +970,7 @@ impl WitnessedReplica {
         mut hook: impl FnMut(&str) -> Result<()>,
     ) -> Result<WitnessedApproval> {
         self.live()?;
+        check(self.record.recovery.is_none())?;
         self.poisoned = true;
         // The inner signature remains private to this wrapper; it is never released before witness ACK.
         let approval = match self.inner.prepare(p) {
@@ -766,6 +1005,7 @@ impl WitnessedReplica {
     }
     pub fn resume_vote(&mut self) -> Result<WitnessedApproval> {
         self.live()?;
+        check(self.record.recovery.is_none())?;
         let approval = self.inner.resume_pending()?;
         let confirmation = self.record.pending.clone().ok_or("no witnessed vote")?;
         let result = WitnessedApproval {
@@ -784,6 +1024,7 @@ impl WitnessedReplica {
         mut hook: impl FnMut(&str) -> Result<()>,
     ) -> Result<()> {
         self.live()?;
+        check(self.record.recovery.is_none())?;
         qc.verify(&self.client.policy, &qc.certificate.statement.previous)?;
         if self
             .record
@@ -831,6 +1072,59 @@ impl WitnessedReplica {
             history: self.client.call(0, Operation::History { after })?.history,
         })
     }
+    pub fn export_recovery_state(&self, index: usize) -> Result<RecoveryBundle> {
+        self.live()?;
+        Ok(RecoveryBundle {
+            encrypted: self.inner.export_recovery(index)?,
+            certificate: self
+                .record
+                .certificate
+                .clone()
+                .ok_or("no witnessed certificate")?,
+            history: vec![],
+        })
+    }
+    pub fn export_history_page(&self, after: &Head, through: &Head) -> Result<HistoryPage> {
+        self.live()?;
+        self.client.history_page(after, through)
+    }
+    pub fn sync_status(&self) -> Result<SyncStatus> {
+        self.live()?;
+        Ok(SyncStatus {
+            head: self.record.head.clone(),
+            recovery: self.record.recovery.clone(),
+        })
+    }
+    pub fn stage_history(&mut self, page: &HistoryPage) -> Result<()> {
+        self.live()?;
+        page.validate(&self.client.policy)?;
+        let cursor = self
+            .record
+            .recovery
+            .as_ref()
+            .map(|p| &p.certificate.certificate.statement.next)
+            .unwrap_or(&self.record.head);
+        // Retries may overlap an already staged prefix; the authority verifies
+        // every repeated statement against its durable row before acknowledging.
+        check(page.after.epoch <= cursor.epoch && page.after.epoch >= self.record.head.epoch)?;
+        if page.after.epoch == cursor.epoch {
+            check(page.after == *cursor)?;
+        }
+        if let Some(progress) = &self.record.recovery {
+            check(page.through.epoch > progress.target.epoch || page.through == progress.target)?;
+        }
+        self.poisoned = true;
+        self.record = self.client.call(
+            self.record.revision,
+            Operation::StageHistory {
+                target: page.through.clone(),
+                certificates: page.certificates.clone(),
+            },
+        )?;
+        self.consistent()?;
+        self.poisoned = false;
+        Ok(())
+    }
     pub fn recover(&mut self, bundle: &RecoveryBundle) -> Result<()> {
         self.live()?;
         bundle.certificate.verify(
@@ -840,6 +1134,41 @@ impl WitnessedReplica {
         if self.record.head == bundle.certificate.certificate.statement.next {
             return Ok(());
         }
+        if bundle.history.is_empty() {
+            let progress = self
+                .record
+                .recovery
+                .as_ref()
+                .ok_or("missing authenticated history")?;
+            check(
+                progress.base == self.record.head
+                    && progress.target == bundle.certificate.certificate.statement.next
+                    && progress.certificate.certificate.statement
+                        == bundle.certificate.certificate.statement,
+            )?;
+            self.poisoned = true;
+            if let Err(error) = self
+                .inner
+                .recover_witnessed_head(&bundle.encrypted, &bundle.certificate.certificate)
+            {
+                if self.consistent().is_ok() {
+                    self.poisoned = false;
+                }
+                return Err(error);
+            }
+            let snapshot = self.inner.checkpoint()?;
+            self.record = self.client.call(
+                self.record.revision,
+                Operation::InstallStaged {
+                    certificate: bundle.certificate.clone(),
+                    snapshot,
+                },
+            )?;
+            self.consistent()?;
+            self.poisoned = false;
+            return Ok(());
+        }
+        check(self.record.recovery.is_none())?;
         let chain: Vec<_> = bundle
             .history
             .iter()
@@ -890,6 +1219,11 @@ pub struct RecoveryBundle {
     pub encrypted: Envelope,
     pub certificate: WitnessedCertificate,
     pub history: Vec<WitnessedCertificate>,
+}
+#[derive(Clone, Serialize, Deserialize)]
+pub struct SyncStatus {
+    pub head: Head,
+    pub recovery: Option<RecoveryProgress>,
 }
 /// Recover finality without trusting a coordinator disk. ACK requires >=3 witness commits;
 /// any fresh read quorum intersects those durable records. Unacknowledged partial commits
@@ -981,12 +1315,19 @@ pub enum WorkerCommand {
     },
     Resume,
     Head,
+    SyncStatus,
     Query(Envelope),
     Export(usize),
     ExportSince {
         index: usize,
         after: u64,
     },
+    ExportState(usize),
+    ExportHistory {
+        after: Head,
+        through: Head,
+    },
+    StageHistory(Box<HistoryPage>),
     Recover(Box<RecoveryBundle>),
 }
 #[derive(Serialize, Deserialize)]
@@ -994,6 +1335,8 @@ pub enum WorkerReply {
     Approval(Box<WitnessedApproval>),
     Committed,
     Head(Head),
+    SyncStatus(Box<SyncStatus>),
+    HistoryPage(Box<HistoryPage>),
     Balance(Envelope),
     Recovery(Box<RecoveryBundle>),
     Rejected(String),

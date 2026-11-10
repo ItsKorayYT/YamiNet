@@ -455,6 +455,231 @@ fn concurrent_credits_and_coordinator_rollback_recover_from_external_authorities
     assert_eq!(recover_head(&lab.policy, &lab.observers).unwrap(), lab.head);
 }
 #[test]
+fn long_gap_recovery_pages_survive_restart_without_installing_partial_state() {
+    let mut lab = Lab::new();
+    let selected = [true, true, true, false];
+    for nonce in 0..273 {
+        let payment = lab.payment(nonce, 1, selected);
+        lab.pay(&payment, selected);
+    }
+    // The former all-at-once export refuses this gap. Keep that refusal bound.
+    assert!(matches!(
+        lab.workers[0].call(WorkerCommand::Export(3)),
+        WorkerReply::Rejected(_)
+    ));
+    let bundle = match lab.workers[0].call(WorkerCommand::ExportState(3)) {
+        WorkerReply::Recovery(bundle) => bundle,
+        _ => panic!("state export"),
+    };
+    let wrong_recipient = match lab.workers[0].call(WorkerCommand::ExportState(2)) {
+        WorkerReply::Recovery(bundle) => bundle,
+        _ => panic!("state export"),
+    };
+    assert!(bundle.history.is_empty());
+    // A final certificate alone cannot authorize installing a distant snapshot.
+    assert!(matches!(
+        lab.workers[3].call(WorkerCommand::Recover(bundle.clone())),
+        WorkerReply::Rejected(_)
+    ));
+    let target = bundle.certificate.certificate.statement.next.clone();
+    let first = match lab.workers[0].call(WorkerCommand::ExportHistory {
+        after: lab.policy.genesis.clone(),
+        through: target.clone(),
+    }) {
+        WorkerReply::HistoryPage(page) => page,
+        _ => panic!("page export"),
+    };
+    assert_eq!(first.certificates.len(), HISTORY_PAGE_SIZE);
+    let mut forged = first.clone();
+    forged.certificates[0].confirmations[0].signature[0] ^= 1;
+    assert!(matches!(
+        lab.workers[3].call(WorkerCommand::StageHistory(forged)),
+        WorkerReply::Rejected(_)
+    ));
+    let mut oversized = first.clone();
+    oversized.certificates.push(first.certificates[0].clone());
+    assert!(matches!(
+        lab.workers[3].call(WorkerCommand::StageHistory(oversized)),
+        WorkerReply::Rejected(_)
+    ));
+    let skipped = match lab.workers[0].call(WorkerCommand::ExportHistory {
+        after: first
+            .certificates
+            .last()
+            .unwrap()
+            .certificate
+            .statement
+            .next
+            .clone(),
+        through: target.clone(),
+    }) {
+        WorkerReply::HistoryPage(page) => page,
+        _ => panic!("page export"),
+    };
+    assert!(matches!(
+        lab.workers[3].call(WorkerCommand::StageHistory(skipped)),
+        WorkerReply::Rejected(_)
+    ));
+    for _ in 0..2 {
+        assert!(matches!(
+            lab.workers[3].call(WorkerCommand::StageHistory(first.clone())),
+            WorkerReply::Committed
+        ));
+    }
+    let installed = lab.policy.genesis.clone();
+    // Acknowledged pages survive both authority and executor restart. Neither
+    // the installed head nor its balance/snapshot advances before the final page.
+    lab.nodes[3].restart();
+    lab.workers[3].restart();
+    let status = match lab.workers[3].call(WorkerCommand::SyncStatus) {
+        WorkerReply::SyncStatus(status) => status,
+        _ => panic!("sync status"),
+    };
+    assert_eq!(status.head, installed);
+    let client = lab.configs[3].client().unwrap();
+    let record = client.get().unwrap();
+    // Even direct authenticated authority requests cannot use staged rows as an
+    // installed ledger, sign a vote or skip the remaining history verification.
+    assert!(client
+        .history_page(
+            &lab.policy.genesis,
+            &first
+                .certificates
+                .last()
+                .unwrap()
+                .certificate
+                .statement
+                .next
+        )
+        .is_err());
+    assert!(client
+        .call(0, Operation::History { after: 0 })
+        .unwrap()
+        .history
+        .is_empty());
+    for operation in [
+        Operation::Prepare {
+            statement: first.certificates[0].certificate.statement.clone(),
+            snapshot: record.snapshot.clone(),
+        },
+        Operation::Commit {
+            certificate: first.certificates[0].clone(),
+            snapshot: record.snapshot.clone(),
+        },
+        Operation::CatchUp {
+            certificates: first.certificates.clone(),
+            snapshot: record.snapshot.clone(),
+        },
+        Operation::InstallStaged {
+            certificate: bundle.certificate.clone(),
+            snapshot: record.snapshot.clone(),
+        },
+    ] {
+        assert!(client.call(record.revision, operation).is_err());
+    }
+    let mut cursor = status
+        .recovery
+        .unwrap()
+        .certificate
+        .certificate
+        .statement
+        .next;
+    assert_eq!(cursor.epoch, HISTORY_PAGE_SIZE as u64);
+    assert!(matches!(
+        lab.workers[3].call(WorkerCommand::Resume),
+        WorkerReply::Rejected(_)
+    ));
+    assert!(matches!(
+        lab.workers[3].call(WorkerCommand::Recover(bundle.clone())),
+        WorkerReply::Rejected(_)
+    ));
+    let payment = lab.payment(273, 1, [true; 4]);
+    assert!(matches!(
+        lab.workers[3].call(WorkerCommand::Prepare(Box::new(payment))),
+        WorkerReply::Rejected(_)
+    ));
+    // The source advances after the snapshot is pinned. Pages must still end at
+    // the original target, rather than mixing a moving tip with old ciphertext.
+    let payment = lab.payment(273, 1, selected);
+    lab.pay(&payment, selected);
+    let mut pages = 1;
+    while cursor != target {
+        let page = match lab.workers[0].call(WorkerCommand::ExportHistory {
+            after: cursor.clone(),
+            through: target.clone(),
+        }) {
+            WorkerReply::HistoryPage(page) => page,
+            _ => panic!("page export"),
+        };
+        page.validate(&lab.policy).unwrap();
+        cursor = page
+            .certificates
+            .last()
+            .unwrap()
+            .certificate
+            .statement
+            .next
+            .clone();
+        assert!(matches!(
+            lab.workers[3].call(WorkerCommand::StageHistory(page)),
+            WorkerReply::Committed
+        ));
+        assert!(
+            matches!(lab.workers[3].call(WorkerCommand::Head), WorkerReply::Head(head) if head == installed)
+        );
+        pages += 1;
+    }
+    assert_eq!(pages, 9);
+    let mut corrupted = bundle.clone();
+    corrupted.encrypted.ciphertext[0] ^= 1;
+    assert!(matches!(
+        lab.workers[3].call(WorkerCommand::Recover(corrupted)),
+        WorkerReply::Rejected(_)
+    ));
+    assert!(matches!(
+        lab.workers[3].call(WorkerCommand::Recover(wrong_recipient)),
+        WorkerReply::Rejected(_)
+    ));
+    assert!(matches!(
+        lab.workers[2].call(WorkerCommand::Recover(bundle.clone())),
+        WorkerReply::Rejected(_)
+    ));
+    assert!(matches!(
+        lab.workers[3].call(WorkerCommand::Recover(bundle.clone())),
+        WorkerReply::Committed
+    ));
+    assert!(matches!(
+        lab.workers[3].call(WorkerCommand::Recover(bundle)),
+        WorkerReply::Committed
+    ));
+    lab.nodes[3].restart();
+    lab.workers[3].restart();
+    assert!(
+        matches!(lab.workers[3].call(WorkerCommand::SyncStatus), WorkerReply::SyncStatus(status) if status.head == target && status.recovery.is_none())
+    );
+    // Successfully installed history is available to other recipients too.
+    let page = lab.configs[3]
+        .client()
+        .unwrap()
+        .history_page(&lab.policy.genesis, &target)
+        .unwrap();
+    assert_eq!(page.certificates.len(), HISTORY_PAGE_SIZE);
+    let next = match lab.workers[0].call(WorkerCommand::ExportSince {
+        index: 3,
+        after: target.epoch,
+    }) {
+        WorkerReply::Recovery(bundle) => bundle,
+        _ => panic!("successor export"),
+    };
+    assert!(matches!(
+        lab.workers[3].call(WorkerCommand::Recover(next)),
+        WorkerReply::Committed
+    ));
+    let bob = lab.bob.clone();
+    assert_eq!(lab.balance(&bob, [true; 4]).balance, 274);
+}
+
+#[test]
 fn restoring_both_local_snapshot_and_anchor_cannot_erase_the_remote_vote_lock() {
     let mut lab = Lab::new();
     let c = lab.configs[0].clone();

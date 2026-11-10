@@ -18,7 +18,10 @@ response bound. A stuck worker is terminated and reopened through the existing
 authenticated witness recovery path. Financial operations remain serialized.
 A background recovery pass retries the original pending certificate and catches
 up reachable lagging executors using existing authenticated recovery bundles.
-It does not install snapshots or take authority from process-health metadata.
+Process-health metadata grants no signing or recovery authority.
+Executor catch-up uses [resumable authenticated pages](recovery-pages.md), allowing
+gaps beyond 256 transitions while retaining the complete certified prefix and
+the original snapshot until verification reaches its target.
 
 Authenticated gateway GET `/services` reports wrapper PIDs, liveness and restart
 counts. GET `/recovery` reports the last recovery-pass time and whether at least

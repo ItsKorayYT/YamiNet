@@ -18,13 +18,17 @@ Implemented next:
   worker pipes, periodic authenticated executor recovery and monitoring.
 - A unified reproducible TLS software demonstration using the existing PoS and
   encrypted-wallet implementations, plus measured idle resource observations.
+- Resumable private-executor history synchronization beyond the former
+  256-transition gap: bounded authenticated pages, durable incremental witness
+  progress, full-prefix verification before state installation and live TLS PoS
+  interruption/restart validation. See [recovery contracts](recovery-pages.md).
 
 Still requiring software implementation/validation (not claimed complete):
 
 1. Public permissionless peer discovery and admission integrated with the live
    PoS identity directory; transaction propagation and independent multi-machine
    fault/partition campaigns. Current demos use configured private bootstrap peers.
-2. Financial-state incremental persistence, authenticated large-history checkpoint
+2. Ordinary financial-state incremental persistence, authenticated large-history checkpoint
    bootstrap/pruning and bounded long-term disk growth. M16 activation gates stay
    closed; the current native financial profile retains full certified history.
 3. Attestation-bound executor provisioning, confidential transfer, revocation,

@@ -51,6 +51,19 @@ fn main() -> Result<()> {
                 }
                 WorkerCommand::Resume => WorkerReply::Approval(Box::new(replica.resume_vote()?)),
                 WorkerCommand::Head => WorkerReply::Head(replica.head()?),
+                WorkerCommand::SyncStatus => {
+                    WorkerReply::SyncStatus(Box::new(replica.sync_status()?))
+                }
+                WorkerCommand::ExportState(index) => {
+                    WorkerReply::Recovery(Box::new(replica.export_recovery_state(index)?))
+                }
+                WorkerCommand::ExportHistory { after, through } => WorkerReply::HistoryPage(
+                    Box::new(replica.export_history_page(&after, &through)?),
+                ),
+                WorkerCommand::StageHistory(page) => {
+                    replica.stage_history(&page)?;
+                    WorkerReply::Committed
+                }
                 WorkerCommand::Query(q) => WorkerReply::Balance(replica.query(&q)?),
                 WorkerCommand::ExportSince { index, after } => {
                     WorkerReply::Recovery(Box::new(replica.export_recovery_since(index, after)?))

@@ -251,7 +251,11 @@ class Handler(RpcHandler):
                     result = {'validator': index, 'consensus_pid': proc.pid, 'insecure': True}
             elif role == 'executor':
                 result = exchange(proc, 'Head' if value is None else value)
-                if value is None and (not isinstance(result, dict) or 'Head' not in result):
+                health_key='SyncStatus' if value=='SyncStatus' else 'Head'
+                if (value is None or value=='Head' or value=='SyncStatus') and (not isinstance(result, dict) or health_key not in result):
+                    # Includes an uncertain mutation/ACK: reopen from the same
+                    # live authority instead of leaving a poisoned worker stuck.
+                    proc.terminate()
                     raise RuntimeError('executor/witness not ready')
             elif self.path == '/committee' and value is None:
                 result=bridge('live-committee',policy=read(DATA/'policy.json'),records=history_records(read(DATA/'state.json')['height']))
@@ -392,10 +396,31 @@ def recover():
     for i, h in enumerate(heads):
         if h is not None and h != state['head']:
             source = next(j for j, v in enumerate(heads) if v == state['head'])
-            bundle = worker(source, {'ExportSince': {'index': i, 'after': h['epoch']}})['Recovery']
-            if worker(i, {'Recover': bundle}) != 'Committed':
-                raise RuntimeError('executor recovery failed')
-            heads[i]=state['head']
+            progress=worker(i,'SyncStatus')['SyncStatus']['recovery']
+            path=DATA/f'executor-recovery-{i}.json'
+            bundle=read(path) if path.exists() else None
+            if bundle is None or (progress and bundle['certificate']['certificate']['statement']['next']['epoch']<progress['target']['epoch']):
+                # Ciphertext only, recipient-bound. This file grants no authority:
+                # the recipient's witness must verify the entire missing prefix.
+                bundle=worker(source,{'ExportState':i})['Recovery']
+                save(path,bundle)
+            target=bundle['certificate']['certificate']['statement']['next']
+            cursor=progress['certificate']['certificate']['statement']['next'] if progress else h
+            # Bound each supervision pass; the authority retains acknowledged
+            # progress across wrapper/witness/coordinator restarts. No partial
+            # prefix ever becomes the installed ledger or signs a new vote.
+            for _ in range(2):
+                if cursor==target:break
+                page=worker(source,{'ExportHistory':{'after':cursor,'through':target}})['HistoryPage']
+                if worker(i,{'StageHistory':page})!='Committed':
+                    raise RuntimeError('executor history staging failed')
+                progress=worker(i,'SyncStatus')['SyncStatus']['recovery']
+                cursor=progress['certificate']['certificate']['statement']['next']
+            if cursor==target:
+                if worker(i, {'Recover': bundle}) != 'Committed':
+                    raise RuntimeError('executor recovery failed')
+                heads[i]=worker(i,'Head')['Head']
+                path.unlink(missing_ok=True)
     return sum(h==state['head'] for h in heads)
 
 

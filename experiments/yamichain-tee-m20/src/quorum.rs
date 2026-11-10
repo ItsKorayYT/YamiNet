@@ -616,20 +616,35 @@ impl Replica {
         chain: &[Certificate],
     ) -> Result<()> {
         check(!self.file.poisoned && !chain.is_empty() && chain.len() <= 256)?;
+        let mut head = self.head()?;
+        for certificate in chain {
+            certificate.verify(&self.committee, &head)?;
+            head = certificate.statement.next.clone();
+        }
+        self.recover_witnessed_head(envelope, chain.last().ok_or("empty chain")?)
+    }
+    /// Only the witnessed wrapper may call this after its own authenticated
+    /// authority has durably verified every missing successor in bounded pages.
+    /// A final certificate alone is never a public snapshot-import capability.
+    pub(crate) fn recover_witnessed_head(
+        &mut self,
+        envelope: &Envelope,
+        expected: &Certificate,
+    ) -> Result<()> {
+        check(!self.file.poisoned)?;
+        expected.verify(&self.committee, &expected.statement.previous)?;
         let data: Recovery = serde_json::from_slice(&decrypt(
             &self.keys.transport,
             envelope,
             b"YAMI-M21-recovery-v1",
         )?)?;
         check(data.committee == self.committee.id())?;
-        let mut head = self.head()?;
-        for certificate in chain {
-            certificate.verify(&self.committee, &head)?;
-            head = certificate.statement.next.clone();
-        }
+        data.certificate
+            .verify(&self.committee, &expected.statement.previous)?;
         check(
-            chain.last().map(|c| &c.statement) == Some(&data.certificate.statement)
-                && state_head(&data.state.state()?, self.keys.root_secret) == head,
+            expected.statement == data.certificate.statement
+                && state_head(&data.state.state()?, self.keys.root_secret)
+                    == expected.statement.next,
         )?;
         let mut disk = self.disk.clone();
         disk.state = data.state;

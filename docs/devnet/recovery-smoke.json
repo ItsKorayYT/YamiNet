@@ -1,0 +1,14 @@
+{
+  "software_only": true,
+  "production_activation": false,
+  "authenticated_tls": true,
+  "initial_height": 0,
+  "final_height": 7,
+  "missed_transitions": 7,
+  "crossed_epoch_boundary": true,
+  "recipient_balance": 7,
+  "recovered_executors": 4,
+  "snapshot_forward_file_removed": true,
+  "restart_preserved": true,
+  "signing_journals_retained": true
+}

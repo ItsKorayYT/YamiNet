@@ -327,6 +327,17 @@ impl Guest {
                 WorkerReply::Committed
             }
             WorkerCommand::Head => WorkerReply::Head(r.head()?),
+            WorkerCommand::SyncStatus => WorkerReply::SyncStatus(Box::new(r.sync_status()?)),
+            WorkerCommand::ExportState(index) => {
+                WorkerReply::Recovery(Box::new(r.export_recovery_state(index)?))
+            }
+            WorkerCommand::ExportHistory { after, through } => {
+                WorkerReply::HistoryPage(Box::new(r.export_history_page(&after, &through)?))
+            }
+            WorkerCommand::StageHistory(page) => {
+                r.stage_history(&page)?;
+                WorkerReply::Committed
+            }
             WorkerCommand::Query(q) => WorkerReply::Balance(r.query(&q)?),
             WorkerCommand::Resume => WorkerReply::Approval(Box::new(r.resume_vote()?)),
             WorkerCommand::Export(i) => WorkerReply::Recovery(Box::new(r.export_recovery(i)?)),
