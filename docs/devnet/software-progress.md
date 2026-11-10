@@ -85,3 +85,95 @@ External validation dependencies:
 Production financial proofs remain rejected for all 65,536 versions. No real
 money, public deployment or production checkpoint writer/recovery/pruning is
 activated by these commits. `main` is not modified or merged.
+
+## Continuation — 2026-11-10
+
+Validated and pushed on the shared branch:
+
+- `be1356e`: private delegation details and explicit existing reward terms.
+- `fb31c14`: economic policy/authorization version refusal, preserving version 1.
+- `8b4fdda`: encrypted outgoing history, verified status/retry, pinned HTTPS seed
+  discovery and least-privilege wallet profile export.
+
+This session did **not** finish all remaining software. In particular, ordinary
+financial-state incremental persistence and permissionless P2P integration are
+still code work, not completed external validation. Do not reinterpret the
+external blockers below as completion of those implementations.
+
+Validation completed:
+
+- Release experiment suite, all features: **51 passed, 0 failed, 11 ignored**.
+  This includes the 273-transition interrupted/restarted recovery test. The
+  debug run was intentionally stopped at sequence 116 to replace its expensive
+  history verification with the same complete release-mode suite; no assertion
+  or recovery test was removed.
+- **23** wallet/configuration/discovery/RPC/supervision/worker-I/O Python tests.
+- Strict Clippy for all experiment targets/features and for core chain, storage,
+  consensus and validator targets with development input enabled.
+- Production privacy-boundary test: all 65,536 proof versions and public value
+  actions still refuse. Native wire-boundary tests passed with the development
+  feature both disabled and enabled.
+- Fresh unified TLS PoS and encrypted-wallet demonstration:
+  [wallet-history-validation.json](wallet-history-validation.json).
+
+Resume checkout without resetting or force-pushing:
+
+```sh
+git fetch origin development/yamichain:refs/remotes/origin/development/yamichain
+git switch development/yamichain
+git merge --ff-only refs/remotes/origin/development/yamichain
+export CARGO_HOME=/workspace/.yami-tools/cargo
+export RUSTUP_HOME=/workspace/.yami-tools/rustup
+export PATH=/workspace/.yami-tools/cargo/bin:$PATH
+cargo test --release --locked --manifest-path experiments/yamichain-tee-m20/Cargo.toml --all-features
+cargo clippy --locked --manifest-path experiments/yamichain-tee-m20/Cargo.toml --all-targets --all-features -- -D warnings
+cargo clippy --locked -p yami-chain -p yami-chain-consensus -p yami-chain-storage -p yami-validator --all-targets --features insecure-devnet-input -- -D warnings
+PYTHONPATH=tools python3 -m unittest tools/test_yamichain_wallet_config.py tools/test_yamichain_wallet_history.py tools/test_yamichain_wallet_discovery.py tools/test_yamichain_rpc.py tools/test_yamichain_services.py tools/test_yamichain_worker_io.py
+cargo test --locked -p yami-chain-privacy --test non_test_boundary
+cargo test --locked -p yami-chain --test native_devnet
+cargo test --locked -p yami-chain --features insecure-devnet-input --test native_devnet
+python3 tools/yamichain-unified-smoke.py --out work/next-wallet-tls --port-offset 4500
+```
+
+Use a new demonstration directory and free port offset on every reproduction;
+never overwrite a retained ledger. `work/continuation-wallet-tls` contains this
+session's disposable private configuration, wallets and retained network state.
+Do not commit its credentials or use its seven-day localhost certificates for
+public deployment. Build/test logs are under `work/continuation-*.log` and are
+local diagnostics, not durable evidence after an environment replacement.
+
+Concrete next source work:
+
+1. Implement ordinary private financial incremental persistence, starting with
+   `Replica::{prepare_with_hook,commit_with_hook,checkpoint,restore_cache}` in
+   `experiments/yamichain-tee-m20/src/quorum.rs` and their witnessed callers in
+   `src/witness.rs`. Today they still rewrite full encrypted snapshots. Preserve
+   exact snapshot authentication, durable witness acknowledgment, poison-on-
+   uncertain-write behavior and all crash/rollback tests. Do not substitute a
+   final certificate for complete-prefix verification or activate M16 pruning.
+2. Integrate bounded signed endpoint discovery and transaction propagation with
+   live identities in `crates/yami-chain-consensus/src/{network,node,signing}.rs`.
+   Current public-address refusal remains a security gate. Endpoint hints must
+   never grant voting authority, overwrite finalized identities or expose private
+   owner/stake information. Configured private seeds are the only live P2P profile.
+3. Complete confidential executor provisioning/replacement/revocation and witness
+   custody changes in `src/{tdx_guest,attestation,witness}.rs` and `deployment/tdx`.
+   The recovery-custodian impersonation issue remains unresolved. Software TLS,
+   process isolation, copied measurements or ignored QVL tests are not substitutes.
+4. Implement incoming/restored-wallet history through an authenticated confidential
+   retention/query protocol. Existing public blinded transaction commitments do
+   not disclose historical transfers; the new local journal cannot reconstruct
+   incoming payments or submissions recorded on another wallet installation.
+5. Implement reviewed beacon/randomness and upgrade negotiation. Existing economic
+   policy versioning deliberately accepts only version 1; changing a JSON version
+   cannot activate new delegator rewards or monetary rules. Do not silently change
+   the current deterministic selection seed, fee shares or canonical state roots.
+
+External resources still absent in this environment: `/dev/tdx_guest`,
+`/dev/tdx-guest` and `/dev/kvm`; configured outbound identities/secret bindings;
+and independently operated validator/executor/witness machines. Hardware/QVL
+trials, independent partition campaigns and production authorization therefore
+remain blocked. Resource references were requested without asking for credentials
+in chat. No such resources are inferred from the local TLS software demonstration.
+Independent custody/checkpoint/randomness/economic review is still required before
+opening any corresponding production or public-network gate.
