@@ -11,9 +11,12 @@ import subprocess
 import sys
 import time
 import urllib.request
-from http.server import BaseHTTPRequestHandler, HTTPServer
+
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / 'tools'))
+from yamichain_rpc import Transport, Handler as RpcHandler
+
 DATA = pathlib.Path(os.environ.get('YAMI_DEVNET_DIR', ROOT / 'work/yamichain-native-devnet')).resolve()
 BIN = ROOT / 'experiments/yamichain-tee-m20/target/release'
 CARGO = os.environ.get('CARGO', '/workspace/.yami-tools/cargo/bin/cargo' if pathlib.Path('/workspace/.yami-tools/cargo/bin/cargo').exists() else 'cargo')
@@ -56,6 +59,8 @@ if len(EXECUTORS)!=4 or len(WITNESSES)!=4 or len(VALIDATORS)!=len(PEERS) or not 
     raise SystemExit('four executor/witness endpoints and 4..100 matching validator/peer slots required')
 
 
+RPC = Transport(CONFIG.get('rpc'), {'gateway':[URL], 'executor':EXECUTORS, 'validator':VALIDATORS})
+
 def bridge(op, **kw):
     p = subprocess.run([str(BIN / 'devnet-bridge')], input=json.dumps(dict(op=op, **kw)), text=True, capture_output=True)
     if p.returncode:
@@ -83,10 +88,7 @@ def wallet_secret(path):
 
 
 def http(url, value=None, timeout=90):
-    data = None if value is None else json.dumps(value).encode()
-    req = urllib.request.Request(url, data=data, headers={'Content-Type': 'application/json'})
-    with urllib.request.urlopen(req, timeout=timeout) as r:
-        return json.load(r)
+    return RPC.request(url, value, timeout)
 
 
 def worker(i, command):
@@ -207,25 +209,7 @@ def listen(url):
     return u.hostname, u.port
 
 
-class Handler(BaseHTTPRequestHandler):
-    def log_message(self, *args):
-        pass
-
-    def do_GET(self):
-        self.handle_request(None)
-
-    def do_POST(self):
-        try:
-            n = int(self.headers.get('Content-Length', '0'))
-            if not 0 < n <= 1024*1024:
-                self.send_error(413)
-                return
-            value = json.loads(self.rfile.read(n))
-        except Exception:
-            self.send_error(400)
-            return
-        self.handle_request(value)
-
+class Handler(RpcHandler):
     def handle_request(self, value):
         try:
             if role == 'validator':
@@ -452,7 +436,7 @@ if __name__ == '__main__':
             if (DATA/f'validator-key-{i}.bin').exists():
                 startchild(own('validator',i),f'validator-{i}');wait(VALIDATORS[i])
         recover()
-        server=HTTPServer(listen(URL), Handler);server.timeout=1
+        server=RPC.server(URL, Handler);server.timeout=1
         launched={i for i in range(len(VALIDATORS)) if i<4 or (DATA/f'validator-key-{i}.bin').exists()}
         while True:
             server.handle_request()
@@ -472,7 +456,7 @@ if __name__ == '__main__':
         else:
             proc = validator_start(index)
         signal.signal(signal.SIGTERM, shutdown)
-        server=HTTPServer(listen(EXECUTORS[index] if role == 'executor' else VALIDATORS[index]), Handler)
+        server=RPC.server(EXECUTORS[index] if role == 'executor' else VALIDATORS[index], Handler)
         server.timeout=1
         delay=1;next_restart=0
         while True:
@@ -486,7 +470,7 @@ if __name__ == '__main__':
     elif a.command == 'gateway':
         role = 'gateway'
         recover()
-        HTTPServer(listen(URL), Handler).serve_forever()
+        RPC.server(URL, Handler).serve_forever()
     elif a.command == 'stop':
         try:
             pid = read(DATA / 'supervisor.pid')

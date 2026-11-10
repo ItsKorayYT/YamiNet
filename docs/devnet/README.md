@@ -177,3 +177,6 @@ at all four validators. It leaves the network running. The checked-in
 
 See [the separate live PoS devnet](pos.md) for stake-selected Malachite committees,
 candidate synchronization, deterministic rewards and evidence-based slashing.
+
+Remote HTTP service endpoints now require [authenticated TLS RPC](rpc.md);
+legacy plaintext compatibility is limited to loopback.

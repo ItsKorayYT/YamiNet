@@ -1,0 +1,33 @@
+#!/usr/bin/env python3
+"""Create an isolated loopback TLS RPC development profile. Never overwrites a ledger."""
+import argparse,json,os,pathlib,secrets,subprocess
+root=pathlib.Path(__file__).resolve().parents[1]
+p=argparse.ArgumentParser(description=__doc__)
+p.add_argument('--base',type=pathlib.Path,default=root/'docs/devnet/pos-network.json')
+p.add_argument('--out',type=pathlib.Path,required=True)
+a=p.parse_args();out=a.out.resolve();out.mkdir(mode=0o700,parents=True,exist_ok=False)
+try:
+ subprocess.run(['openssl','req','-x509','-newkey','rsa:3072','-nodes','-days','7','-keyout',str(out/'server.key'),'-out',str(out/'ca.pem'),'-subj','/CN=YamiChain disposable localhost RPC','-addext','subjectAltName=DNS:localhost,IP:127.0.0.1'],check=True,capture_output=True)
+ (out/'server.key').chmod(0o600)
+ tokens={}
+ for role in ['gateway','executor','validator']:
+  target=out/(role+'.token');fd=os.open(target,os.O_WRONLY|os.O_CREAT|os.O_EXCL,0o600)
+  with os.fdopen(fd,'w') as f:f.write(secrets.token_hex(32)+'\n')
+  tokens[role+'_file']=str(target)
+ config=json.loads(a.base.read_text())
+ # Separate ports and a new data directory preserve every existing development ledger.
+ from urllib.parse import urlsplit
+ def tls(url):
+  u=urlsplit(url)
+  if u.hostname not in ('127.0.0.1','localhost'):raise ValueError('this helper provisions loopback certificates only')
+  return 'https://'+u.hostname+':'+str(u.port+1000)
+ config['gateway']=tls(config['gateway'])
+ for key in ['executors','validators']:config[key]=[tls(v) for v in config[key]]
+ for key in ['witnesses','validator_peers']:
+  config[key]=[v.rsplit(':',1)[0]+':'+str(int(v.rsplit(':',1)[1])+1000) for v in config[key]]
+ config['rpc']=dict(ca_file=str(out/'ca.pem'),certificate_file=str(out/'ca.pem'),key_file=str(out/'server.key'),tokens=tokens)
+ (out/'network.json').write_text(json.dumps(config,indent=2)+'\n')
+ print(json.dumps(dict(config=str(out/'network.json'),data=str(out/'data'),gateway=config['gateway'],software_only=True,production_activation=False)))
+except Exception:
+ # Keep partial material for inspection; never silently regenerate or overwrite keys.
+ raise SystemExit('RPC provisioning failed; partial private directory retained for inspection')

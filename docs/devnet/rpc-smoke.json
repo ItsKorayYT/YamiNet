@@ -1,0 +1,11 @@
+{
+  "software_only": true,
+  "production_activation": false,
+  "tls_native_finality": true,
+  "unauthenticated_rpc_rejected": true,
+  "alice_after_payment": 898,
+  "bob_received_offline": 100,
+  "restart_preserved": true,
+  "verified_height": 2,
+  "block": "4dacf2bda43db9bb518d938cd52b699c5ebd77367d196a5ed9b5071f55d0fd19"
+}
