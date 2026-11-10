@@ -154,9 +154,11 @@ impl Signer<Context> for DurableSigner {
     ) -> Result<m::ValidatorProof<Context>, Error> {
         if public_key != self.key.verifying_key().to_bytes()
             || peer_id.len() > 128
-            || (!native_peer_admission(&self.genesis)
-                && transport_peer(&self.genesis, &self.key.verifying_key().to_bytes()).as_ref()
-                    != Some(&peer_id))
+            || !valid_peer_binding(
+                &self.genesis,
+                &self.key.verifying_key().to_bytes(),
+                &peer_id,
+            )
         {
             return Err(Error::new());
         }
@@ -223,23 +225,36 @@ impl Verifier<Context> for SignatureVerifier {
             return Ok(VerificationResult::Invalid);
         };
         Ok(VerificationResult::from_bool(
-            (native_peer_admission(&self.0)
-                || transport_peer(&self.0, &key).as_ref() == Some(&p.peer_id))
+            valid_peer_binding(&self.0, &key, &p.peer_id)
                 && yami_chain::verify(&key, &p.preimage(), &p.signature).is_ok(),
         ))
     }
 }
 
-// Peer authentication grants no voting power. Live devnet candidates must connect
-// before selection so they can sequentially synchronize authenticated history.
-fn native_peer_admission(genesis: &Genesis) -> bool {
+// A finalized identity ALWAYS uses its finalized transport key. Permissionless
+// candidates may authenticate and synchronize before selection, but cannot borrow
+// a reserved key/PeerId and acquire no voting power from this proof.
+fn valid_peer_binding(genesis: &Genesis, key: &[u8; 32], peer_id: &[u8]) -> bool {
+    if let Some(expected) = transport_peer(genesis, key) {
+        return expected == peer_id;
+    }
     #[cfg(feature = "insecure-devnet-input")]
-    {
-        genesis.live_scope().is_some()
+    if genesis.live_scope().is_some() && !genesis.is_reserved_key(key) {
+        let Ok(peer) = libp2p_identity::PeerId::from_bytes(peer_id) else {
+            return false;
+        };
+        let multihash = peer.as_ref();
+        if multihash.code() != 0 {
+            return false;
+        }
+        let Ok(public) = libp2p_identity::PublicKey::try_decode_protobuf(multihash.digest()) else {
+            return false;
+        };
+        let Ok(ed) = public.try_into_ed25519() else {
+            return false;
+        };
+        let transport = ed.to_bytes();
+        return transport != *key && !genesis.is_reserved_key(&transport);
     }
-    #[cfg(not(feature = "insecure-devnet-input"))]
-    {
-        let _ = genesis;
-        false
-    }
+    false
 }

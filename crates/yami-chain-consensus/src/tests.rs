@@ -965,3 +965,95 @@ async fn scale_stress_authenticated_core() {
         }
     }
 }
+
+#[cfg(feature = "insecure-devnet-input")]
+#[tokio::test]
+async fn permissionless_sync_proofs_never_override_finalized_transport_or_voting_authority() {
+    let mut genesis = Genesis::local();
+    genesis.enable_live_committees([9; 32]).unwrap();
+    let root = std::env::temp_dir().join(format!(
+        "yami-peer-proof-{}-{}",
+        std::process::id(),
+        ID.fetch_add(1, Ordering::SeqCst)
+    ));
+    let candidate = yami_chain::SigningKey::from_bytes(&[101; 32]);
+    let transport = yami_chain::SigningKey::from_bytes(&[102; 32]);
+    let peer = |key: &yami_chain::SigningKey| {
+        malachite::app::types::Keypair::ed25519_from_bytes(key.to_bytes())
+            .unwrap()
+            .public()
+            .to_peer_id()
+            .to_bytes()
+    };
+    let signer = DurableSigner {
+        key: candidate.clone(),
+        genesis: genesis.clone(),
+        journal: Arc::new(Journal::open(&root).unwrap()),
+        crash: None,
+    };
+    let proof = signer
+        .sign_validator_proof(
+            candidate.verifying_key().to_bytes().to_vec(),
+            peer(&transport),
+        )
+        .await
+        .unwrap();
+    let verifier = SignatureVerifier(genesis.clone());
+    assert!(verifier
+        .verify_validator_proof(&proof)
+        .await
+        .unwrap()
+        .is_valid());
+    assert!(genesis
+        .committee_at(1)
+        .unwrap()
+        .member(&candidate.verifying_key().to_bytes())
+        .is_none());
+    assert!(genesis.committee_at(2).is_err());
+    assert!(signer
+        .sign_validator_proof(
+            candidate.verifying_key().to_bytes().to_vec(),
+            peer(&development_key("transport", 0))
+        )
+        .await
+        .is_err());
+    assert!(signer
+        .sign_validator_proof(candidate.verifying_key().to_bytes().to_vec(), vec![0; 42])
+        .await
+        .is_err());
+    let known = DurableSigner {
+        key: development_key("consensus", 0),
+        genesis: genesis.clone(),
+        journal: signer.journal.clone(),
+        crash: None,
+    };
+    assert!(known
+        .sign_validator_proof(
+            known.key.verifying_key().to_bytes().to_vec(),
+            peer(&transport)
+        )
+        .await
+        .is_err());
+    let mut members = genesis.committee_at(1).unwrap().members().to_vec();
+    members[3] = yami_chain::committee::Member {
+        consensus_key: candidate.verifying_key().to_bytes(),
+        transport_key: development_key("transport", 9).verifying_key().to_bytes(),
+        power: 1,
+    };
+    genesis
+        .install_finalized_committee(
+            2,
+            yami_chain::committee::ValidatorSet::new(members).unwrap(),
+        )
+        .unwrap();
+    // Once a finalized mapping exists, even a previously valid candidate proof
+    // cannot retain a different transport key through the live shared directory.
+    assert!(!verifier
+        .verify_validator_proof(&proof)
+        .await
+        .unwrap()
+        .is_valid());
+    drop(signer);
+    drop(known);
+    std::fs::remove_dir_all(root).unwrap();
+}

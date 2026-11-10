@@ -53,6 +53,11 @@ Implemented next:
   (including 273-transition recovery); native Intel/QVL-dependent tests remain
   explicitly ignored rather than treated as hardware validation.
 
+- Live PoS peer proofs now enforce finalized consensus-to-transport bindings even
+  in the software profile. Unknown candidates may authenticate for synchronization,
+  but cannot borrow reserved transport identities or obtain voting power. Focused
+  binding tests, the core consensus regressions and strict Clippy passed.
+
 Still requiring software implementation/validation (not claimed complete):
 
 1. Public permissionless peer discovery and admission integrated with the live
