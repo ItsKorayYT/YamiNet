@@ -19,7 +19,7 @@ def save(path,value):
  fd=os.open(pathlib.Path(path).parent,os.O_RDONLY);os.fsync(fd);os.close(fd)
 p=argparse.ArgumentParser(description=__doc__)
 p.add_argument('--network',choices=['native','economics','pos'],default='economics')
-p.add_argument('command',choices=['create','encrypt','backup','restore','address','balance','send','fee','validator-key','register','stake','unstake','withdraw','exit','status','verify','join-validator','slash'])
+p.add_argument('command',choices=['create','encrypt','backup','restore','address','balance','send','fee','validator-key','register','stake','unstake','withdraw','exit','status','verify','join-validator','slash','transactions','retry'])
 p.add_argument('args',nargs='*');a=p.parse_args()
 if a.command=='create':
  secret=password()
@@ -44,10 +44,10 @@ elif a.command=='verify':
   os.environ.setdefault('YAMI_DEVNET_CONFIG',str(ROOT/('docs/devnet/pos-network.json' if a.network=='pos' else 'docs/devnet/economics-network.json')))
   os.environ.setdefault('YAMI_DEVNET_DIR',str(ROOT/('work/yamichain-pos-devnet' if a.network=='pos' else 'work/yamichain-economics-devnet')))
  d=runpy.run_path(str(ROOT/'scripts/yamichain-devnet'))
- height=int(a.args[0]);policy=d['policy']()
- records=[d['http'](d['URL']+'/history/'+str(h))['finality']['record'] for h in range(1,height+1)]
+ height=int(a.args[0]);policy=d['policy']();gateway=d['policy'].__globals__['URL']
+ records=[d['http'](gateway+'/history/'+str(h))['finality']['record'] for h in range(1,height+1)]
  verified=d['bridge']('audit-native',policy=policy,records=records)
- history=d['http'](d['URL']+'/history/'+str(height))
+ history=d['http'](gateway+'/history/'+str(height))
  certificate=d['bridge']('finality',record=history['finality']['record'],height=height,certificate=history['certificate'],policy=policy,records=records[:-1])
  print(json.dumps(dict(verified=True,height=verified['height'],block=certificate['block'],production_security=False)))
 else:

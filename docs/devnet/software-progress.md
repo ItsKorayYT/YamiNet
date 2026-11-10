@@ -38,6 +38,21 @@ Implemented next:
   tests and strict all-target/all-feature Clippy passed; see
   [policy versions](economic-policy-versions.md).
 
+- Encrypted network-bound local outgoing transaction history, durable submission
+  recording before transmission, native-finality status verification, bounded
+  pagination, offline history and explicit byte-identical retry. A timeout never
+  creates a replacement payment. The live TLS test checked offline history,
+  restart preservation and idempotent retry with private balances 898/100.
+- Bounded wallet HTTPS seed discovery with exact independently provisioned policy
+  pins and a least-privilege profile exporter. The live wallet used an unavailable
+  seed followed by the pinned gateway, without backend credentials or server keys.
+  See [wallet validation](wallet-history-validation.json) and
+  [wallet operations](economics.md). Strict Clippy passed for the experiment and
+  core chain/storage/consensus/validator targets; 23 wallet/RPC/supervision Python
+  checks passed. The complete release-mode all-feature experiment suite passed
+  (including 273-transition recovery); native Intel/QVL-dependent tests remain
+  explicitly ignored rather than treated as hardware validation.
+
 Still requiring software implementation/validation (not claimed complete):
 
 1. Public permissionless peer discovery and admission integrated with the live
@@ -50,8 +65,10 @@ Still requiring software implementation/validation (not claimed complete):
    replacement, measured-guest encrypted RPC packaging and witness custody
    changes. In particular, recovery-custodian
    impersonation is not solved by TLS or process supervision.
-4. Wallet transaction-history/status UX, automatic secure network discovery and
-   further delegation/reward UX beyond the authenticated portfolio details.
+4. Incoming and restored-wallet historical transaction reconstruction, public
+   network discovery beyond independently configured pinned HTTPS seeds, and
+   further delegation/reward UX. Local outgoing history and pinned seed discovery
+   are implemented; neither claims permissionless network discovery.
 5. Production-quality selection randomness, justified delegator reward policy,
    upgrade negotiation and activation of future economic policy versions. The current disposable
    deterministic seed is explicitly not a production randomness beacon.

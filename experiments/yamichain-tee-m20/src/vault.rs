@@ -114,3 +114,65 @@ mod tests {
         assert!(Vault::seal(secret, "short").is_err());
     }
 }
+
+/// Wallet-local history encryption uses a separate key and a pinned network
+/// context. It grants no authority and cannot establish transaction finality.
+pub fn seal_history(secret: Id, network: Id, entries: &serde_json::Value) -> Result<Envelope> {
+    let raw = serde_json::to_vec(entries)?;
+    check(
+        entries.is_array()
+            && entries.as_array().is_some_and(|a| a.len() <= 1024)
+            && raw.len() <= 2 * 1024 * 1024,
+    )?;
+    let key = history_key(secret, network)?;
+    encrypt(
+        PublicKey::from(&key).to_bytes(),
+        &raw,
+        &history_context(secret, network),
+    )
+}
+pub fn open_history(secret: Id, network: Id, envelope: &Envelope) -> Result<serde_json::Value> {
+    check(envelope.ciphertext.len() <= 2 * 1024 * 1024 + 16)?;
+    let raw = decrypt(
+        &history_key(secret, network)?,
+        envelope,
+        &history_context(secret, network),
+    )?;
+    let entries: serde_json::Value = serde_json::from_slice(&raw)?;
+    check(entries.as_array().is_some_and(|a| a.len() <= 1024))?;
+    Ok(entries)
+}
+fn history_key(secret: Id, network: Id) -> Result<StaticSecret> {
+    let mut key = [0; 32];
+    Hkdf::<Sha256>::new(Some(&network), &secret)
+        .expand(b"YAMI-wallet-local-history-key-v1", &mut key)
+        .map_err(|_| "history key derivation")?;
+    Ok(StaticSecret::from(key))
+}
+fn history_context(secret: Id, network: Id) -> Vec<u8> {
+    bytes(&(
+        "YAMI-wallet-local-history-v1",
+        network,
+        SigningKey::from_bytes(&secret).verifying_key().to_bytes(),
+    ))
+}
+#[cfg(test)]
+mod history_tests {
+    use super::*;
+    #[test]
+    fn wallet_history_is_private_network_bound_and_tamper_evident() {
+        let entries = serde_json::json!([{"recipient":"private recipient", "amount":12345}]);
+        let sealed = seal_history([1; 32], [2; 32], &entries).unwrap();
+        assert_eq!(open_history([1; 32], [2; 32], &sealed).unwrap(), entries);
+        assert!(!String::from_utf8(bytes(&sealed))
+            .unwrap()
+            .contains("recipient"));
+        assert!(open_history([3; 32], [2; 32], &sealed).is_err());
+        assert!(open_history([1; 32], [3; 32], &sealed).is_err());
+        let mut changed = sealed;
+        changed.ciphertext[0] ^= 1;
+        assert!(open_history([1; 32], [2; 32], &changed).is_err());
+        assert!(seal_history([1; 32], [2; 32], &serde_json::json!({})).is_err());
+        assert!(seal_history([1; 32], [2; 32], &serde_json::json!(vec![0; 1025])).is_err());
+    }
+}

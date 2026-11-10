@@ -1,0 +1,61 @@
+{
+  "software_only": true,
+  "production_activation": false,
+  "transport": "authenticated TLS RPC; configured bootstrap P2P peers",
+  "witness_transport": "pinned TLS and signed requests",
+  "gateway": "https://127.0.0.1:34780",
+  "pos": {
+    "software_only": true,
+    "production_activation": false,
+    "live_pos": true,
+    "registered": "674e1265f9e9c40da266998577b6eb522a294669477b756d3efac78810a8f139",
+    "joined_height": 7,
+    "earned": {
+      "height": 7,
+      "amount": 1
+    },
+    "signed_height": 16,
+    "candidate_crash_recovered": true,
+    "lag_across_epoch_recovered": true,
+    "slash_unbonding_penalty": 100,
+    "replayed_evidence_rejected": true,
+    "left_safely": true,
+    "withdrawal_after_unlock": 33,
+    "restart_preserved": true,
+    "history_verified": 34,
+    "gapped_history_rejected": true,
+    "final_height": 34,
+    "final_balance": {
+      "balance": 886,
+      "nonce": 6,
+      "portfolio": {
+        "bonded": 0,
+        "rewards": {
+          "current_fee_recipient": false,
+          "direct_delegator_rewards": false,
+          "policy": "devnet-equal-active-owner-fees-v1",
+          "validator_commission_bps": 10000
+        },
+        "unbonding": 0,
+        "withdrawable": 0,
+        "withdrawals": []
+      }
+    }
+  },
+  "encrypted_payments": {
+    "software_only": true,
+    "production_activation": false,
+    "tls_native_finality": true,
+    "unauthenticated_rpc_rejected": true,
+    "alice_after_payment": 898,
+    "bob_received_offline": 100,
+    "restart_preserved": true,
+    "encrypted_history_survived": true,
+    "pinned_seed_discovery": true,
+    "wallet_has_no_backend_credentials": true,
+    "idempotent_retry": true,
+    "offline_history_available": true,
+    "verified_height": 36,
+    "block": "9d606daaf12bc7e86c1a4155d8e0215c071977629d7e5f57eba95377e49e9696"
+  }
+}

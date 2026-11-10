@@ -1,0 +1,28 @@
+#!/usr/bin/env python3
+"""Export a private wallet profile using independently trusted policy/CA inputs."""
+import argparse
+import json
+import pathlib
+import subprocess
+import sys
+ROOT = pathlib.Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT/'tools'))
+from yamichain_wallet_config import export_wallet_config
+
+
+def validate(policy):
+    result = subprocess.run([str(ROOT/'experiments/yamichain-tee-m20/target/release/devnet-bridge')],
+                            input=json.dumps(dict(op='validate-policy', policy=policy)),
+                            text=True, capture_output=True)
+    if result.returncode:
+        raise ValueError('invalid trusted witness policy')
+
+
+parser = argparse.ArgumentParser(description=__doc__)
+parser.add_argument('--network-config', type=pathlib.Path, required=True)
+parser.add_argument('--policy', type=pathlib.Path, required=True)
+parser.add_argument('--out', type=pathlib.Path, required=True)
+args = parser.parse_args()
+path = export_wallet_config(json.loads(args.network_config.read_text()),
+                            json.loads(args.policy.read_text()), args.out, validate)
+print(json.dumps(dict(config=str(path), production_activation=False)))

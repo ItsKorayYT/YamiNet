@@ -31,6 +31,25 @@ fn main() -> Result<()> {
     let v: serde_json::Value = serde_json::from_str(&input)?;
     let op = v["op"].as_str().ok_or("op")?;
     let out = match op {
+        "validate-policy" => {
+            let policy: WitnessPolicy = serde_json::from_value(v["policy"].clone())?;
+            policy.validate()?;
+            serde_json::json!({"valid":true,"policy":policy.id()})
+        }
+        "wallet-history-seal" | "wallet-history-open" => {
+            let secret: Id = serde_json::from_value(v["secret"].clone())?;
+            let policy: WitnessPolicy = serde_json::from_value(v["policy"].clone())?;
+            let network = hash(&bytes(&policy));
+            if op == "wallet-history-seal" {
+                serde_json::to_value(vault::seal_history(secret, network, &v["entries"])?)?
+            } else {
+                vault::open_history(
+                    secret,
+                    network,
+                    &serde_json::from_value(v["envelope"].clone())?,
+                )?
+            }
+        }
         "key" => {
             let k = SigningKey::generate(&mut OsRng);
             let t = StaticSecret::random_from_rng(OsRng);

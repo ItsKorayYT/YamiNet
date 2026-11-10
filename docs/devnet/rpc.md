@@ -89,3 +89,26 @@ unauthenticated-call rejection and restart preservation. Public peer discovery,
 large financial-history checkpoint import/pruning and hardware-bound executor
 replacement remain separate outstanding requirements; this does not claim that
 all Phase 1 or production networking is complete.
+
+To provision a wallet from independently trusted operator inputs, export a
+separate profile after the policy has been provisioned:
+
+```sh
+./scripts/yamichain-wallet-config \
+  --network-config work/my-tls-network/network.json \
+  --policy work/my-tls-network/data/policy.json \
+  --out work/alice-network
+export YAMI_DEVNET_CONFIG="$PWD/work/alice-network/wallet-network.json"
+export YAMI_DEVNET_DIR="$PWD/work/alice-wallet-data"
+./scripts/yami-wallet --network pos balance work/alice.secure
+```
+
+The output directory must be new. The exporter validates the policy locally,
+requires HTTPS origins, and copies only the public CA, policy pin and gateway
+credential, with private file permissions. It does not copy executor/validator
+credentials, server private keys, witness configuration or backend inventories.
+Transport the wallet profile securely and verify its public policy and CA through
+an independent trusted channel. Generating the profile does not establish trust
+in an arbitrary source file or authorize production payments. Optional
+`wallet_gateway_seeds` in the source profile supplies bounded authenticated seed
+discovery; see [wallet history and discovery](economics.md).

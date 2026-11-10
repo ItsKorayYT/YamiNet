@@ -99,3 +99,57 @@ bond/unbond, early/double-withdrawal rejection, exact reward shares and restart.
 The encrypted-wallet check separately exercises payment, backup/restore and
 local verification of the full finalized native history. Records are beside
 this file. Production financial proofs and activation gates remain closed.
+
+The authenticated private portfolio includes the caller's individual `delegations`
+(validator, owner, amount), withdrawal tickets and current fee-recipient status.
+Reward terms explicitly report that this disposable policy pays all fees to the
+active validator owners (or configured recipients in the fixed profile), with
+no direct delegator rewards. The reported 10000 basis points describes this
+existing allocation, not a configurable commission or a promise of future yield.
+These additions are encrypted query data; financial state encoding is unchanged.
+
+Outgoing transaction history is wallet-local and encrypted with a separate,
+network-bound key derived from the unlocked wallet seed:
+
+```sh
+./scripts/yami-wallet transactions work/alice.secure
+./scripts/yami-wallet retry work/alice.secure TRANSACTION_ID
+```
+
+`transactions WALLET [OFFSET [LIMIT]]` lists newest submissions first, defaults
+to 20 entries and accepts a maximum of 100; `next_offset` continues the listing.
+Each status still verifies the required native history prefix; large-history
+checkpoint verification remains a separate unfinished requirement.
+
+Every submission is durably recorded before transmission, including staking
+operations. `send` returns the blinded transaction ID. `transactions` verifies
+native finality and reports `finalized`, `superseded` (another authentic transition
+used that parent), or `unknown` (missing, unavailable or unverifiable finality).
+An RPC timeout remains uncertain. `retry` reuses the exact original payment;
+it never creates a fresh payment or nonce. A changed parent requires finality
+verification before reporting a result. There is no automatic repeat payment.
+
+This history covers outgoing submissions from this wallet installation, not
+incoming payments or independently recovered historical activity. The encrypted
+`.history-<network>.json` sidecar is separate from the keystore backup; copy it
+separately for history recovery. Keep the sidecar mode 0600. Files are bounded
+at 1024 entries and 2 MiB plaintext; archive a full encrypted history before
+submitting more. Preserve archived files under separate names. Removing history
+loses local information about uncertain submissions; it does not reverse payments.
+The OS remains trusted for availability and rollback of local history. History
+contents grant no authority and are never accepted as a finality certificate.
+
+Economic version rules: [policy versions](economic-policy-versions.md).
+
+A wallet may configure `wallet_gateway_seeds` as 1–8 unique HTTPS service origins
+in its trusted `YAMI_DEVNET_CONFIG`. On each command it selects the first seed
+that passes CA/hostname verification, role authentication and exact policy-pin
+comparison. Supply `wallet_policy_file` with an independently obtained copy of
+the network policy when the wallet data directory has no pin yet. Multiple seeds
+refuse to run without that pin. Each seed probe has a three-second timeout;
+redirects remain refused. A foreign network, invalid policy or failed probe
+cannot replace the pin. No endpoint can supply a new CA or credentials.
+Discovery chooses a gateway before submission; it does not automatically repeat
+an uncertain payment. Existing single-endpoint first-use pinning is retained.
+These are configured bootstrap seeds; public permissionless P2P discovery and
+cross-operator deployment validation remain unfinished.

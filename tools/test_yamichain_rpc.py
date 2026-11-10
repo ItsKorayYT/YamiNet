@@ -44,6 +44,29 @@ class RpcTests(unittest.TestCase):
         self.server.token=secret(self.tokens['gateway_file'])
         self.thread=threading.Thread(target=self.server.serve_forever,daemon=True);self.thread.start()
 
+    def test_wallet_discovers_policy_matching_seed_over_authenticated_tls(self):
+        from yamichain_wallet_discovery import discover
+        class PolicyEcho(Handler):
+            def handle_request(self, value):
+                raw = json.dumps(self.server.policy).encode()
+                self.send_response(200)
+                self.send_header('Content-Length', str(len(raw)))
+                self.end_headers()
+                self.wfile.write(raw)
+        server = Server(('127.0.0.1',0), PolicyEcho)
+        server.context, server.token = self.server.context, self.server.token
+        server.policy = {'chain':24,'pin':'independently provisioned'}
+        url = 'https://127.0.0.1:'+str(server.server_port)
+        transport = Transport(self.config,{'gateway':[self.url,url]})
+        thread = threading.Thread(target=server.serve_forever,daemon=True)
+        thread.start()
+        try:
+            selected, policy = discover(transport,[self.url,url],server.policy,lambda _:None)
+            self.assertEqual(selected,url)
+            self.assertEqual(policy,server.policy)
+        finally:
+            server.shutdown();server.server_close();thread.join()
+
     def tearDown(self):
         self.server.shutdown();self.server.server_close();self.thread.join();self.tmp.cleanup()
 

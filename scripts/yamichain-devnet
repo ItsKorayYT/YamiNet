@@ -19,6 +19,8 @@ sys.path.insert(0, str(ROOT / 'tools'))
 from yamichain_rpc import Transport, Handler as RpcHandler
 from yamichain_services import Services
 from yamichain_worker_io import exchange
+from yamichain_wallet_history import History
+from yamichain_wallet_discovery import discover
 
 DATA = pathlib.Path(os.environ.get('YAMI_DEVNET_DIR', ROOT / 'work/yamichain-native-devnet')).resolve()
 BIN = ROOT / 'experiments/yamichain-tee-m20/target/release'
@@ -62,7 +64,8 @@ if len(EXECUTORS)!=4 or len(WITNESSES)!=4 or len(VALIDATORS)!=len(PEERS) or not 
     raise SystemExit('four executor/witness endpoints and 4..100 matching validator/peer slots required')
 
 
-RPC = Transport(CONFIG.get('rpc'), {'gateway':[URL], 'executor':EXECUTORS, 'validator':VALIDATORS})
+GATEWAY_SEEDS=CONFIG.get('wallet_gateway_seeds',[URL])
+RPC = Transport(CONFIG.get('rpc'), {'gateway':list(dict.fromkeys([URL,*GATEWAY_SEEDS])), 'executor':EXECUTORS, 'validator':VALIDATORS})
 
 def bridge(op, **kw):
     p = subprocess.run([str(BIN / 'devnet-bridge')], input=json.dumps(dict(op=op, **kw)), text=True, capture_output=True)
@@ -330,14 +333,29 @@ class Handler(RpcHandler):
         self.wfile.write(data)
 
 
+_wallet_policy=None
+
 def policy():
-    # Remote wallets pin policy.json on first use; subsequent identity changes fail closed.
-    remote = http(URL + '/policy')
-    pin = DATA / 'policy.json'
-    if pin.exists() and read(pin) != remote:
-        raise RuntimeError('pinned committee/witness policy mismatch')
+    global URL, _wallet_policy
+    if _wallet_policy is not None:return _wallet_policy
+    pin=DATA/'policy.json'
+    trusted=read(pin) if pin.exists() else (read(CONFIG['wallet_policy_file']) if CONFIG.get('wallet_policy_file') else None)
+    selected,remote=discover(RPC,GATEWAY_SEEDS,trusted,lambda value:bridge('validate-policy',policy=value))
     if not pin.exists():
-        save(pin, remote)
+        # Exclusive creation avoids first-use races silently replacing a pin.
+        pin.parent.mkdir(parents=True,exist_ok=True)
+        try:
+            fd=os.open(pin,os.O_WRONLY|os.O_CREAT|os.O_EXCL,0o600)
+        except FileExistsError:
+            if read(pin)!=remote:raise RuntimeError('pinned committee/witness policy mismatch')
+        else:
+            with os.fdopen(fd,'w') as stream:
+                json.dump(remote,stream);stream.flush();os.fsync(stream.fileno())
+            directory=os.open(pin.parent,os.O_RDONLY)
+            try:os.fsync(directory)
+            finally:os.close(directory)
+    URL=selected
+    _wallet_policy=remote
     return remote
 
 
@@ -351,23 +369,92 @@ def balance(wallet):
 
 
 def fee_estimate(action='Transfer'):
-    policy=http(URL+'/fees')
-    if not policy:return {'fee':0,'units':1,'economics_enabled':False}
+    policy()
+    economic_policy=http(URL+'/fees')
+    if not economic_policy:return {'fee':0,'units':1,'economics_enabled':False}
+    version=economic_policy.get('version',1)
+    if type(version) is not int or version!=1:raise RuntimeError('unsupported economic policy version')
     units={'Transfer':1,'Register':4,'Bond':2,'Unbond':2,'Withdraw':1,'Exit':1,'Slash':4}[action]
-    return {'fee':policy['base_fee']+policy['unit_fee']*units,'units':units,'economics_enabled':True}
+    return {'fee':economic_policy['base_fee']+economic_policy['unit_fee']*units,'units':units,'economics_enabled':True,'policy_version':version}
+
+
+def verified_submission(pinned, payment):
+    height=payment['previous']['epoch']+1
+    receipt=http(URL+'/history/'+str(height))
+    records=[http(URL+'/history/'+str(h))['finality']['record'] for h in range(1,height)] if pinned.get('native_scope') else None
+    verified=bridge('finality',policy=pinned,height=height,record=receipt['finality']['record'],certificate=receipt['certificate'],records=records)
+    statement=verified['certificate']['certificate']['statement']
+    matches=all(statement[k]==payment[k] for k in ('committee','previous','transaction'))
+    return dict(status='finalized' if matches else 'superseded',height=height,block=verified['block'])
+
+
+def transaction_history(wallet, offset=0, limit=20):
+    if type(offset) is not int or type(limit) is not int or not 0<=offset<=1024 or not 1<=limit<=100:
+        raise ValueError('history requires offset 0..1024 and limit 1..100')
+    pin=DATA/'policy.json'
+    if pin.exists():
+        pinned=read(pin)
+        bridge('validate-policy',policy=pinned)
+        try:policy()
+        except Exception:pass # Local history remains available without a reachable gateway.
+    else:
+        pinned=policy()
+    journal=History(wallet,pinned,bridge,wallet_secret(wallet))
+    result=[]
+    with journal.locked():
+        total=len(journal.entries)
+        selected=list(reversed(journal.entries))[offset:offset+limit]
+        for entry in selected:
+            public={k:v for k,v in entry.items() if k!='payment'}
+            try:
+                status=verified_submission(pinned,entry['payment'])
+            except Exception:
+                # Transport errors and unverifiable/missing records establish no status.
+                status={'status':'unknown'}
+            result.append(dict(public,**status))
+    return dict(scope='locally recorded outgoing submissions',transactions=result,total=total,next_offset=offset+len(selected) if offset+len(selected)<total else None,production_security=False)
+
+
+def submit_recorded(pinned, entry):
+    result=http(URL+'/send',entry['payment'],timeout=120)
+    verified=verified_submission(pinned,entry['payment'])
+    if verified['status']!='finalized':raise RuntimeError('submission superseded by another finalized transaction')
+    result.update(verified)
+    result['transaction']=entry['transaction']
+    result['fee']=entry['fee']
+    if isinstance(entry['action'],dict) and 'Unbond' in entry['action']:result['withdrawal_ticket']=entry['nonce']
+    return result
 
 
 def send(wallet, address, amount, action='Transfer'):
-    b=balance(wallet)
-    name=action if isinstance(action,str) else next(iter(action))
-    estimate=fee_estimate(name)
-    finance={'fee_limit':estimate['fee'],'action':action} if estimate['economics_enabled'] else None
-    if finance is None and name!='Transfer':raise RuntimeError('staking requires an economics-enabled genesis')
-    p=bridge('payment',policy=policy(),head=http(URL)['head'],secret=wallet_secret(wallet),recipient=address,amount=amount,nonce=b['nonce'],finance=finance)
-    result=http(URL+'/send',p,timeout=120)
-    result['fee']=estimate['fee']
-    if name=='Unbond':result['withdrawal_ticket']=b['nonce']
-    return result
+    pinned=policy()
+    journal=History(wallet,pinned,bridge,wallet_secret(wallet))
+    with journal.locked():
+        b=balance(wallet)
+        name=action if isinstance(action,str) else next(iter(action))
+        estimate=fee_estimate(name)
+        finance={'fee_limit':estimate['fee'],'action':action,'policy_version':estimate.get('policy_version',1)} if estimate['economics_enabled'] else None
+        if finance is None and name!='Transfer':raise RuntimeError('staking requires an economics-enabled genesis')
+        payment=bridge('payment',policy=pinned,head=http(URL)['head'],secret=wallet_secret(wallet),recipient=address,amount=amount,nonce=b['nonce'],finance=finance)
+        entry=dict(payment=payment,transaction=bytes(payment['transaction']).hex(),recipient=address,amount=amount,nonce=b['nonce'],action=action,fee=estimate['fee'],created_at=int(time.time()))
+        # Durable before transmission: a timeout/crash must never erase an uncertain payment.
+        journal.append(entry)
+        try:return submit_recorded(pinned,entry)
+        except Exception as error:
+            raise RuntimeError('submission not confirmed locally; retained transaction '+entry['transaction']+'; inspect transactions before retrying') from error
+
+
+def retry_submission(wallet, transaction):
+    pinned=policy()
+    journal=History(wallet,pinned,bridge,wallet_secret(wallet))
+    with journal.locked():
+        entry=next((e for e in journal.entries if e['transaction']==transaction),None)
+        if entry is None:raise RuntimeError('unknown local transaction ID')
+        current=http(URL)['head']
+        if current!=entry['payment']['previous']:
+            return dict(transaction=transaction,**verified_submission(pinned,entry['payment']))
+        # Byte-identical signed envelopes; no new nonce, fee or payment is created.
+        return submit_recorded(pinned,entry)
 
 
 def cleanup():
@@ -431,7 +518,7 @@ def recover():
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('command', choices=['start', 'stop', 'status', 'wallet', 'faucet', 'send', 'balance', 'history', 'supervise', 'executor', 'witness', 'validator', 'gateway', 'bootstrap', 'fee', 'validator-key', 'register', 'stake', 'unstake', 'withdraw', 'exit', 'join-validator', 'slash'])
+    parser.add_argument('command', choices=['start', 'stop', 'status', 'wallet', 'faucet', 'send', 'balance', 'history', 'supervise', 'executor', 'witness', 'validator', 'gateway', 'bootstrap', 'fee', 'validator-key', 'register', 'stake', 'unstake', 'withdraw', 'exit', 'join-validator', 'slash', 'transactions', 'retry'])
     parser.add_argument('args', nargs='*')
     a = parser.parse_args()
     DATA.mkdir(parents=True, exist_ok=True)
@@ -540,6 +627,7 @@ if __name__ == '__main__':
         time.sleep(1)
         print('Stopped; persistent state retained in ' + str(DATA))
     elif a.command == 'status':
+        policy()
         print(json.dumps(http(URL), indent=2))
     elif a.command == 'wallet':
         path = pathlib.Path(a.args[0])
@@ -581,5 +669,9 @@ if __name__ == '__main__':
         print(json.dumps(send(a.args[0],read(a.args[0])['address'],0,action),indent=2))
     elif a.command == 'withdraw':
         print(json.dumps(send(a.args[0],read(a.args[0])['address'],0,{'Withdraw':{'ticket':int(a.args[1])}}),indent=2))
+    elif a.command == 'transactions':
+        print(json.dumps(transaction_history(a.args[0],int(a.args[1]) if len(a.args)>1 else 0,int(a.args[2]) if len(a.args)>2 else 20),indent=2))
+    elif a.command == 'retry':
+        print(json.dumps(retry_submission(a.args[0],a.args[1]),indent=2))
     elif a.command == 'history':
         print(json.dumps(http(URL + '/history/' + str(int(a.args[0])))))
