@@ -211,6 +211,7 @@ impl Lab {
         let mut observers = Vec::new();
         for i in 0..4 {
             let config = ServiceConfig {
+                tls: None,
                 listen: "127.0.0.1:0".parse().unwrap(),
                 database: witness.join(format!("authority-{i}.sqlite")),
                 policy: policy.clone(),
@@ -222,6 +223,7 @@ impl Lab {
             let mut k = keys[i].clone();
             k.root_secret = root;
             let config = WorkerConfig {
+                witness_tls: None,
                 economics: None,
                 snapshot: host.join(format!("executor-{i}.json")),
                 policy: policy.clone(),

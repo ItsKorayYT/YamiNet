@@ -1,0 +1,9 @@
+{
+  "software_only": true,
+  "production_activation": false,
+  "supervised_wrapper_restarts": 3,
+  "private_worker_recovered": true,
+  "original_head_preserved": true,
+  "finalized_height": 38,
+  "stores_and_signing_wals_retained": true
+}

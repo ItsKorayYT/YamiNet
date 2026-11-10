@@ -159,11 +159,28 @@ separate witness host (copy the binary and config with restricted permissions):
 ./deployment/tdx/manage.py witness-config --index 0 \
  --key /secure/witness-0.key --policy /srv/yami/tdx-network/policy.json \
  --listen WITNESS_PRIVATE_IP:28800 --database /srv/yami/witness-0.sqlite \
+ --tls-certificate /secure/witness-0-chain.pem --tls-key /secure/witness-0-tls.key \
  --out /secure/witness-0.json
 experiments/yamichain-tee-m20/target/release/witness-node /secure/witness-0.json
 ```
 
 Build `witness-node` with the existing Cargo manifest if it is not already built.
+Non-loopback witness connections now require TLS. Each witness operator supplies
+a certificate whose SAN matches its expected DNS name or IP and a mode-0600
+private key. Provision the public CA certificate out of band to its custodian;
+set `network.witness_tls[index].ca_file` and `server_name` before provisioning.
+The custodian's signed guest configuration covers the CA bytes and name; ambient
+system roots and plaintext fallback are excluded. Existing signed witness
+requests, replay checks and durable vote records remain mandatory. Loopback TLS
+and software recovery are tested; genuine guest/remote deployments still need
+hardware execution and independent operator validation.
+
+The older HTTP addresses in the example remain placeholders, not deployable
+secure endpoints. Remote gateway/executor/validator RPC now requires the
+[authenticated HTTPS configuration](../../docs/devnet/rpc.md). The minimal guest
+HTTP adapter still needs an integrated encrypted RPC deployment path and hardware
+validation; this witness TLS change does not claim that packaging is complete.
+
 Each custodian then runs its own provisioning command, with the public policy
 and initial provisioning plan securely supplied by the genesis coordinator:
 

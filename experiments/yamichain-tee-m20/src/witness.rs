@@ -1,4 +1,5 @@
 //! M23: authenticated remote sign-once authorities. No local directory is an independence claim.
+use crate::witness_tls::{ClientTls, DeadlineStream, ServerTls};
 use crate::{quorum::*, *};
 use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
 use std::{
@@ -390,7 +391,7 @@ impl Response {
         }
     }
 }
-fn read_frame(stream: &mut TcpStream) -> Result<Vec<u8>> {
+fn read_frame(stream: &mut impl Read) -> Result<Vec<u8>> {
     let mut length = [0; 4];
     stream.read_exact(&mut length)?;
     let n = u32::from_be_bytes(length) as usize;
@@ -399,7 +400,7 @@ fn read_frame(stream: &mut TcpStream) -> Result<Vec<u8>> {
     stream.read_exact(&mut data)?;
     Ok(data)
 }
-fn write_frame(stream: &mut TcpStream, data: &[u8]) -> Result<()> {
+fn write_frame(stream: &mut impl Write, data: &[u8]) -> Result<()> {
     check(!data.is_empty() && data.len() <= MAX_FRAME)?;
     stream.write_all(&(data.len() as u32).to_be_bytes())?;
     stream.write_all(data)?;
@@ -412,6 +413,7 @@ pub struct Client {
     pub policy: WitnessPolicy,
     pub index: usize,
     actor: SigningKey,
+    tls: Option<ClientTls>,
 }
 impl Client {
     pub fn new(
@@ -427,18 +429,34 @@ impl Client {
             policy,
             index,
             actor,
+            tls: None,
         })
+    }
+    pub fn with_tls(mut self, tls: Option<ClientTls>) -> Result<Self> {
+        if let Some(config) = &tls {
+            config.connector()?;
+        }
+        self.tls = tls;
+        Ok(self)
     }
     pub fn request(&self, revision: u64, operation: Operation) -> Result<Request> {
         Request::signed(&self.policy, self.index, &self.actor, revision, operation)
     }
     pub fn exchange(&self, request: &Request) -> Result<Response> {
-        let mut stream = TcpStream::connect_timeout(&self.address, Duration::from_secs(2))?;
-        stream.set_read_timeout(Some(Duration::from_secs(2)))?;
-        stream.set_write_timeout(Some(Duration::from_secs(2)))?;
-        write_frame(&mut stream, &bytes(request))?;
-        let response: Response = serde_json::from_slice(&read_frame(&mut stream)?)?;
-        Ok(response)
+        check(self.tls.is_some() || self.address.ip().is_loopback())?;
+        let stream = DeadlineStream::new(TcpStream::connect_timeout(
+            &self.address,
+            Duration::from_secs(2),
+        )?);
+        if let Some(tls) = &self.tls {
+            let mut stream = tls.connector()?.connect(&tls.server_name, stream)?;
+            write_frame(&mut stream, &bytes(request))?;
+            Ok(serde_json::from_slice(&read_frame(&mut stream)?)?)
+        } else {
+            let mut stream = stream;
+            write_frame(&mut stream, &bytes(request))?;
+            Ok(serde_json::from_slice(&read_frame(&mut stream)?)?)
+        }
     }
     pub fn call(&self, revision: u64, operation: Operation) -> Result<Record> {
         let request = self.request(revision, operation)?;
@@ -468,6 +486,8 @@ pub struct ServiceConfig {
     pub index: usize,
     pub signing_secret: Id,
     #[serde(default)]
+    pub tls: Option<ServerTls>,
+    #[serde(default)]
     pub test_crash_after_prepare_commit: bool,
 }
 pub struct Service {
@@ -479,6 +499,10 @@ pub struct Service {
 impl Service {
     pub fn open(config: ServiceConfig) -> Result<Self> {
         config.policy.validate()?;
+        check(config.tls.is_some() || config.listen.ip().is_loopback())?;
+        if let Some(tls) = &config.tls {
+            tls.acceptor()?;
+        }
         let signer = SigningKey::from_bytes(&config.signing_secret);
         check(
             config.index < 4
@@ -840,7 +864,31 @@ impl Service {
         response.signature = self.signer.sign(&response.message()).to_bytes().to_vec();
         response
     }
-    pub fn serve(mut self) -> Result<()> {
+    fn connection(
+        service: &std::sync::Mutex<Self>,
+        stream: &mut (impl Read + Write),
+    ) -> Result<()> {
+        let request: Request = serde_json::from_slice(&read_frame(stream)?)?;
+        let response = {
+            let mut service = service.lock().map_err(|_| "witness service lock")?;
+            let response = service.handle(&request);
+            if service.config.test_crash_after_prepare_commit
+                && matches!(request.operation, Operation::Prepare { .. })
+                && matches!(response.outcome, Outcome::Record(_))
+            {
+                std::process::exit(86);
+            }
+            response
+        };
+        write_frame(stream, &bytes(&response))
+    }
+    pub fn serve(self) -> Result<()> {
+        let tls = self
+            .config
+            .tls
+            .as_ref()
+            .map(ServerTls::acceptor)
+            .transpose()?;
         let socket = socket2::Socket::new(
             socket2::Domain::for_address(self.config.listen),
             socket2::Type::STREAM,
@@ -848,28 +896,42 @@ impl Service {
         )?;
         socket.set_reuse_address(true)?;
         socket.bind(&self.config.listen.into())?;
-        socket.listen(128)?;
+        socket.listen(16)?;
         let listener: TcpListener = socket.into();
         println!("{}", listener.local_addr()?);
         std::io::stdout().flush()?;
+        let service = std::sync::Arc::new(std::sync::Mutex::new(self));
+        let (sender, receiver) = std::sync::mpsc::sync_channel::<DeadlineStream>(8);
+        let receiver = std::sync::Arc::new(std::sync::Mutex::new(receiver));
+        // Fixed workers bound TLS handshakes and frame allocations. Admission
+        // never waits for a client handshake or holds the authority lock for I/O.
+        for _ in 0..8 {
+            let (service, receiver, tls) = (service.clone(), receiver.clone(), tls.clone());
+            std::thread::spawn(move || loop {
+                let stream = match receiver.lock() {
+                    Ok(receiver) => match receiver.recv() {
+                        Ok(stream) => stream,
+                        Err(_) => break,
+                    },
+                    Err(_) => break,
+                };
+                let attempt = (|| -> Result<()> {
+                    if let Some(tls) = &tls {
+                        Self::connection(&service, &mut tls.accept(stream)?)
+                    } else {
+                        Self::connection(&service, &mut { stream })
+                    }
+                })();
+                // Malformed, stalled or unauthenticated clients cannot stop service.
+                let _ = attempt;
+            });
+        }
         for incoming in listener.incoming() {
-            let mut stream = incoming?;
-            stream.set_read_timeout(Some(Duration::from_secs(2)))?;
-            stream.set_write_timeout(Some(Duration::from_secs(2)))?;
-            let attempt = (|| -> Result<()> {
-                let request: Request = serde_json::from_slice(&read_frame(&mut stream)?)?;
-                let response = self.handle(&request);
-                if self.config.test_crash_after_prepare_commit
-                    && matches!(request.operation, Operation::Prepare { .. })
-                    && matches!(response.outcome, Outcome::Record(_))
-                {
-                    std::process::exit(86);
+            match incoming {
+                Ok(stream) => {
+                    let _ = sender.try_send(DeadlineStream::new(stream));
                 }
-                write_frame(&mut stream, &bytes(&response))
-            })();
-            // A malformed connection must not terminate the independently deployable authority.
-            if attempt.is_err() {
-                continue;
+                Err(_) => std::thread::sleep(Duration::from_millis(10)),
             }
         }
         Ok(())
@@ -1273,6 +1335,8 @@ pub struct WorkerConfig {
     pub policy: WitnessPolicy,
     pub index: usize,
     pub authority: SocketAddr,
+    #[serde(default)]
+    pub witness_tls: Option<ClientTls>,
     pub signing_secret: Id,
     pub transport_secret: Id,
     pub storage_secret: Id,
@@ -1298,7 +1362,8 @@ impl WorkerConfig {
             self.policy.clone(),
             self.index,
             self.keys().signing,
-        )
+        )?
+        .with_tls(self.witness_tls.clone())
     }
 }
 #[derive(Serialize, Deserialize)]

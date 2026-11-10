@@ -9,7 +9,8 @@ def run(args,env=None):
  return json.loads(value.stdout)
 provision=run([root/'scripts/yamichain-rpc-config','--out',a.out,'--port-offset',a.port_offset])
 config=pathlib.Path(provision['config']);directory=config.parent
+profile=json.loads(config.read_text())
 env=dict(os.environ,YAMI_DEVNET_CONFIG=str(config),YAMI_DEVNET_DIR=provision['data'],YAMI_POS_SMOKE_WALLET_DIR=str(directory/'pos-wallets'))
 pos=run([root/'scripts/yamichain-pos-smoke'],env)
 wallets=run(['python3',root/'tools/yamichain-rpc-smoke.py',config,directory/'encrypted-wallets'],env)
-print(json.dumps(dict(software_only=True,production_activation=False,transport='authenticated TLS RPC; configured bootstrap P2P peers',gateway=provision['gateway'],pos=pos,encrypted_payments=wallets),indent=2))
+print(json.dumps(dict(software_only=True,production_activation=False,transport='authenticated TLS RPC; configured bootstrap P2P peers',witness_transport='pinned TLS and signed requests' if profile.get('witness_tls') else 'legacy loopback signed TCP',gateway=provision['gateway'],pos=pos,encrypted_payments=wallets),indent=2))

@@ -66,10 +66,11 @@ fn main() -> Result<()> {
                 body.root = seeds.root;
                 body.restored = Some(seeds);
             }
-            serde_json::to_value(provision(
+            serde_json::to_value(provision_with_tls(
                 &identity,
                 serde_json::from_value(v["policy"].clone())?,
                 v["authority"].as_str().ok_or("authority")?.parse()?,
+                serde_json::from_value(v["witness_tls"].clone())?,
                 &body,
                 &owner,
             )?)?

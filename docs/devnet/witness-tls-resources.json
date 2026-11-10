@@ -1,0 +1,10 @@
+{
+  "duration_seconds": 5.162558066998827,
+  "cpu_seconds_observed": 0.8399999999999999,
+  "peak_sum_rss_bytes": 395403264,
+  "peak_sum_pss_bytes": 230501376,
+  "peak_process_count": 23,
+  "observations_complete": true,
+  "workload": "idle supervised TLS devnet; no throughput benchmark",
+  "production_readiness_claim": false
+}

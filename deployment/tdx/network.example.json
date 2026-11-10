@@ -2,6 +2,12 @@
   "gateway": "http://10.80.0.10:29780",
   "executors": ["http://10.80.1.11:28790", "http://10.80.2.12:28790", "http://10.80.3.13:28790", "http://10.80.4.14:28790"],
   "witnesses": ["10.90.1.11:28800", "10.90.2.12:28800", "10.90.3.13:28800", "10.90.4.14:28800"],
+  "witness_tls": [
+    {"ca_file":"/secure/witness-0-ca.pem","server_name":"witness-0.example.invalid"},
+    {"ca_file":"/secure/witness-1-ca.pem","server_name":"witness-1.example.invalid"},
+    {"ca_file":"/secure/witness-2-ca.pem","server_name":"witness-2.example.invalid"},
+    {"ca_file":"/secure/witness-3-ca.pem","server_name":"witness-3.example.invalid"}
+  ],
   "validators": ["http://10.80.0.10:29890", "http://10.80.0.10:29891", "http://10.80.0.10:29892", "http://10.80.0.10:29893"],
   "validator_peers": ["127.0.0.1:29900", "127.0.0.1:29901", "127.0.0.1:29902", "127.0.0.1:29903"],
   "collateral": ["intel-pcs", "intel-pcs", "intel-pcs", "intel-pcs"],

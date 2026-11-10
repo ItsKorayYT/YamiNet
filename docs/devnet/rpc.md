@@ -38,8 +38,33 @@ Wallet machines require only the CA, gateway token and service inventory; remove
 backend token paths and server key/certificate paths from wallet configuration.
 Gateway hosts need backend RPC access. Service authentication does not make the
 current software executors or their recovery custodians hardware-secure.
-Witnesses retain their separate existing signed-request/encrypted-snapshot
-protocol; this change does not add TLS or new key custody to that protocol.
+Fresh TLS profiles also encrypt witness connections using certificate-verified
+TLS while retaining the signed-request/encrypted-snapshot protocol. Legacy
+loopback witness profiles remain supported. Non-loopback witness clients and
+listeners require TLS; there is no remote plaintext fallback.
+
+`witness_tls.server` contains `certificate_file` and `key_file` paths.
+`witness_tls.client` contains the explicitly provisioned public CA certificate
+as `certificate_pem` bytes and the expected `server_name`. Trust excludes ambient
+system roots and verifies both the certificate chain and DNS/IP identity. The
+provisioned name may differ from the numeric dial address. Private key files
+must be regular, non-symlinked and private. Existing service configurations must
+match the network configuration; changing only the top-level file is refused
+instead of silently leaving an old plaintext service running.
+
+Witnesses have eight fixed connection workers, eight queued sockets, a listen
+backlog of sixteen and a five-second absolute deadline covering handshake and
+framed I/O, including time in the queue. Byte trickling cannot renew that limit.
+Frames retain their existing 32 MiB refusal bound; this is not a small worst-case
+memory claim. Authority mutations remain serialized and durable before reply;
+no handshake or socket I/O holds the authority lock. TLS alone cannot authorize
+a witness operation: signed actor, policy, nonce and revision checks still run.
+
+TDX provisioning can supply `witness_tls` in the operator-signed configuration,
+with the CA bytes and server name covered by that signature. `tdx-admin` still
+requires genuine QVL enrollment verification before configuring an executor.
+This transport implementation does not solve recovery-custodian impersonation,
+executor replacement/revocation or prove hardware security.
 
 Admission is bounded to eight concurrent connections, a queue of sixteen, five
 seconds for TLS handshakes/body reads, 1 MiB request bodies and 16 MiB client
@@ -56,6 +81,7 @@ TLS profile:
 ```sh
 python3 tools/yamichain-rpc-smoke.py work/my-tls-network/network.json work/tls-wallet-check
 python3 -m unittest discover -s tools -p 'test_yamichain_rpc.py' -v
+cargo test --release --manifest-path experiments/yamichain-tee-m20/Cargo.toml --test witness_tls
 ```
 
 [rpc-smoke.json](rpc-smoke.json) records native finality, 898/100 private balances,

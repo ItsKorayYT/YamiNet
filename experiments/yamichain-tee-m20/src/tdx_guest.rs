@@ -60,6 +60,8 @@ pub struct Configuration {
     pub boot: Id,
     pub policy: WitnessPolicy,
     pub authority: SocketAddr,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub witness_tls: Option<crate::witness_tls::ClientTls>,
     pub capsule: Envelope,
 }
 #[derive(Serialize, Deserialize)]
@@ -266,7 +268,8 @@ impl Guest {
             c.policy.clone(),
             self.config.index,
             keys.signing.clone(),
-        )?;
+        )?
+        .with_tls(c.witness_tls.clone())?;
         let backup = encrypt(
             self.config.recovery,
             &bytes(&Seeds {
@@ -367,11 +370,26 @@ pub fn provision(
     body: &Provision,
     operator: &SigningKey,
 ) -> Result<Configure> {
+    provision_with_tls(id, policy, authority, None, body, operator)
+}
+pub fn provision_with_tls(
+    id: &Identity,
+    policy: WitnessPolicy,
+    authority: SocketAddr,
+    witness_tls: Option<crate::witness_tls::ClientTls>,
+    body: &Provision,
+    operator: &SigningKey,
+) -> Result<Configure> {
     check(id.operator == operator.verifying_key().to_bytes())?;
+    check(authority.ip().is_loopback() || witness_tls.is_some())?;
+    if let Some(tls) = &witness_tls {
+        tls.connector()?;
+    }
     let configuration = Configuration {
         boot: id.boot,
         policy,
         authority,
+        witness_tls,
         capsule: encrypt(id.member.transport, &bytes(body), PROVISION)?,
     };
     let signature = operator.sign(&configuration.message()).to_bytes().to_vec();

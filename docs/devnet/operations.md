@@ -58,3 +58,14 @@ remain outstanding. No public deployment, hardware-attestation fallback or
 production financial activation is performed.
 
 [Unified execution evidence](unified-smoke.json) records the complete TLS run: live PoS through 35 blocks, followed by encrypted payment and independent finality verification at height 37.
+
+The subsequent [witness TLS run](witness-tls-unified.json) verifies the same flow
+with encrypted witness transport through height 38. Its
+[service crash test](witness-tls-service.json) retained that head and all safety
+stores. A separate [idle resource sample](witness-tls-resources.json) observed 23
+processes (including five validator processes), approximately 220 MiB peak summed
+PSS and 0.84 CPU seconds over 5.16 seconds. This small co-located network does not
+establish a production or worst-case resource bound. The
+[validation record](witness-tls-validation.json) includes the latest linked TDX
+binary's refusal to start without genuine hardware; no guest image or hardware
+boot was validated by this run.

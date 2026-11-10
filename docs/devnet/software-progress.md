@@ -12,6 +12,9 @@ Implemented next:
 
 - Authenticated HTTPS gateway/executor/validator RPC, per-role credentials,
   certificate/hostname verification, redirect refusal and bounded admission.
+- Pinned witness TLS with signed application authentication, bounded connection
+  workers, absolute handshake/frame deadlines and refusal of remote plaintext.
+  Operator-signed TDX provisioning covers the witness TLS trust configuration.
 - Independent development TLS configuration with distinct ports/data, retaining
   existing devnets; wallet configurations need no backend credentials.
 - Bounded service restarts, Linux child-lifetime enforcement, deadline-bounded
@@ -32,7 +35,8 @@ Still requiring software implementation/validation (not claimed complete):
    bootstrap/pruning and bounded long-term disk growth. M16 activation gates stay
    closed; the current native financial profile retains full certified history.
 3. Attestation-bound executor provisioning, confidential transfer, revocation,
-   replacement and witness custody changes. In particular, recovery-custodian
+   replacement, measured-guest encrypted RPC packaging and witness custody
+   changes. In particular, recovery-custodian
    impersonation is not solved by TLS or process supervision.
 4. Wallet transaction-history/status UX, automatic secure network discovery and
    clearer delegation/reward information beyond the existing portfolio queries.

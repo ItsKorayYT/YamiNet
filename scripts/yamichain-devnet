@@ -130,6 +130,10 @@ def bootstrap():
         pinned=read(DATA/'economic-policy.json') if (DATA/'economic-policy.json').exists() else None
         if read(DATA/'policy.json')['committee']['chain']!=CONFIG.get('chain',24):raise RuntimeError('chain ID is pinned at genesis')
         if pinned!=CONFIG.get('economics'):raise RuntimeError('economic policy is pinned at genesis; choose a new devnet directory')
+        expected=CONFIG.get('witness_tls') or {}
+        for i in range(4):
+            if read(DATA/f'witness-{i}.json').get('tls')!=expected.get('server') or read(DATA/f'executor-{i}.json').get('witness_tls')!=expected.get('client'):
+                raise RuntimeError('witness TLS configuration differs from the retained service configs; refuse a silent transport downgrade')
         return
     treasury = bridge('key')
     save(DATA / 'treasury.wallet', treasury)
@@ -143,8 +147,9 @@ def bootstrap():
     policy = dict(committee=committee, genesis=genesis, authorities=[list(bytes.fromhex(k['address'])) for k in auth], observer=list(bytes.fromhex(observer['address'])))
     if LIVE_POS:policy['native_scope']=bridge('pos-scope',allocations=allocations,economics=CONFIG['economics'],chain=committee['chain'])
     for i in range(4):
-        save(DATA / f'witness-{i}.json', dict(listen=WITNESSES[i], database=str(DATA / f'witness-{i}.sqlite'), policy=policy, index=i, signing_secret=auth[i]['secret']))
-        save(DATA / f'executor-{i}.json', dict(snapshot=str(DATA / f'executor-{i}.state'), policy=policy, index=i, authority=WITNESSES[i], signing_secret=keys[i]['secret'], transport_secret=keys[i]['transport'], storage_secret=list(os.urandom(32)), root_secret=root, software_protocol_only=True, economics=CONFIG.get('economics')))
+        witness_tls=CONFIG.get('witness_tls') or {}
+        save(DATA / f'witness-{i}.json', dict(listen=WITNESSES[i], database=str(DATA / f'witness-{i}.sqlite'), policy=policy, index=i, signing_secret=auth[i]['secret'],tls=witness_tls.get('server')))
+        save(DATA / f'executor-{i}.json', dict(snapshot=str(DATA / f'executor-{i}.state'), policy=policy, index=i, authority=WITNESSES[i], signing_secret=keys[i]['secret'], transport_secret=keys[i]['transport'], storage_secret=list(os.urandom(32)), root_secret=root, software_protocol_only=True, economics=CONFIG.get('economics'),witness_tls=witness_tls.get('client')))
     save(DATA / 'allocations.json', allocations)
     save(DATA / 'state.json', dict(head=genesis, height=0))
     save(DATA / 'economic-policy.json', CONFIG.get('economics'))

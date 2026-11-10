@@ -1,0 +1,36 @@
+{
+  "software_only": true,
+  "production_activation": false,
+  "base": "14eec15",
+  "rust_tests": {
+    "passed": 19,
+    "failed": 0,
+    "ignored": 1,
+    "ignored_reason": "native QVL integration requires an explicitly pinned official Intel QVL build"
+  },
+  "python_tests": 17,
+  "clippy": "passed --release --all-targets --features tdx-guest-devnet -- -D warnings",
+  "transport_checks": [
+    "pinned certificate chain and DNS/IP name",
+    "unknown CA, wrong name and plaintext rejected",
+    "TLS never replaces signed actor authentication",
+    "remote plaintext refused before connect/open",
+    "eight fixed connection workers under stalled-client admission",
+    "trickled bytes cannot extend the connection deadline",
+    "exposed private key refused before opening witness database"
+  ],
+  "tdx": {
+    "latest_tdx_executor_built": true,
+    "executor_sha256": "8a7b9bb3e667c50652f0ae874a3b7ecf71b95917364ab3faa6d280c51b079cbd",
+    "hardware_present": false,
+    "hardware_absent_startup_rejected": true,
+    "software_attestation_fallback": false,
+    "guest_image_built": false
+  },
+  "unified": "witness-tls-unified.json",
+  "service_restarts": "witness-tls-service.json",
+  "resources": "witness-tls-resources.json",
+  "production_financial_proof_versions_rejected": 65536,
+  "production_and_compact_checkpoint_sources_unchanged": true,
+  "remaining_software": "software-progress.md"
+}

@@ -14,6 +14,7 @@ v=s.add_parser('guest-config');v.add_argument('--index',required=True,type=int);
 v=s.add_parser('plan');v.add_argument('--network',required=True,type=pathlib.Path);v.add_argument('--authorities',required=True,type=pathlib.Path);v.add_argument('--data',required=True,type=pathlib.Path)
 v=s.add_parser('provision');v.add_argument('--index',type=int,required=True);v.add_argument('--network',type=pathlib.Path,required=True);v.add_argument('--data',type=pathlib.Path,required=True);v.add_argument('--key',type=pathlib.Path,required=True);v.add_argument('--trusted-config',type=pathlib.Path,required=True);v.add_argument('--backup',type=pathlib.Path,required=True,help='new encrypted backup destination, or existing backup for restore')
 v=s.add_parser('witness-config');v.add_argument('--index',type=int,required=True);v.add_argument('--key',type=pathlib.Path,required=True);v.add_argument('--policy',type=pathlib.Path,required=True);v.add_argument('--listen',required=True);v.add_argument('--database',required=True);v.add_argument('--out',type=pathlib.Path,required=True)
+v.add_argument('--tls-certificate',type=pathlib.Path,required=True);v.add_argument('--tls-key',type=pathlib.Path,required=True)
 a=p.parse_args()
 print('DISPOSABLE TDX DEVNET ONLY; PRODUCTION ACTIVATION CLOSED')
 if a.command=='custodian-key':
@@ -40,6 +41,8 @@ elif a.command=='plan':
     print('Provisional public committee pinned. Each custodian MUST verify enrollment before provisioning. No attestation has been accepted yet.')
 elif a.command=='provision':
     i=a.index;network=read(a.network);trusted=read(a.trusted_config);key=read(a.key);policy=read(a.data/'policy.json')
+    tls=network['witness_tls'][i]
+    witness_tls=dict(certificate_pem=list(pathlib.Path(tls['ca_file']).read_bytes()),server_name=tls['server_name'])
     if trusted['witness_policy']!=policy:raise SystemExit('trusted wallet policy mismatch')
     identity=http(network['executors'][i]+'/identity')
     if identity['index']!=i or identity['operator']!=key['operator'] or identity['recovery']!=key['recovery']:raise SystemExit('custodian/guest identity mismatch')
@@ -49,7 +52,7 @@ elif a.command=='provision':
     source=network.get('collateral',['intel-pcs']*4)[i]
     collateral=col.retrieve(quote,trusted) if source=='intel-pcs' else http(source)
     if time.monotonic()-started>50:raise SystemExit('enrollment challenge expired; no provisioning')
-    request=admin(dict(op='configure',qvl_library=trusted['qvl_library'],qvl_sha256=trusted['qvl_sha256'],software_policy=trusted['policies'][i],identity=identity,challenge=challenge,evidence=dict(quote=quote,collateral=collateral),operator_secret=key['signing'],recovery_secret=key['recovery_secret'],backup=read(a.backup) if a.backup.exists() else None,policy=policy,authority=network['witnesses'][i],provision=read(a.data/'provision.json')))
+    request=admin(dict(op='configure',qvl_library=trusted['qvl_library'],qvl_sha256=trusted['qvl_sha256'],software_policy=trusted['policies'][i],identity=identity,challenge=challenge,evidence=dict(quote=quote,collateral=collateral),operator_secret=key['signing'],recovery_secret=key['recovery_secret'],backup=read(a.backup) if a.backup.exists() else None,policy=policy,authority=network['witnesses'][i],witness_tls=witness_tls,provision=read(a.data/'provision.json')))
     if time.monotonic()-started>60:raise SystemExit('enrollment challenge expired; no provisioning')
     try:
         response=http(network['executors'][i]+'/configure',request)
@@ -66,4 +69,4 @@ elif a.command=='provision':
 elif a.command=='witness-config':
     key=read(a.key);policy=read(a.policy)
     if list(bytes.fromhex(key['address']))!=policy['authorities'][a.index]:raise SystemExit('wrong witness key')
-    save(a.out,dict(listen=a.listen,database=a.database,policy=policy,index=a.index,signing_secret=key['secret']))
+    save(a.out,dict(listen=a.listen,database=a.database,policy=policy,index=a.index,signing_secret=key['secret'],tls=dict(certificate_file=str(a.tls_certificate.resolve()),key_file=str(a.tls_key.resolve()))))
