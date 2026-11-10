@@ -70,7 +70,7 @@ impl Statement {
     pub fn message(&self) -> Vec<u8> {
         bytes(&("YAMI-M21-SOFTWARE-approval-v1", self))
     }
-    pub(crate) fn validate(&self, c: &Committee, previous: &Head) -> Result<()> {
+    pub fn validate(&self, c: &Committee, previous: &Head) -> Result<()> {
         check(
             self.committee == c.id()
                 && self.previous == *previous
@@ -156,6 +156,9 @@ impl WitnessPolicy {
     pub fn id(&self) -> Id {
         hash(&bytes(&("YAMI-M23-witness-policy-v1", self)))
     }
+    pub fn member(&self,index:usize)->Result<Id> {
+        Ok(self.committee.members.get(index).ok_or("member index")?.signing)
+    }
     pub fn validate(&self) -> Result<()> {
         self.committee.validate()?;
         check(self.genesis.chain == self.committee.chain && self.genesis.epoch == 0)?;
@@ -178,7 +181,7 @@ impl WitnessPolicy {
                 .any(|m| m.signing == self.observer),
         )
     }
-    fn index(&self, member: Id) -> Result<usize> {
+    pub fn index(&self, member: Id) -> Result<usize> {
         self.committee
             .members
             .iter()
@@ -196,7 +199,7 @@ pub struct Confirmation {
     pub signature: Vec<u8>,
 }
 impl Confirmation {
-    fn message(&self) -> Vec<u8> {
+    pub fn message(&self) -> Vec<u8> {
         bytes(&(
             "YAMI-M23-durable-vote-v1",
             self.policy,

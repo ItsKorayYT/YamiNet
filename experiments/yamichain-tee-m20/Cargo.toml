@@ -5,6 +5,7 @@ edition = "2021"
 publish = false
 [workspace]
 [dependencies]
+yamichain-devnet-cert = { path = "../../crates/yami-chain-devnet-cert" }
 yami-chain = { path = "../../crates/yami-chain", features=["insecure-devnet-input"] }
 yami-chain-storage = { path = "../../crates/yami-chain-storage" }
 yami-chain-consensus = { path = "../../crates/yami-chain-consensus", features = ["insecure-devnet-input"] }

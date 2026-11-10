@@ -297,3 +297,11 @@ Durable evidence is the linked JSON, not ephemeral work logs. Continue with the
 TDX custody/replacement, wallet recovery and security-validation work above;
 do not restart the implemented persistence or peer discovery components.
 `main`, M16 activation and production financial verification remain unchanged.
+
+## Executor lifecycle implementation — in progress
+
+The executor, wallet and native-validator development paths now share one
+certificate/witness verifier (`yamichain-devnet-cert`), eliminating divergent
+copies before adding generation and replacement authorization. The complete
+55-test release experiment suite and strict all-target/all-feature Clippy passed.
+This verifier consolidation does not itself resolve custody or activate recovery.

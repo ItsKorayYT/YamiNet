@@ -193,12 +193,7 @@ pub fn transition(old: &State, tx: &Signed) -> Result<State> {
     s.epoch = s.epoch.checked_add(1).ok_or("epoch overflow")?;
     Ok(s)
 }
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
-pub struct Head {
-    pub chain: u64,
-    pub epoch: u64,
-    pub commitment: Id,
-}
+pub use yamichain_devnet_cert::Head;
 #[derive(Clone, Serialize, Deserialize)]
 pub struct Receipt {
     pub previous: Head,

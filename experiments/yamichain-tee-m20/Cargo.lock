@@ -4666,6 +4666,7 @@ dependencies = [
  "yami-chain",
  "yami-chain-consensus",
  "yami-chain-storage",
+ "yamichain-devnet-cert",
 ]
 
 [[package]]
