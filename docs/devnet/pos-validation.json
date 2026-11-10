@@ -1,0 +1,97 @@
+{
+  "validated_at": "2026-11-09T19:15:19.078522+00:00",
+  "base_commit": "50427fadf5df7b754ad09452d8f9eebeaa499551",
+  "branch": "development/yamichain",
+  "software_only": true,
+  "production_activation": false,
+  "main_preserved": "8628b6ef4aa2dcd76c0f309e3703c2ee6e3d84da",
+  "tests": {
+    "native_consensus": {
+      "passed": 45,
+      "ignored": 1,
+      "ignored_cases": [
+        [
+          "tests::scale_stress_authenticated_core",
+          ", manual 4/25/100-validator authenticated Malachite schedules; run in release as documented"
+        ]
+      ]
+    },
+    "native_boundary_and_key_isolation": {
+      "passed": 2,
+      "ignored": 0,
+      "ignored_cases": []
+    },
+    "witnessed_certificate_boundary": {
+      "passed": 4,
+      "ignored": 0,
+      "ignored_cases": []
+    },
+    "private_execution": {
+      "passed": 39,
+      "ignored": 11,
+      "ignored_cases": [
+        [
+          "attestation::tests::native_wallet_rounds_reject_deadlines_wrong_round_ids_and_backwards_time",
+          ", requires explicitly pinned official Intel QVL native build"
+        ],
+        [
+          "actual_wallet_cli_emits_challenges_but_no_payment_for_archived_evidence",
+          ", requires explicitly pinned official Intel QVL native build"
+        ],
+        [
+          "approved_measurements_debug_policy_and_reportdata_binding_are_mandatory",
+          ", requires explicitly pinned official Intel QVL native build"
+        ],
+        [
+          "archived_or_unverified_evidence_never_encrypts_or_submits_and_rounds_are_single_use",
+          ", requires explicitly pinned official Intel QVL native build"
+        ],
+        [
+          "balance_queries_use_the_same_three_executor_gate",
+          ", requires explicitly pinned official Intel QVL native build"
+        ],
+        [
+          "genuine_intel_signed_fixture_verifies_at_archived_time_only",
+          ", requires explicitly pinned official Intel QVL native build"
+        ],
+        [
+          "genuine_outdated_tcb_quote_is_not_relaxed_into_success",
+          ", requires explicitly pinned official Intel QVL native build"
+        ],
+        [
+          "m23_attested_identity_binding_includes_the_witness_authority_policy",
+          ", requires explicitly pinned official Intel QVL native build"
+        ],
+        [
+          "m23_missing_malicious_expired_and_mismatched_quotes_do_not_become_eligible",
+          ", requires explicitly pinned official Intel QVL native build"
+        ],
+        [
+          "signatures_collateral_revocation_data_and_lengths_are_not_host_assertions",
+          ", requires explicitly pinned official Intel QVL native build"
+        ],
+        [
+          "wallet_native_library_must_be_pinned_and_hardware_activation_stays_closed",
+          ", requires explicitly pinned official Intel QVL native build"
+        ]
+      ]
+    },
+    "production_and_m16": {
+      "passed": 87,
+      "ignored": 1,
+      "ignored_cases": [
+        [
+          "tests::scale_stress_authenticated_core",
+          ", manual 4/25/100-validator authenticated Malachite schedules; run in release as documented"
+        ]
+      ]
+    }
+  },
+  "python_safety_tests": 6,
+  "root_and_private_clippy_all_targets": "passed with -D warnings",
+  "financial_proof_versions_rejected": 65536,
+  "native_lifecycle_evidence": "pos-smoke.json",
+  "encrypted_wallet_evidence": "pos-wallet-smoke.json",
+  "hardware_execution": "not activated; official QVL/hardware cases remain explicitly ignored",
+  "production_checkpoint_activation": "closed; M16 restrictions unchanged"
+}

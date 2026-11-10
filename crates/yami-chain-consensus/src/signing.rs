@@ -64,6 +64,15 @@ pub(crate) struct DurableSigner {
 }
 pub(crate) struct SignatureVerifier(pub Genesis);
 fn transport_peer(genesis: &Genesis, key: &[u8; 32]) -> Option<Vec<u8>> {
+    #[cfg(feature = "insecure-devnet-input")]
+    if let Some(transport) = genesis.live_transport(key) {
+        let public = libp2p_identity::ed25519::PublicKey::try_from_bytes(&transport).ok()?;
+        return Some(
+            libp2p_identity::PublicKey::from(public)
+                .to_peer_id()
+                .to_bytes(),
+        );
+    }
     let member = genesis
         .epochs
         .iter()
@@ -145,8 +154,9 @@ impl Signer<Context> for DurableSigner {
     ) -> Result<m::ValidatorProof<Context>, Error> {
         if public_key != self.key.verifying_key().to_bytes()
             || peer_id.len() > 128
-            || transport_peer(&self.genesis, &self.key.verifying_key().to_bytes()).as_ref()
-                != Some(&peer_id)
+            || (!native_peer_admission(&self.genesis)
+                && transport_peer(&self.genesis, &self.key.verifying_key().to_bytes()).as_ref()
+                    != Some(&peer_id))
         {
             return Err(Error::new());
         }
@@ -213,8 +223,23 @@ impl Verifier<Context> for SignatureVerifier {
             return Ok(VerificationResult::Invalid);
         };
         Ok(VerificationResult::from_bool(
-            transport_peer(&self.0, &key).as_ref() == Some(&p.peer_id)
+            (native_peer_admission(&self.0)
+                || transport_peer(&self.0, &key).as_ref() == Some(&p.peer_id))
                 && yami_chain::verify(&key, &p.preimage(), &p.signature).is_ok(),
         ))
+    }
+}
+
+// Peer authentication grants no voting power. Live devnet candidates must connect
+// before selection so they can sequentially synchronize authenticated history.
+fn native_peer_admission(genesis: &Genesis) -> bool {
+    #[cfg(feature = "insecure-devnet-input")]
+    {
+        genesis.live_scope().is_some()
+    }
+    #[cfg(not(feature = "insecure-devnet-input"))]
+    {
+        let _ = genesis;
+        false
     }
 }

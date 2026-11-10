@@ -41,6 +41,8 @@ pub struct Statement {
     pub previous: Head,
     pub next: Head,
     pub transaction: Id,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub next_validators: Option<Vec<(Id, Id)>>,
 }
 impl Statement {
     pub fn message(&self) -> Vec<u8> {
@@ -460,6 +462,14 @@ impl Replica {
     pub fn head(&self) -> Result<Head> {
         Ok(state_head(&self.disk.state.state()?, self.keys.root_secret))
     }
+    pub(crate) fn native_scope(&self) -> Result<Option<Id>> {
+        Ok(self
+            .disk
+            .state
+            .state()?
+            .economics
+            .and_then(|e| e.live.map(|l| l.scope)))
+    }
     fn approval(&self, s: Statement) -> Approval {
         let signature = self.keys.signing.sign(&s.message()).to_bytes().to_vec();
         Approval {
@@ -493,6 +503,10 @@ impl Replica {
         check(tx_commit(&d) == p.transaction)?;
         let next = transition(&self.disk.state.state()?, &d.transfer)?;
         let statement = Statement {
+            next_validators: next
+                .economics
+                .as_ref()
+                .and_then(|e| e.live.as_ref().map(|l| l.active.clone())),
             committee: p.committee,
             previous: p.previous.clone(),
             next: state_head(&next, self.keys.root_secret),

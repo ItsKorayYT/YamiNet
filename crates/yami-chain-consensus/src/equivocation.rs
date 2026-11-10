@@ -81,6 +81,35 @@ pub fn verify_double_vote(
         id: yami_chain::hash(b"YAMI-CONSENSUS-DOUBLE-VOTE-SLOT-1", &w.0),
     })
 }
+/// Explicit malicious software-devnet fixture. Never uses a live validator's
+/// durable signer; callers must use disposable test keys only.
+#[cfg(feature = "insecure-devnet-input")]
+pub fn devnet_double_vote_fixture(
+    genesis: &Genesis,
+    key: &yami_chain::SigningKey,
+    height: u64,
+) -> Result<(Vec<u8>, Vec<u8>)> {
+    use malachite::app::types::core as m;
+    use yami_chain::Signer as _;
+    let encode = |value| -> Result<Vec<u8>> {
+        let v = Vote {
+            height: Height(height),
+            round: m::Round::ZERO,
+            value: m::NilOrVal::Val(Value(Digest([value; 32]))),
+            step: m::VoteType::Precommit,
+            address: Address(Digest(key.verifying_key().to_bytes())),
+            extension: None,
+        };
+        let signature = key.sign(&vote_preimage_for(genesis, &v)?).to_bytes();
+        Ok(wire::encode(
+            genesis.id(),
+            &SignedConsensusMsg::<Context>::Vote(m::SignedMessage::new(v, signature)),
+        )?
+        .to_vec())
+    };
+    Ok((encode(1)?, encode(2)?))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

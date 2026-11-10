@@ -18,8 +18,8 @@ def save(path,value):
  with os.fdopen(fd,'w') as f:json.dump(value,f);f.flush();os.fsync(f.fileno())
  fd=os.open(pathlib.Path(path).parent,os.O_RDONLY);os.fsync(fd);os.close(fd)
 p=argparse.ArgumentParser(description=__doc__)
-p.add_argument('--network',choices=['native','economics'],default='economics')
-p.add_argument('command',choices=['create','encrypt','backup','restore','address','balance','send','fee','validator-key','register','stake','unstake','withdraw','exit','status','verify'])
+p.add_argument('--network',choices=['native','economics','pos'],default='economics')
+p.add_argument('command',choices=['create','encrypt','backup','restore','address','balance','send','fee','validator-key','register','stake','unstake','withdraw','exit','status','verify','join-validator','slash'])
 p.add_argument('args',nargs='*');a=p.parse_args()
 if a.command=='create':
  secret=password()
@@ -40,16 +40,16 @@ elif a.command in ('backup','restore'):
 elif a.command=='address':
  print(json.loads(pathlib.Path(a.args[0]).read_text())['address'])
 elif a.command=='verify':
- if a.network=='economics':
-  os.environ.setdefault('YAMI_DEVNET_CONFIG',str(ROOT/'docs/devnet/economics-network.json'))
-  os.environ.setdefault('YAMI_DEVNET_DIR',str(ROOT/'work/yamichain-economics-devnet'))
+ if a.network in ('economics','pos'):
+  os.environ.setdefault('YAMI_DEVNET_CONFIG',str(ROOT/('docs/devnet/pos-network.json' if a.network=='pos' else 'docs/devnet/economics-network.json')))
+  os.environ.setdefault('YAMI_DEVNET_DIR',str(ROOT/('work/yamichain-pos-devnet' if a.network=='pos' else 'work/yamichain-economics-devnet')))
  d=runpy.run_path(str(ROOT/'scripts/yamichain-devnet'))
  height=int(a.args[0]);policy=d['policy']()
  records=[d['http'](d['URL']+'/history/'+str(h))['finality']['record'] for h in range(1,height+1)]
  verified=d['bridge']('audit-native',policy=policy,records=records)
  history=d['http'](d['URL']+'/history/'+str(height))
- certificate=d['bridge']('finality',record=history['finality']['record'],height=height,certificate=history['certificate'],policy=policy)
+ certificate=d['bridge']('finality',record=history['finality']['record'],height=height,certificate=history['certificate'],policy=policy,records=records[:-1])
  print(json.dumps(dict(verified=True,height=verified['height'],block=certificate['block'],production_security=False)))
 else:
- command=ROOT/('scripts/yamichain-economic-devnet' if a.network=='economics' else 'scripts/yamichain-devnet')
+ command=ROOT/({'economics':'scripts/yamichain-economic-devnet','pos':'scripts/yamichain-pos-devnet'}.get(a.network,'scripts/yamichain-devnet'))
  os.execv(str(command),[str(command),a.command,*a.args])

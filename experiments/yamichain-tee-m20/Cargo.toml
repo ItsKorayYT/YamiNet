@@ -7,7 +7,7 @@ publish = false
 [dependencies]
 yami-chain = { path = "../../crates/yami-chain", features=["insecure-devnet-input"] }
 yami-chain-storage = { path = "../../crates/yami-chain-storage" }
-yami-chain-consensus = { path = "../../crates/yami-chain-consensus" }
+yami-chain-consensus = { path = "../../crates/yami-chain-consensus", features = ["insecure-devnet-input"] }
 chacha20poly1305 = "0.10"
 ed25519-dalek = { version = "2", features = ["rand_core"] }
 x25519-dalek = { version = "2", features = ["static_secrets"] }

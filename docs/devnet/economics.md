@@ -43,14 +43,15 @@ VALIDATOR=$(./scripts/yami-wallet validator-key work/operator.validator)
 ./scripts/yami-wallet exit work/alice.secure "$VALIDATOR"
 ```
 
-**Registration here does not add the candidate to Malachite's live committee.**
+**Registration in this fixed economics profile does not add the candidate to Malachite's live committee.**
+The separate [live PoS profile](pos.md) integrates stake selection, rotating
+committees, rewards and evidence-based slashing into the running network.
 The financial ledger implements key-possession checks, owner-authorized exit,
 self-stake thresholds, delegation ownership, supply-conserving locks, delayed
 withdrawals and single-use tickets. Eligibility is derived from locked accounts,
-not advertised peer weights. Live stake-driven selection/rotation, dynamic
-consensus membership and financial slashing remain unfinished. The separate
-objective double-vote verifier verifies real consensus evidence but applies no
-penalty. Do not describe either component as completed permissionless PoS.
+not advertised peer weights. Live stake-driven selection/rotation, dynamic membership and slashing stay
+disabled in this fixed profile. The live profile applies the existing objective
+evidence verifier inside encrypted execution.
 
 The sample [configuration](economics-network.json) explicitly sets the example
 fee schedule, resource-unit limits, stake threshold, unbonding/epoch parameters,

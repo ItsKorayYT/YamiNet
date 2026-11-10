@@ -30,6 +30,7 @@ fn state() -> State {
         economics: None,
     };
     s.enable_economics(Policy {
+        live_pos: false,
         base_fee: 1,
         unit_fee: 1,
         max_units: 16,
@@ -203,4 +204,173 @@ fn old_state_encoding_and_signed_transfer_bytes_remain_unchanged() {
 
     let again = transition(&s, &t).unwrap();
     assert_eq!(next, again);
+}
+
+fn live_state() -> State {
+    let mut s = State {
+        chain: 24,
+        epoch: 0,
+        accounts: BTreeMap::from([(
+            id(1),
+            Account {
+                balance: 10000,
+                nonce: 0,
+            },
+        )]),
+        economics: None,
+    };
+    s.enable_economics(Policy {
+        live_pos: true,
+        base_fee: 1,
+        unit_fee: 1,
+        max_units: 16,
+        minimum_stake: 100,
+        unbonding_blocks: 15,
+        epoch_blocks: 6,
+        active_limit: 4,
+        fee_recipients: vec![id(10), id(11), id(12), id(13)],
+    })
+    .unwrap();
+    s
+}
+#[test]
+fn live_weighted_rotation_rewards_and_safe_exit_are_deterministic() {
+    let mut s = live_state();
+    let initial = s.clone();
+    s = run(&s, 1, id(3), 0, registration(&s));
+    s = run(&s, 1, id(3), 200, Action::Bond { validator: id(3) });
+    let mut joined = false;
+    for _ in 0..120 {
+        let active = s
+            .economics
+            .as_ref()
+            .unwrap()
+            .live
+            .as_ref()
+            .unwrap()
+            .active
+            .clone();
+        let before = s.accounts[&id(1)].balance;
+        let t = tx(&s, 1, id(2), 1, Action::Transfer);
+        let next = transition(&s, &t).unwrap();
+        assert_eq!(next, transition(&s, &t).unwrap());
+        if active.iter().any(|(c, _)| *c == id(3)) {
+            // Sender pays 1+2, receives its exact rotating fee share as active owner.
+            let index = active.iter().position(|(c, _)| *c == id(3)).unwrap();
+            let reward = u64::from((index as u64 + 4 - s.epoch % 4) % 4 < 2);
+            assert_eq!(next.accounts[&id(1)].balance, before - 3 + reward);
+            joined = true;
+            s = next;
+            break;
+        }
+        s = next;
+    }
+    assert!(joined);
+    s = run(&s, 1, id(3), 0, Action::Exit { validator: id(3) });
+    s = run(&s, 1, id(3), 200, Action::Unbond { validator: id(3) });
+    let ticket = s.accounts[&id(1)].nonce - 1;
+    assert!(transition(&s, &tx(&s, 1, id(1), 0, Action::Withdraw { ticket })).is_err());
+    let unlock = s.economics.as_ref().unwrap().tickets[0].unlock;
+    while s.epoch < unlock {
+        s = run(&s, 1, id(2), 1, Action::Transfer);
+    }
+    assert!(!s
+        .economics
+        .as_ref()
+        .unwrap()
+        .live
+        .as_ref()
+        .unwrap()
+        .active
+        .iter()
+        .any(|(c, _)| *c == id(3)));
+    s = run(&s, 1, id(1), 0, Action::Withdraw { ticket });
+    assert!(transition(&s, &tx(&s, 1, id(1), 0, Action::Withdraw { ticket })).is_err());
+    assert_eq!(
+        s.economics.as_ref().unwrap().supply,
+        initial.economics.as_ref().unwrap().supply
+    );
+}
+#[test]
+fn live_objective_slash_covers_unbonding_and_rejects_replays_and_foreign_domains() {
+    let mut s = live_state();
+    s = run(&s, 1, id(10), 100, Action::Transfer);
+    s = run(&s, 1, id(3), 0, registration(&s));
+    s = run(&s, 1, id(3), 200, Action::Bond { validator: id(3) });
+    let offender = yami_chain::development_key("consensus", 0);
+    let validator = offender.verifying_key().to_bytes();
+    s = run(&s, 10, id(10), 50, Action::Unbond { validator });
+    let scope = s.economics.as_ref().unwrap().live.as_ref().unwrap().scope;
+    let mut g = yami_chain::Genesis::local();
+    g.enable_live_committees(scope).unwrap();
+    let (a, b) =
+        yami_chain_consensus::equivocation::devnet_double_vote_fixture(&g, &offender, 1).unwrap();
+    let action = Action::Slash {
+        left: a.clone(),
+        right: b.clone(),
+    };
+    let mut bad = a.clone();
+    let n = bad.len();
+    bad[n - 1] ^= 1;
+    assert!(transition(
+        &s,
+        &tx(
+            &s,
+            1,
+            id(1),
+            0,
+            Action::Slash {
+                left: bad,
+                right: b.clone()
+            }
+        )
+    )
+    .is_err());
+    let (foreign_a, foreign_b) = yami_chain_consensus::equivocation::devnet_double_vote_fixture(
+        &yami_chain::Genesis::local(),
+        &offender,
+        1,
+    )
+    .unwrap();
+    assert!(transition(
+        &s,
+        &tx(
+            &s,
+            1,
+            id(1),
+            0,
+            Action::Slash {
+                left: foreign_a,
+                right: foreign_b
+            }
+        )
+    )
+    .is_err());
+    s = run(&s, 1, id(1), 0, action.clone());
+    let e = s.economics.as_ref().unwrap();
+    assert_eq!(
+        e.bonds
+            .iter()
+            .find(|b| b.validator == validator)
+            .unwrap()
+            .amount,
+        25
+    );
+    assert_eq!(
+        e.tickets
+            .iter()
+            .find(|t| t.validator == validator)
+            .unwrap()
+            .amount,
+        25
+    );
+    assert!(
+        e.validators
+            .iter()
+            .find(|v| v.consensus == validator)
+            .unwrap()
+            .exited
+    );
+    assert!(transition(&s, &tx(&s, 1, id(1), 0, action)).is_err());
+    e.invariant(&s.accounts).unwrap();
 }

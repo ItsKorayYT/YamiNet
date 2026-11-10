@@ -7,6 +7,7 @@ fn fixture() -> (WitnessPolicy, WitnessedCertificate) {
         .map(|n| SigningKey::from_bytes(&[n; 32]))
         .collect();
     let policy = WitnessPolicy {
+        native_scope: None,
         committee: Committee {
             chain: 24,
             members: std::array::from_fn(|i| Member {
@@ -23,6 +24,7 @@ fn fixture() -> (WitnessPolicy, WitnessedCertificate) {
         observer: SigningKey::from_bytes(&[31; 32]).verifying_key().to_bytes(),
     };
     let statement = Statement {
+        next_validators: None,
         committee: policy.committee.id(),
         previous: policy.genesis.clone(),
         next: Head {
@@ -141,4 +143,68 @@ fn alternate_certificate_serializations_cannot_poison_native_queue_identity() {
         .is_err());
     assert_eq!(before, ledger.commitment());
     ledger.apply(&bytes(&qc)).unwrap();
+}
+
+fn resign(policy: &WitnessPolicy, qc: &mut WitnessedCertificate) {
+    for (i, a) in qc.certificate.approvals.iter_mut().enumerate() {
+        a.statement = qc.certificate.statement.clone();
+        a.signature = SigningKey::from_bytes(&[i as u8 + 1; 32])
+            .sign(&a.statement.message())
+            .to_bytes()
+            .to_vec();
+    }
+    for (i, c) in qc.confirmations.iter_mut().enumerate() {
+        c.policy = policy.id();
+        c.statement = qc.certificate.statement.clone();
+        c.signature = SigningKey::from_bytes(&[i as u8 + 11; 32])
+            .sign(&c.message())
+            .to_bytes()
+            .to_vec();
+    }
+}
+#[test]
+fn live_updates_are_witnessed_bounded_sorted_and_cannot_downgrade_or_leak_into_fixed_mode() {
+    let (mut policy, mut qc) = fixture();
+    policy.native_scope = Some([9; 32]);
+    let mut members = (40..44)
+        .map(|n| {
+            (
+                SigningKey::from_bytes(&[n; 32]).verifying_key().to_bytes(),
+                SigningKey::from_bytes(&[n + 10; 32])
+                    .verifying_key()
+                    .to_bytes(),
+            )
+        })
+        .collect::<Vec<_>>();
+    members.sort();
+    qc.certificate.statement.next_validators = Some(members.clone());
+    resign(&policy, &mut qc);
+    let original = Ledger::new(policy.clone()).unwrap();
+    let mut accepted = original.clone();
+    accepted.apply(&bytes(&qc)).unwrap();
+    assert_eq!(accepted.next_validators, Some(members.clone()));
+    for set in [
+        None,
+        Some(vec![]),
+        Some(vec![members[0]; 4]),
+        Some(members.iter().rev().copied().collect()),
+        Some(vec![members[0]; 17]),
+    ] {
+        let mut bad = qc.clone();
+        bad.certificate.statement.next_validators = set;
+        resign(&policy, &mut bad);
+        let mut ledger = original.clone();
+        assert!(ledger.apply(&bytes(&bad)).is_err());
+        assert_eq!(ledger.commitment(), original.commitment());
+    }
+    let mut bad = qc.clone();
+    bad.certificate.statement.previous = accepted.head.clone();
+    bad.certificate.statement.next.epoch = 2;
+    bad.certificate.statement.next_validators = None;
+    resign(&policy, &mut bad);
+    assert!(accepted.apply(&bytes(&bad)).is_err());
+    let (fixed, mut signed) = fixture();
+    signed.certificate.statement.next_validators = Some(members);
+    resign(&fixed, &mut signed);
+    assert!(Ledger::new(fixed).unwrap().apply(&bytes(&signed)).is_err());
 }

@@ -218,6 +218,28 @@ impl Candidates {
             })
             .transpose()
     }
+    /// Relay exact authenticated bytes. Never re-sign or relabel another proposer's
+    /// value when Malachite asks precommitting peers to improve data availability.
+    pub fn restream(
+        &mut self,
+        state: &State,
+        height: Height,
+        round: m::Round,
+        valid_round: m::Round,
+        address: Address,
+        value_id: Value,
+    ) -> Result<Option<Part>> {
+        if height.0 != state.height() + 1 {
+            return Ok(None);
+        }
+        Ok(self.recover(state, round)?.filter(|p| {
+            p.height == height
+                && p.round == round
+                && p.valid_round == valid_round
+                && p.proposer == address
+                && p.block.id().ok() == Some(value_id.0)
+        }))
+    }
     pub fn prune_finalized(&mut self, height: u64) -> Result<()> {
         self.validated = None;
         self.journal.remove_finalized_candidates(height)?;
@@ -258,6 +280,79 @@ mod tests {
             .sign(&proposal_preimage_for(state.genesis(), &part.proposal().unwrap()).unwrap())
             .to_bytes();
         part
+    }
+    #[test]
+    fn restream_preserves_original_signature_and_rejects_metadata_substitution() {
+        let path = std::env::temp_dir().join(format!(
+            "yami-relay-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let state = State::new(Genesis::local()).unwrap();
+        let part = signed(&state, m::Round::ZERO, "test-relay");
+        let journal = Arc::new(Journal::open(&path).unwrap());
+        let mut cache = Candidates::new(journal.clone());
+        assert!(cache.admit(&state, part.round, &part).unwrap());
+        let value = Value(part.block.id().unwrap());
+        let mut cache = Candidates::new(journal.clone());
+        assert_eq!(
+            cache
+                .restream(
+                    &state,
+                    part.height,
+                    part.round,
+                    part.valid_round,
+                    part.proposer,
+                    value
+                )
+                .unwrap(),
+            Some(part.clone())
+        );
+        for (h, r, v, a, id) in [
+            (
+                Height(2),
+                part.round,
+                part.valid_round,
+                part.proposer,
+                value,
+            ),
+            (
+                part.height,
+                m::Round::new(1),
+                part.valid_round,
+                part.proposer,
+                value,
+            ),
+            (
+                part.height,
+                part.round,
+                m::Round::ZERO,
+                part.proposer,
+                value,
+            ),
+            (
+                part.height,
+                part.round,
+                part.valid_round,
+                Address(Digest([0; 32])),
+                value,
+            ),
+            (
+                part.height,
+                part.round,
+                part.valid_round,
+                part.proposer,
+                Value(Digest([0; 32])),
+            ),
+        ] {
+            assert!(cache.restream(&state, h, r, v, a, id).unwrap().is_none());
+        }
+        drop(cache);
+        drop(journal);
+        std::fs::remove_dir_all(path).unwrap();
     }
     #[test]
     fn authenticated_flood_is_bounded_and_next_round_progresses_after_restart() {

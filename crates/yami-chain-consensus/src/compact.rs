@@ -147,6 +147,40 @@ fn local_base(journal: &Journal, genesis: &Genesis) -> Result<Option<VerifiedCom
     Ok(Some(verified))
 }
 pub fn replay_certified(journal: &Journal, genesis: &Genesis) -> Result<State> {
+    #[cfg(feature = "insecure-devnet-input")]
+    let native_state = State::new(genesis.clone())?;
+    #[cfg(feature = "insecure-devnet-input")]
+    if native_state.genesis().live_scope().is_some() {
+        if journal.path().join("compact-base.bin").exists()
+            || journal.path().join("compacted.bin").exists()
+        {
+            return Err(eyre!(
+                "live PoS requires complete certified archive history"
+            ));
+        }
+        let state = native_state;
+        let authority = state.genesis().clone();
+        let failure = std::cell::Cell::new(false);
+        let state = journal.replay_from_state_observed(
+            state,
+            ReplayBudget::default(),
+            |r| {
+                if failure.get() {
+                    return Err(std::io::Error::other("committee replay conflict"));
+                }
+                verify_record(&authority, r)
+            },
+            |s| {
+                if s.install_finalized_committee().is_err() {
+                    failure.set(true);
+                }
+            },
+        )?;
+        if failure.get() {
+            return Err(eyre!("committee replay conflict"));
+        }
+        return Ok(state);
+    }
     let base = local_base(journal, genesis)?;
     if let Some(base) = base {
         Ok(
@@ -692,5 +726,31 @@ mod tests {
         std::fs::remove_file(f.path.join("compact-base.bin")).unwrap();
         assert!(replay_certified(&f.journal, &f.genesis).is_err());
         assert!(f.journal.replay(f.genesis.clone(), |_| Ok(())).is_err());
+    }
+}
+
+#[cfg(all(test, feature = "insecure-devnet-input"))]
+mod live_replay_tests {
+    use super::*;
+    #[test]
+    fn live_replay_refuses_pruning_markers_instead_of_bootstrapping_from_them() {
+        let path = std::env::temp_dir().join(format!(
+            "yami-live-prune-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let journal = Journal::open(&path).unwrap();
+        journal
+            .write_once("compacted.bin", b"untrusted marker")
+            .unwrap();
+        let mut g = Genesis::local();
+        g.enable_live_committees([7; 32]).unwrap();
+        assert!(replay_certified(&journal, &g).is_err());
+        assert_eq!(g.committee_at(2), Err(yami_chain::Error::Genesis));
+        drop(journal);
+        std::fs::remove_dir_all(path).unwrap();
     }
 }

@@ -1,0 +1,32 @@
+{
+  "software_only": true,
+  "production_activation": false,
+  "live_pos": true,
+  "registered": "d83ed4789c156e0aca58faca9f04237c75f198a49f303ce24f5234da5c1bed33",
+  "joined_height": 13,
+  "earned": {
+    "height": 14,
+    "amount": 1
+  },
+  "signed_height": 23,
+  "candidate_crash_recovered": true,
+  "lag_across_epoch_recovered": true,
+  "slash_unbonding_penalty": 100,
+  "replayed_evidence_rejected": true,
+  "left_safely": true,
+  "withdrawal_after_unlock": 40,
+  "restart_preserved": true,
+  "history_verified": 41,
+  "gapped_history_rejected": true,
+  "final_height": 41,
+  "final_balance": {
+    "balance": 887,
+    "nonce": 6,
+    "portfolio": {
+      "bonded": 0,
+      "unbonding": 0,
+      "withdrawable": 0,
+      "withdrawals": []
+    }
+  }
+}

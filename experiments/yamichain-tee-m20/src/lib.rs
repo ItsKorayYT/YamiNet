@@ -468,7 +468,9 @@ impl State {
                 && self.economics.is_none()
                 && self.accounts.values().all(|a| a.nonce == 0),
         )?;
-        self.economics = Some(economics::Economics::new(policy, &self.accounts)?);
+        let mut e = economics::Economics::new(policy, &self.accounts)?;
+        e.bootstrap_live(self)?;
+        self.economics = Some(e);
         Ok(())
     }
 }

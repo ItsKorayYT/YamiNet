@@ -730,6 +730,7 @@ mod tests {
         );
         let payment = Payment::software(&c, &previous, transfer).unwrap();
         let statement = Statement {
+            next_validators: None,
             committee: c.id(),
             previous: previous.clone(),
             next: Head {
@@ -760,6 +761,7 @@ mod tests {
         qc.approvals = approvals[..3].to_vec();
         context.verify_receipt(&qc).unwrap();
         let witness_policy = WitnessPolicy {
+            native_scope: None,
             committee: c.clone(),
             genesis: previous.clone(),
             authorities: std::array::from_fn(|_| wallet().verifying_key().to_bytes()),

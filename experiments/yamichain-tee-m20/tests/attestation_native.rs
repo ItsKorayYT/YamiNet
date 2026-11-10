@@ -54,6 +54,7 @@ fn setup() -> (WalletGate, SigningKey, Committee, Head) {
         commitment: [7; 32],
     };
     let witness_policy = yamichain_tee_m20::witness::WitnessPolicy {
+        native_scope: None,
         committee: c.clone(),
         genesis: genesis.clone(),
         authorities: std::array::from_fn(|_| {
@@ -294,6 +295,7 @@ fn actual_wallet_cli_emits_challenges_but_no_payment_for_archived_evidence() {
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("trusted-wallet-config.json");
     let witness_policy = yamichain_tee_m20::witness::WitnessPolicy {
+        native_scope: None,
         committee: c.clone(),
         genesis: head.clone(),
         authorities: std::array::from_fn(|_| {
@@ -389,6 +391,7 @@ fn m23_attested_identity_binding_includes_the_witness_authority_policy() {
     let p = policy(verified.report());
     let (_, wallet, c, head) = setup();
     let w = yamichain_tee_m20::witness::WitnessPolicy {
+        native_scope: None,
         committee: c,
         genesis: head.clone(),
         authorities: std::array::from_fn(|_| {

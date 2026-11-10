@@ -174,3 +174,6 @@ committee/sequence/state changes and replay through native `State` execution,
 then actually stops/restarts and checks balances and identical finalized records
 at all four validators. It leaves the network running. The checked-in
 [smoke.json](smoke.json) records the executed result without private keys.
+
+See [the separate live PoS devnet](pos.md) for stake-selected Malachite committees,
+candidate synchronization, deterministic rewards and evidence-based slashing.

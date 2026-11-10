@@ -63,6 +63,8 @@ pub struct Statement {
     pub previous: Head,
     pub next: Head,
     pub transaction: Id,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub next_validators: Option<Vec<(Id, Id)>>,
 }
 impl Statement {
     pub fn message(&self) -> Vec<u8> {
@@ -147,6 +149,8 @@ pub struct WitnessPolicy {
     pub genesis: Head,
     pub authorities: [Id; 4],
     pub observer: Id,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub native_scope: Option<Id>,
 }
 impl WitnessPolicy {
     pub fn id(&self) -> Id {
@@ -289,12 +293,14 @@ impl WitnessedCertificate {
 pub struct Ledger {
     pub policy: WitnessPolicy,
     pub head: Head,
+    pub next_validators: Option<Vec<(Id, Id)>>,
 }
 impl Ledger {
     pub fn new(policy: WitnessPolicy) -> Result<Self> {
         policy.validate()?;
         Ok(Self {
             head: policy.genesis.clone(),
+            next_validators: None,
             policy,
         })
     }
@@ -303,11 +309,32 @@ impl Ledger {
         let qc: WitnessedCertificate = serde_json::from_slice(payload)?;
         check(bytes(&qc) == payload)?;
         qc.verify(&self.policy, &self.head)?;
+        let next = qc.certificate.statement.next_validators;
+        check(next.is_some() == self.policy.native_scope.is_some())?;
+        check(self.next_validators.is_none() || next.is_some())?;
+        if let Some(set) = &next {
+            check((4..=8).contains(&set.len()))?;
+            let mut keys = BTreeSet::new();
+            for (c, t) in set {
+                check(
+                    !VerifyingKey::from_bytes(c)?.is_weak()
+                        && !VerifyingKey::from_bytes(t)?.is_weak()
+                        && keys.insert(*c)
+                        && keys.insert(*t),
+                )?;
+            }
+            check(set.windows(2).all(|w| w[0].0 < w[1].0))?;
+        }
+        self.next_validators = next;
         self.head = qc.certificate.statement.next;
         Ok(())
     }
     pub fn commitment(&self) -> Vec<u8> {
-        bytes(&(self.policy.id(), &self.head))
+        if self.next_validators.is_some() {
+            bytes(&(self.policy.id(), &self.head, &self.next_validators))
+        } else {
+            bytes(&(self.policy.id(), &self.head))
+        }
     }
 }
 

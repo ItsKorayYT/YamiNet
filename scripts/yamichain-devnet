@@ -51,8 +51,9 @@ EXECUTORS = CONFIG.get('executors', [f'http://127.0.0.1:{28790+i}' for i in rang
 VALIDATORS = CONFIG.get('validators', [f'http://127.0.0.1:{28890+i}' for i in range(4)])
 WITNESSES = CONFIG.get('witnesses', [f'127.0.0.1:{28800+i}' for i in range(4)])
 PEERS = CONFIG.get('validator_peers', [f'127.0.0.1:{28900+i}' for i in range(4)])
-if any(len(v) != 4 for v in (EXECUTORS, VALIDATORS, WITNESSES, PEERS)):
-    raise SystemExit('exactly four pinned endpoints required per service class')
+LIVE_POS=bool((CONFIG.get('economics') or {}).get('live_pos',False))
+if len(EXECUTORS)!=4 or len(WITNESSES)!=4 or len(VALIDATORS)!=len(PEERS) or not 4<=len(PEERS)<=100:
+    raise SystemExit('four executor/witness endpoints and 4..100 matching validator/peer slots required')
 
 
 def bridge(op, **kw):
@@ -131,6 +132,7 @@ def bootstrap():
     committee = {'chain': CONFIG.get('chain',24), 'members': [{'signing': list(bytes.fromhex(k['address'])), 'transport': k['transport_public']} for k in keys]}
     genesis = bridge('genesis', allocations=allocations, root=root, economics=CONFIG.get('economics'), chain=committee['chain'])
     policy = dict(committee=committee, genesis=genesis, authorities=[list(bytes.fromhex(k['address'])) for k in auth], observer=list(bytes.fromhex(observer['address'])))
+    if LIVE_POS:policy['native_scope']=bridge('pos-scope',allocations=allocations,economics=CONFIG['economics'],chain=committee['chain'])
     for i in range(4):
         save(DATA / f'witness-{i}.json', dict(listen=WITNESSES[i], database=str(DATA / f'witness-{i}.sqlite'), policy=policy, index=i, signing_secret=auth[i]['secret']))
         save(DATA / f'executor-{i}.json', dict(snapshot=str(DATA / f'executor-{i}.state'), policy=policy, index=i, authority=WITNESSES[i], signing_secret=keys[i]['secret'], transport_secret=keys[i]['transport'], storage_secret=list(os.urandom(32)), root_secret=root, software_protocol_only=True, economics=CONFIG.get('economics')))
@@ -138,6 +140,10 @@ def bootstrap():
     save(DATA / 'state.json', dict(head=genesis, height=0))
     save(DATA / 'economic-policy.json', CONFIG.get('economics'))
     save(DATA / 'policy.json', policy)
+
+
+def history_records(height):
+    return [read(DATA/f'receipt-{h}.json')['finality']['record'] for h in range(1,height+1)]
 
 
 def finalize(pending):
@@ -155,7 +161,7 @@ def finalize(pending):
         for endpoint in VALIDATORS:
             try:
                 raw = http(endpoint + '/record/' + str(height), timeout=2)
-                receipts.append(bridge('finality', record=raw, height=height, certificate=qc, policy=read(DATA / 'policy.json')))
+                receipts.append(bridge('finality', record=raw, height=height, certificate=qc, policy=read(DATA / 'policy.json'), records=history_records(height-1) if LIVE_POS else None))
             except Exception:
                 pass
         # One authentic >2/3 Malachite commit establishes finality; require three durable archives for this devnet.
@@ -189,7 +195,9 @@ def validator_start(i):
     directory = DATA / f'validator-{i}'
     directory.mkdir(parents=True, exist_ok=True)
     env = dict(os.environ, YAMI_NATIVE_POLICY=str(DATA / 'policy.json'), YAMI_NATIVE_VALIDATOR_ENDPOINTS=','.join(PEERS))
-    return startchild([str(ROOT / 'target/release/yami-validator'), 'run', '--dir', str(directory), '--index', str(i),
+    keys=DATA/f'validator-key-{i}.bin'
+    if keys.exists():env['YAMI_NATIVE_KEYS']=str(keys)
+    return startchild([os.environ.get('YAMI_VALIDATOR_BINARY',str(ROOT / 'target/release/yami-validator')), 'run', '--dir', str(directory), '--index', str(i),
                        '--base-port', '28900', '--height', str(2**64-1), '--timeout', '3600'], f'consensus-{i}', env=env)
 
 
@@ -236,7 +244,7 @@ class Handler(BaseHTTPRequestHandler):
                     previous=None
                     if height>1:
                         previous=list((DATA/f'validator-{index}/native-finalized-{height-1}.bin').read_bytes())
-                    bridge('validate-certificate',payload=list(payload),policy=read(DATA/'policy.json'),height=height,previous_record=previous)
+                    bridge('validate-certificate',payload=list(payload),policy=read(DATA/'policy.json'),height=height,previous_record=previous,records=history_records(height-1) if LIVE_POS else None)
                     p = DATA / f'validator-{index}/devnet-payment-{height}.json'
                     if p.exists() and p.read_bytes() != payload:
                         raise RuntimeError('conflicting queued certificate')
@@ -259,6 +267,8 @@ class Handler(BaseHTTPRequestHandler):
                 result = json.loads(line)
                 if value is None and (not isinstance(result, dict) or 'Head' not in result):
                     raise RuntimeError('executor/witness not ready')
+            elif self.path == '/committee' and value is None:
+                result=bridge('live-committee',policy=read(DATA/'policy.json'),records=history_records(read(DATA/'state.json')['height']))
             elif self.path == '/fees' and value is None:
                 result=read(DATA/'economic-policy.json') if (DATA/'economic-policy.json').exists() else None
             elif self.path == '/policy' and value is None:
@@ -344,7 +354,7 @@ def balance(wallet):
 def fee_estimate(action='Transfer'):
     policy=http(URL+'/fees')
     if not policy:return {'fee':0,'units':1,'economics_enabled':False}
-    units={'Transfer':1,'Register':4,'Bond':2,'Unbond':2,'Withdraw':1,'Exit':1}[action]
+    units={'Transfer':1,'Register':4,'Bond':2,'Unbond':2,'Withdraw':1,'Exit':1,'Slash':4}[action]
     return {'fee':policy['base_fee']+policy['unit_fee']*units,'units':units,'economics_enabled':True}
 
 
@@ -399,7 +409,7 @@ def recover():
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('command', choices=['start', 'stop', 'status', 'wallet', 'faucet', 'send', 'balance', 'history', 'supervise', 'executor', 'witness', 'validator', 'gateway', 'bootstrap', 'fee', 'validator-key', 'register', 'stake', 'unstake', 'withdraw', 'exit'])
+    parser.add_argument('command', choices=['start', 'stop', 'status', 'wallet', 'faucet', 'send', 'balance', 'history', 'supervise', 'executor', 'witness', 'validator', 'gateway', 'bootstrap', 'fee', 'validator-key', 'register', 'stake', 'unstake', 'withdraw', 'exit', 'join-validator', 'slash'])
     parser.add_argument('args', nargs='*')
     a = parser.parse_args()
     DATA.mkdir(parents=True, exist_ok=True)
@@ -438,8 +448,18 @@ if __name__ == '__main__':
         for i in range(4):
             startchild(own('validator', i), f'validator-{i}')
             wait(VALIDATORS[i])
+        for i in range(4,len(VALIDATORS)):
+            if (DATA/f'validator-key-{i}.bin').exists():
+                startchild(own('validator',i),f'validator-{i}');wait(VALIDATORS[i])
         recover()
-        HTTPServer(listen(URL), Handler).serve_forever()
+        server=HTTPServer(listen(URL), Handler);server.timeout=1
+        launched={i for i in range(len(VALIDATORS)) if i<4 or (DATA/f'validator-key-{i}.bin').exists()}
+        while True:
+            server.handle_request()
+            for i in range(4,len(VALIDATORS)):
+                if i not in launched and (DATA/f'validator-key-{i}.bin').exists():
+                    startchild(own('validator',i),f'validator-{i}')
+                    launched.add(i)
     elif a.command in ('executor', 'validator', 'witness'):
         role, index = a.command, int(a.args[0])
         if role == 'witness':
@@ -506,6 +526,18 @@ if __name__ == '__main__':
     elif a.command in ('stake','unstake','exit'):
         name={'stake':'Bond','unstake':'Unbond','exit':'Exit'}[a.command]
         print(json.dumps(send(a.args[0],a.args[1],int(a.args[2]) if len(a.args)>2 else 0,{name:{'validator':list(bytes.fromhex(a.args[1]))}}),indent=2))
+    elif a.command == 'join-validator':
+        if not LIVE_POS:raise RuntimeError('live PoS profile required')
+        slot=int(a.args[1]);key=read(a.args[0])
+        if not 4<=slot<len(VALIDATORS):raise RuntimeError('configure a candidate endpoint slot')
+        target=DATA/f'validator-key-{slot}.bin'
+        fd=os.open(target,os.O_WRONLY|os.O_CREAT|os.O_EXCL,0o600)
+        with os.fdopen(fd,'wb') as f:
+            f.write(bytes(key['consensus_secret']+key['transport_secret']));f.flush();os.fsync(f.fileno())
+        print(json.dumps({'slot':slot,'consensus':key['consensus'],'endpoint':VALIDATORS[slot]}))
+    elif a.command == 'slash':
+        action={'Slash':{'left':list(pathlib.Path(a.args[1]).read_bytes()),'right':list(pathlib.Path(a.args[2]).read_bytes())}}
+        print(json.dumps(send(a.args[0],read(a.args[0])['address'],0,action),indent=2))
     elif a.command == 'withdraw':
         print(json.dumps(send(a.args[0],read(a.args[0])['address'],0,{'Withdraw':{'ticket':int(a.args[1])}}),indent=2))
     elif a.command == 'history':

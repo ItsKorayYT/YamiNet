@@ -4,6 +4,27 @@ use rand::{rngs::OsRng, RngCore};
 use std::{collections::BTreeMap, io::Read};
 use x25519_dalek::{PublicKey, StaticSecret};
 use yamichain_tee_m20::{quorum::*, witness::*, *};
+fn native_history(v: &serde_json::Value) -> Result<(yami_chain::State, Head)> {
+    let policy: WitnessPolicy = serde_json::from_value(v["policy"].clone())?;
+    let mut head = policy.genesis.clone();
+    let mut state =
+        yami_chain::State::insecure_devnet(yami_chain::Genesis::local(), &bytes(&policy))?;
+    let records: Vec<Vec<u8>> = serde_json::from_value(v["records"].clone())?;
+    for raw in records {
+        let r = yami_chain_storage::FinalizedRecord::decode(&raw)?;
+        yami_chain_consensus::verify_record(state.genesis(), &r)?;
+        state = state.execute(&r.block)?;
+        state.install_finalized_committee()?;
+        let yami_chain::Action::PrivatePaymentCertificateV1 { certificate } =
+            &r.block.transactions[0].action
+        else {
+            return Err("history action".into());
+        };
+        let qc: WitnessedCertificate = serde_json::from_slice(certificate)?;
+        head = qc.certificate.statement.next;
+    }
+    Ok((state, head))
+}
 fn main() -> Result<()> {
     let mut input = String::new();
     std::io::stdin().read_to_string(&mut input)?;
@@ -82,6 +103,20 @@ fn main() -> Result<()> {
                 &s,
             )?);
             serde_json::json!(true)
+        }
+        "pos-scope" => {
+            let allocations: Vec<(Id, u64)> = serde_json::from_value(v["allocations"].clone())?;
+            let accounts: BTreeMap<_, _> = allocations
+                .into_iter()
+                .map(|(id, balance)| (id, Account { balance, nonce: 0 }))
+                .collect();
+            let policy: economics::Policy = serde_json::from_value(v["economics"].clone())?;
+            serde_json::json!(hash(&bytes(&(
+                "YAMI-LIVE-POS-SCOPE-1",
+                v["chain"].as_u64().ok_or("chain")?,
+                accounts.into_iter().collect::<Vec<_>>(),
+                policy
+            ))))
         }
         "genesis" => {
             let allocations: Vec<(Id, u64)> = serde_json::from_value(v["allocations"].clone())?;
@@ -190,7 +225,13 @@ fn main() -> Result<()> {
             }
             let policy: WitnessPolicy = serde_json::from_value(v["policy"].clone())?;
             let height = v["height"].as_u64().filter(|h| *h > 0).ok_or("height")?;
-            let previous = if height == 1 {
+            let previous = if policy.native_scope.is_some() {
+                let (state, head) = native_history(&v)?;
+                if state.height() + 1 != height {
+                    return Err("history height".into());
+                }
+                head
+            } else if height == 1 {
                 policy.genesis.clone()
             } else {
                 let raw: Vec<u8> = serde_json::from_value(v["previous_record"].clone())?;
@@ -216,6 +257,21 @@ fn main() -> Result<()> {
             qc.verify(&policy, &previous)?;
             serde_json::json!({"valid":true})
         }
+        "devnet-double-vote-fixture" => {
+            let (state, _) = native_history(&v)?;
+            let secret: Id = serde_json::from_value(v["secret"].clone())?;
+            let height = v["height"].as_u64().ok_or("height")?;
+            let (left, right) = yami_chain_consensus::equivocation::devnet_double_vote_fixture(
+                state.genesis(),
+                &yami_chain::SigningKey::from_bytes(&secret),
+                height,
+            )?;
+            serde_json::json!({"left":left,"right":right})
+        }
+        "live-committee" => {
+            let (state, _) = native_history(&v)?;
+            serde_json::json!({"height":state.height()+1,"members":state.genesis().committee_at(state.height()+1)?.members().iter().map(|m|hex::encode(m.consensus_key)).collect::<Vec<_>>()})
+        }
         "audit-native" => {
             let mut state = yami_chain::State::insecure_devnet(
                 yami_chain::Genesis::local(),
@@ -226,21 +282,32 @@ fn main() -> Result<()> {
                 let record = yami_chain_storage::FinalizedRecord::decode(&raw)?;
                 yami_chain_consensus::verify_record(state.genesis(), &record)?;
                 state = state.execute(&record.block)?;
+                state.install_finalized_committee()?;
             }
             let before = state.root();
             let accepted = if v["candidate"].is_null() {
                 false
+            } else if let Ok(candidate) =
+                serde_json::from_value::<WitnessedCertificate>(v["candidate"].clone())
+            {
+                // Structured tool input has no JSON field ordering. Encode the typed
+                // protocol canonically, while still rejecting unknown/extra fields.
+                if serde_json::to_value(&candidate)? != v["candidate"] {
+                    false
+                } else {
+                    let owner = yami_chain::development_key("registry", 0);
+                    let tx = yami_chain::Transaction::devnet_certificate(
+                        bytes(&candidate),
+                        state.nonce(&owner.verifying_key().to_bytes()),
+                        state.height() + 1,
+                        &owner,
+                    )?;
+                    state.propose(vec![tx]).is_ok()
+                }
             } else {
-                let owner = yami_chain::development_key("registry", 0);
-                let tx = yami_chain::Transaction::devnet_certificate(
-                    serde_json::to_vec(&v["candidate"])?,
-                    state.nonce(&owner.verifying_key().to_bytes()),
-                    state.height() + 1,
-                    &owner,
-                )?;
-                state.propose(vec![tx]).is_ok()
+                false
             };
-            serde_json::json!({"height":state.height(),"root":before.to_string(),"candidate_accepted":accepted,"state_unchanged":before==state.root()})
+            serde_json::json!({"height":state.height(),"root":before.to_string(),"candidate_accepted":accepted,"state_unchanged":before==state.root(),"future_committee_installed":state.genesis().committee_at(state.height()+2).is_ok()})
         }
         "finality" => {
             let height = v["height"].as_u64().ok_or("height")?;
@@ -249,7 +316,20 @@ fn main() -> Result<()> {
             if record.block.header.height != height {
                 return Err("height mismatch".into());
             }
-            yami_chain_consensus::verify_record(&yami_chain::Genesis::local(), &record)?;
+            let live_policy: WitnessPolicy = serde_json::from_value(v["policy"].clone())?;
+            if live_policy.native_scope.is_some() {
+                let (state, head) = native_history(&v)?;
+                if state.height() + 1 != height {
+                    return Err("history height".into());
+                }
+                yami_chain_consensus::verify_record(state.genesis(), &record)?;
+                state.execute(&record.block)?;
+                let submitted: WitnessedCertificate =
+                    serde_json::from_value(v["certificate"].clone())?;
+                submitted.verify(&live_policy, &head)?;
+            } else {
+                yami_chain_consensus::verify_record(&yami_chain::Genesis::local(), &record)?;
+            }
             let qc: WitnessedCertificate = serde_json::from_value(v["certificate"].clone())?;
             let policy: WitnessPolicy = serde_json::from_value(v["policy"].clone())?;
             qc.verify(&policy, &qc.certificate.statement.previous)?;
@@ -265,7 +345,16 @@ fn main() -> Result<()> {
                 }
             }
             let accepted = accepted.ok_or("native transition certificate absent")?;
-            serde_json::json!({"height":height,"block":record.block.id()?.to_string(),"action":"PrivatePaymentCertificateV1","certificate":accepted,"record":raw,"consensus":"YamiChain Malachite commit certificate"})
+            let mut g = yami_chain::Genesis::local();
+            if let Some(scope) = policy.native_scope {
+                g.enable_live_committees(scope)?;
+            }
+            let signers = yami_chain_consensus::decode_certificate(&g, &record.certificate)?
+                .commit_signatures
+                .iter()
+                .map(|s| hex::encode(s.address.0 .0))
+                .collect::<Vec<_>>();
+            serde_json::json!({"height":height,"block":record.block.id()?.to_string(),"action":"PrivatePaymentCertificateV1","certificate":accepted,"record":raw,"consensus":"YamiChain Malachite commit certificate","signers":signers})
         }
         _ => return Err("unknown operation".into()),
     };

@@ -1,0 +1,11 @@
+{
+  "software_only": true,
+  "production_activation": false,
+  "encrypted_pos_wallet": true,
+  "authenticated_backup_restore": true,
+  "restored_portfolio_matches": true,
+  "password_and_seeds_not_in_arguments": true,
+  "mode_0600": true,
+  "independently_verified_height": 41,
+  "block": "c25fa7dda006e75a641a6358d7c3eb3026954b7cdee90c9081f99f5c1b6f5bf9"
+}

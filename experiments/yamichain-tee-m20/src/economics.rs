@@ -1,5 +1,5 @@
 //! Finite-supply accounting executed inside the existing witnessed private ledger.
-//! Opt-in genesis policy only. This does not activate production PoS or change Malachite membership.
+//! Opt-in genesis policy only. Live devnet membership is witnessed; production PoS stays closed.
 use crate::*;
 const MAX_VALIDATORS: usize = 128;
 const MAX_BONDS: usize = 4096;
@@ -15,6 +15,8 @@ pub struct Policy {
     pub epoch_blocks: u64,
     pub active_limit: usize,
     pub fee_recipients: Vec<Id>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub live_pos: bool,
 }
 impl Policy {
     pub fn validate(&self) -> Result<()> {
@@ -32,6 +34,14 @@ impl Policy {
             VerifyingKey::from_bytes(id)?;
             check(seen.insert(*id))?;
         }
+        if self.live_pos {
+            check(
+                self.fee_recipients.len() == 4
+                    && (4..=8).contains(&self.active_limit)
+                    && self.unbonding_blocks
+                        > self.epoch_blocks.checked_mul(2).ok_or("epoch overflow")?,
+            )?;
+        }
         self.fee(4)?;
         Ok(())
     }
@@ -45,6 +55,10 @@ impl Policy {
 }
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub enum Action {
+    Slash {
+        left: Vec<u8>,
+        right: Vec<u8>,
+    },
     Transfer,
     Register {
         consensus: Id,
@@ -69,7 +83,7 @@ impl Action {
     pub fn units(&self) -> u64 {
         match self {
             Self::Transfer | Self::Withdraw { .. } | Self::Exit { .. } => 1,
-            Self::Register { .. } => 4,
+            Self::Register { .. } | Self::Slash { .. } => 4,
             _ => 2,
         }
     }
@@ -109,6 +123,8 @@ pub struct Economics {
     pub bonds: Vec<Bond>,
     pub tickets: Vec<Ticket>,
     pub fees_collected: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub live: Option<LivePos>,
 }
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Portfolio {
@@ -157,6 +173,7 @@ impl Economics {
             bonds: vec![],
             tickets: vec![],
             fees_collected: 0,
+            live: None,
         })
     }
     pub fn invariant(&self, accounts: &BTreeMap<Id, Account>) -> Result<()> {
@@ -166,6 +183,28 @@ impl Economics {
                 && self.bonds.len() <= MAX_BONDS
                 && self.tickets.len() <= MAX_TICKETS,
         )?;
+        check(self.policy.live_pos == self.live.is_some())?;
+        if let Some(l) = &self.live {
+            check(
+                (4..=8).contains(&l.active.len())
+                    && l.history.first().map(|h| h.0) == Some(1)
+                    && l.history.last().is_some_and(|h| h.1 == l.active)
+                    && l.history.windows(2).all(|w| w[0].0 < w[1].0),
+            )?;
+            let mut seen = std::collections::BTreeSet::new();
+            check(l.punished.iter().all(|id| seen.insert(*id)))?;
+            for (_, set) in &l.history {
+                check(
+                    (4..=8).contains(&set.len())
+                        && set.windows(2).all(|w| w[0].0 < w[1].0)
+                        && set.iter().all(|(c, t)| {
+                            self.validators
+                                .iter()
+                                .any(|v| v.consensus == *c && v.transport == *t)
+                        }),
+                )?;
+            }
+        }
         let sum = accounts
             .values()
             .map(|a| u128::from(a.balance))
@@ -262,6 +301,10 @@ impl Economics {
             debit(s, t.sender, fee)?;
         }
         match &intent.action {
+            Action::Slash { left, right } => {
+                check(t.amount == 0)?;
+                self.slash(s, left, right)?;
+            }
             Action::Transfer => {
                 check(t.amount > 0 && t.sender != t.recipient)?;
                 debit(s, t.sender, t.amount)?;
@@ -364,9 +407,23 @@ impl Economics {
         if withdrawal {
             debit(s, t.sender, fee)?;
         }
-        let count = self.policy.fee_recipients.len() as u64;
+        let recipients = if let Some(live) = &self.live {
+            live.active
+                .iter()
+                .map(|(c, _)| {
+                    self.validators
+                        .iter()
+                        .find(|v| v.consensus == *c)
+                        .map(|v| v.owner)
+                        .ok_or("missing active owner".into())
+                })
+                .collect::<Result<Vec<_>>>()?
+        } else {
+            self.policy.fee_recipients.clone()
+        };
+        let count = recipients.len() as u64;
         let offset = s.epoch % count;
-        for (i, id) in self.policy.fee_recipients.iter().enumerate() {
+        for (i, id) in recipients.iter().enumerate() {
             let n = fee / count + u64::from(((i as u64 + count - offset) % count) < fee % count);
             credit(s, *id, n)?;
         }
@@ -377,6 +434,176 @@ impl Economics {
         self.validators.sort_by_key(|v| v.consensus);
         self.bonds.sort_by_key(|b| (b.owner, b.validator));
         self.tickets.sort_by_key(|t| (t.owner, t.id));
+        let height = s.epoch.checked_add(1).ok_or("height overflow")?;
+        if self.live.is_some() && height % self.policy.epoch_blocks == 0 {
+            self.rotate(height)?;
+        }
         self.invariant(&s.accounts)
+    }
+}
+
+/// Consensus identities only. Monetary weights and reward accounts stay encrypted.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct LivePos {
+    pub active: Vec<(Id, Id)>,
+    pub history: Vec<(u64, Vec<(Id, Id)>)>,
+    pub punished: Vec<Id>,
+    pub slash_sink: Id,
+    pub scope: Id,
+}
+impl Economics {
+    pub fn bootstrap_live(&mut self, s: &mut State) -> Result<()> {
+        if !self.policy.live_pos {
+            return Ok(());
+        }
+        check(self.validators.is_empty() && self.live.is_none())?;
+        let scope = hash(&bytes(&(
+            "YAMI-LIVE-POS-SCOPE-1",
+            s.chain,
+            s.accounts
+                .iter()
+                .map(|(k, a)| (*k, a.clone()))
+                .collect::<Vec<_>>(),
+            &self.policy,
+        )));
+        let treasury = *s.accounts.keys().next().ok_or("treasury")?;
+        let mut active = vec![];
+        for i in 0..4u8 {
+            let consensus = yami_chain::development_key("consensus", i)
+                .verifying_key()
+                .to_bytes();
+            let transport = yami_chain::development_key("transport", i)
+                .verifying_key()
+                .to_bytes();
+            let owner = self.policy.fee_recipients[i as usize];
+            debit(s, treasury, self.policy.minimum_stake)?;
+            self.validators.push(Validator {
+                owner,
+                consensus,
+                transport,
+                exited: false,
+            });
+            self.bonds.push(Bond {
+                owner,
+                validator: consensus,
+                amount: self.policy.minimum_stake,
+            });
+            active.push((consensus, transport));
+        }
+        active.sort();
+        self.validators.sort_by_key(|v| v.consensus);
+        self.bonds.sort_by_key(|b| (b.owner, b.validator));
+        self.live = Some(LivePos {
+            history: vec![(1, active.clone())],
+            active,
+            punished: vec![],
+            slash_sink: treasury,
+            scope,
+        });
+        self.invariant(&s.accounts)
+    }
+    fn rotate(&mut self, height: u64) -> Result<()> {
+        let mut eligible = self.eligible()?;
+        // Deterministic stake-weighted sampling without replacement. The disposable
+        // devnet seed is predictable; this does not claim a production randomness beacon.
+        eligible.sort_by_key(|(c, _, _)| *c);
+        check(eligible.len() >= 4)?;
+        let count = self.policy.active_limit.min(eligible.len());
+        let scope = self.live.as_ref().ok_or("live PoS disabled")?.scope;
+        let mut selected = Vec::new();
+        let mut draw = 0u64;
+        for _ in 0..count {
+            let total = eligible
+                .iter()
+                .try_fold(0u64, |n, (_, _, w)| n.checked_add(*w))
+                .ok_or("stake overflow")?;
+            let limit = u64::MAX - u64::MAX % total;
+            let ticket = loop {
+                let digest = hash(&bytes(&("YAMI-POS-DRAW-1", scope, height, draw)));
+                draw = draw.checked_add(1).ok_or("draw overflow")?;
+                let n = u64::from_be_bytes(digest[..8].try_into()?);
+                if n < limit {
+                    break n % total;
+                }
+            };
+            let mut sum = 0;
+            let index = eligible
+                .iter()
+                .position(|(_, _, w)| {
+                    sum += *w;
+                    ticket < sum
+                })
+                .ok_or("selection")?;
+            let (c, t, _) = eligible.remove(index);
+            selected.push((c, t));
+        }
+        selected.sort();
+        let l = self.live.as_mut().ok_or("live PoS disabled")?;
+        l.active = selected.clone();
+        l.history
+            .push((height.checked_add(1).ok_or("height overflow")?, selected));
+        Ok(())
+    }
+    fn slash(&mut self, s: &mut State, left: &[u8], right: &[u8]) -> Result<()> {
+        let l = self.live.as_ref().ok_or("live PoS disabled")?;
+        let mut g = yami_chain::Genesis::local();
+        g.enable_live_committees(l.scope)?;
+        // Only finalized selection history authenticates evidence membership.
+        let through = s.epoch.checked_add(1).ok_or("height overflow")?;
+        for h in 2..=through {
+            let set = &l
+                .history
+                .iter()
+                .rev()
+                .find(|(first, _)| *first <= h)
+                .ok_or("history")?
+                .1;
+            g.install_finalized_committee(
+                h,
+                yami_chain::ValidatorSet::new(
+                    set.iter()
+                        .map(|(c, t)| yami_chain::Member {
+                            consensus_key: *c,
+                            transport_key: *t,
+                            power: 1,
+                        })
+                        .collect(),
+                )?,
+            )?;
+        }
+        let e = yami_chain_consensus::equivocation::verify_double_vote(&g, left, right)?;
+        check(
+            e.height() <= s.epoch
+                && s.epoch - e.height() <= self.policy.epoch_blocks
+                && !l.punished.contains(&e.id().0),
+        )?;
+        let mut penalty = 0u64;
+        for amount in self
+            .bonds
+            .iter_mut()
+            .filter(|b| b.validator == e.offender())
+            .map(|b| &mut b.amount)
+            .chain(
+                self.tickets
+                    .iter_mut()
+                    .filter(|t| t.validator == e.offender())
+                    .map(|t| &mut t.amount),
+            )
+        {
+            let n = *amount / 2 + *amount % 2;
+            *amount -= n;
+            penalty = penalty.checked_add(n).ok_or("slash overflow")?;
+        }
+        check(penalty > 0)?;
+        credit(s, l.slash_sink, penalty)?;
+        self.bonds.retain(|b| b.amount > 0);
+        self.tickets.retain(|t| t.amount > 0);
+        self.validators
+            .iter_mut()
+            .find(|v| v.consensus == e.offender())
+            .ok_or("offender")?
+            .exited = true;
+        self.live.as_mut().unwrap().punished.push(e.id().0);
+        Ok(())
     }
 }

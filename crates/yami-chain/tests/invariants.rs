@@ -111,6 +111,13 @@ fn amount_overflow_underflow_and_privacy_types_never_decode_as_actions() {
     let tag = 7 + 4 + CHAIN_ID.len() + 2 + 8 + 8 + 8 + 32;
     for unknown in 2..=u8::MAX {
         bytes[tag] = unknown;
+        #[cfg(feature = "insecure-devnet-input")]
+        if unknown == 240 {
+            // The explicit devnet tag is recognized only with the feature, but
+            // these naming bytes still cannot become a valid devnet certificate.
+            assert_eq!(Transaction::decode(&bytes), Err(Error::Version));
+            continue;
+        }
         assert_eq!(Transaction::decode(&bytes), Err(Error::Unsupported));
     }
 }

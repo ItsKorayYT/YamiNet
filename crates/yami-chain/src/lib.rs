@@ -106,6 +106,8 @@ pub struct Genesis {
     pub protocol: u16,
     pub features: u64,
     pub epochs: Vec<Epoch>,
+    #[cfg(feature = "insecure-devnet-input")]
+    pub live_committees: committee::LiveCommittees,
 }
 impl Genesis {
     pub fn local() -> Self {
@@ -130,6 +132,11 @@ impl Genesis {
         for epoch in &self.epochs {
             w.u64(epoch.first_height);
             epoch.validators.put(&mut w);
+        }
+        #[cfg(feature = "insecure-devnet-input")]
+        if let Some(scope) = self.live_committees.1 {
+            w.raw(b"YC-LIVE-POS-1");
+            w.raw(&scope);
         }
         w.0
     }
@@ -378,7 +385,19 @@ impl PartialEq for State {
 }
 impl Eq for State {}
 impl State {
-    pub fn new(genesis: Genesis) -> Result<Self> {
+    #[allow(unused_mut)]
+    pub fn new(mut genesis: Genesis) -> Result<Self> {
+        #[cfg(feature = "insecure-devnet-input")]
+        if let Some(path) = std::env::var_os("YAMI_NATIVE_POLICY") {
+            if let Some(scope) = native_scope(&std::fs::read(path).map_err(|_| Error::Genesis)?)? {
+                if genesis.live_committees.1.is_none() {
+                    genesis.enable_live_committees(scope)?;
+                }
+                if genesis.live_committees.1 != Some(scope) {
+                    return Err(Error::Genesis);
+                }
+            }
+        }
         genesis.validate()?;
         let state = Self::from_validated_genesis(genesis);
         #[cfg(feature = "insecure-devnet-input")]
@@ -396,7 +415,10 @@ impl State {
     }
     /// Separate, opt-in insecure network profile; absent from production builds.
     #[cfg(feature = "insecure-devnet-input")]
-    pub fn insecure_devnet(genesis: Genesis, policy: &[u8]) -> Result<Self> {
+    pub fn insecure_devnet(mut genesis: Genesis, policy: &[u8]) -> Result<Self> {
+        if let Some(scope) = serde_json_policy(policy)?.native_scope {
+            genesis.enable_live_committees(scope)?;
+        }
         genesis.validate()?;
         let mut state = Self::from_validated_genesis(genesis);
         state.native = Some(
@@ -511,7 +533,10 @@ impl State {
             if !seen.insert(hash(b"yamichain-tx-id-v1", &bytes)) {
                 return Err(Error::Duplicate);
             }
-            if self.reserved_keys.contains(&tx.registry_owner) {
+            let reserved = self.reserved_keys.contains(&tx.registry_owner);
+            #[cfg(feature = "insecure-devnet-input")]
+            let reserved = reserved || self.genesis.is_live_reserved_key(&tx.registry_owner);
+            if reserved {
                 return Err(Error::Signature);
             }
             verify(&tx.registry_owner, &tx.signing_bytes()?, &tx.signature)?;
@@ -661,4 +686,35 @@ impl Transaction {
         tx.signature = owner.sign(&tx.signing_bytes()?).to_bytes();
         Ok(tx)
     }
+}
+
+#[cfg(feature = "insecure-devnet-input")]
+impl State {
+    /// Call only after authenticating and durably appending the containing consensus record.
+    pub fn install_finalized_committee(&self) -> Result<()> {
+        if let Some(set) = self
+            .native
+            .as_ref()
+            .and_then(|n| n.next_validators.as_ref())
+        {
+            let members = set
+                .iter()
+                .map(|(c, t)| Member {
+                    consensus_key: *c,
+                    transport_key: *t,
+                    power: 1,
+                })
+                .collect();
+            self.genesis.install_finalized_committee(
+                self.height.checked_add(1).ok_or(Error::Overflow)?,
+                ValidatorSet::new(members)?,
+            )?;
+        }
+        Ok(())
+    }
+}
+
+#[cfg(feature = "insecure-devnet-input")]
+pub fn native_scope(raw: &[u8]) -> Result<Option<[u8; 32]>> {
+    Ok(serde_json_policy(raw)?.native_scope)
 }

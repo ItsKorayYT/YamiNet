@@ -13,6 +13,8 @@ pub struct WitnessPolicy {
     pub genesis: Head,
     pub authorities: [Id; 4],
     pub observer: Id,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub native_scope: Option<Id>,
 }
 impl WitnessPolicy {
     pub fn id(&self) -> Id {
@@ -647,6 +649,13 @@ pub struct WitnessedReplica {
 impl WitnessedReplica {
     pub fn create(path: &Path, client: Client, keys: ReplicaKeys, state: &State) -> Result<Self> {
         check(client.policy.member(client.index)? == keys.signing.verifying_key().to_bytes())?;
+        check(
+            state
+                .economics
+                .as_ref()
+                .and_then(|e| e.live.as_ref().map(|l| l.scope))
+                == client.policy.native_scope,
+        )?;
         let anchor = Replica::cache_anchor(path);
         let inner = Replica::create(
             path,
@@ -687,6 +696,7 @@ impl WitnessedReplica {
         Ok(result)
     }
     fn consistent(&self) -> Result<()> {
+        check(self.inner.native_scope()? == self.client.policy.native_scope)?;
         let (head, pending, cert) = self.inner.metadata()?;
         check(
             head == self.record.head

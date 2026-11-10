@@ -195,6 +195,7 @@ impl Lab {
         };
         let head = state_head(&genesis, root);
         let policy = WitnessPolicy {
+            native_scope: None,
             committee,
             genesis: head.clone(),
             authorities: std::array::from_fn(|i| authorities[i].verifying_key().to_bytes()),
@@ -572,6 +573,7 @@ fn witness_requests_are_authenticated_replay_protected_and_compare_and_swap() {
         )
         .is_err());
     let statement = Statement {
+        next_validators: None,
         committee: lab.policy.committee.id(),
         previous: r.head.clone(),
         next: Head {

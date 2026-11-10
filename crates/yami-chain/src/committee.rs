@@ -1,5 +1,5 @@
-//! Deterministic committees fixed by an externally pinned genesis. No election,
-//! monetary stake, governance override or network-supplied membership update.
+//! Production committees are fixed by externally pinned genesis. The explicit
+//! insecure devnet feature can derive live committees from finalized witnessed execution.
 use crate::{codec::Writer, development_key, hash, Digest, Error, Result, VerifyingKey};
 use std::collections::{BTreeMap, BTreeSet};
 pub const MAX_VALIDATORS: usize = 100;
@@ -137,11 +137,13 @@ impl crate::Genesis {
             protocol: crate::PROTOCOL,
             features: 0,
             epochs,
+            #[cfg(feature = "insecure-devnet-input")]
+            live_committees: LiveCommittees::default(),
         };
         g.validate()?;
         Ok(g)
     }
-    pub fn committee_at(&self, height: u64) -> Result<&ValidatorSet> {
+    fn fixed_committee_at(&self, height: u64) -> Result<&ValidatorSet> {
         if height == 0 {
             return Err(Error::Header);
         }
@@ -152,7 +154,27 @@ impl crate::Genesis {
             .map(|e| &e.validators)
             .ok_or(Error::Genesis)
     }
+    #[cfg(not(feature = "insecure-devnet-input"))]
+    pub fn committee_at(&self, height: u64) -> Result<&ValidatorSet> {
+        self.fixed_committee_at(height)
+    }
+    #[cfg(feature = "insecure-devnet-input")]
+    pub fn committee_at(&self, height: u64) -> Result<ValidatorSet> {
+        if let Some(view) = &self.live_committees.0 {
+            return view
+                .read()
+                .map_err(|_| Error::Genesis)?
+                .get(&height)
+                .cloned()
+                .ok_or(Error::Genesis);
+        }
+        Ok(self.fixed_committee_at(height)?.clone())
+    }
     pub fn is_reserved_key(&self, key: &[u8; 32]) -> bool {
+        #[cfg(feature = "insecure-devnet-input")]
+        if self.is_live_reserved_key(key) {
+            return true;
+        }
         self.epochs
             .iter()
             .flat_map(|e| e.validators.members())
@@ -162,5 +184,82 @@ impl crate::Genesis {
         self.epochs
             .iter()
             .any(|e| e.validators.member(key).is_some())
+    }
+}
+
+/// Derived from sequentially authenticated devnet history. Only the fixed network scope enters genesis identity.
+/// Unknown future heights fail closed. Speculative execution never updates this view.
+#[cfg(feature = "insecure-devnet-input")]
+#[derive(Clone, Debug, Default)]
+pub struct LiveCommittees(
+    pub(crate) Option<std::sync::Arc<std::sync::RwLock<BTreeMap<u64, ValidatorSet>>>>,
+    pub(crate) Option<[u8; 32]>,
+);
+#[cfg(feature = "insecure-devnet-input")]
+impl PartialEq for LiveCommittees {
+    fn eq(&self, other: &Self) -> bool {
+        self.1 == other.1
+    }
+}
+#[cfg(feature = "insecure-devnet-input")]
+impl Eq for LiveCommittees {}
+#[cfg(feature = "insecure-devnet-input")]
+impl crate::Genesis {
+    pub fn live_scope(&self) -> Option<[u8; 32]> {
+        self.live_committees.1
+    }
+    pub fn enable_live_committees(&mut self, scope: [u8; 32]) -> Result<()> {
+        if self.epochs != Self::local().epochs {
+            return Err(Error::Genesis);
+        }
+        let bootstrap = self
+            .epochs
+            .first()
+            .ok_or(Error::Genesis)?
+            .validators
+            .clone();
+        self.live_committees = LiveCommittees(
+            Some(std::sync::Arc::new(std::sync::RwLock::new(BTreeMap::from(
+                [(1, bootstrap)],
+            )))),
+            Some(scope),
+        );
+        Ok(())
+    }
+    pub fn install_finalized_committee(&self, height: u64, set: ValidatorSet) -> Result<()> {
+        if let Some(view) = &self.live_committees.0 {
+            let mut view = view.write().map_err(|_| Error::Genesis)?;
+            if let Some(old) = view.get(&height) {
+                if old != &set {
+                    return Err(Error::Genesis);
+                }
+            } else {
+                if height == 0 || !view.contains_key(&(height - 1)) {
+                    return Err(Error::Genesis);
+                }
+                view.insert(height, set);
+            }
+        }
+        Ok(())
+    }
+    pub fn is_live_reserved_key(&self, key: &[u8; 32]) -> bool {
+        self.live_committees.0.as_ref().is_some_and(|view| {
+            view.read().map_or(true, |sets| {
+                sets.values().any(|set| {
+                    set.members()
+                        .iter()
+                        .any(|m| m.consensus_key == *key || m.transport_key == *key)
+                })
+            })
+        })
+    }
+    pub fn live_transport(&self, key: &[u8; 32]) -> Option<[u8; 32]> {
+        self.live_committees
+            .0
+            .as_ref()?
+            .read()
+            .ok()?
+            .values()
+            .find_map(|s| s.member(key).map(|m| m.transport_key))
     }
 }

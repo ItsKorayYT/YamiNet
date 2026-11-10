@@ -482,6 +482,7 @@ mod tests {
         });
         members[0] = g.identity().member.clone();
         let policy = WitnessPolicy {
+            native_scope: None,
             committee: Committee { chain: 24, members },
             genesis: Head {
                 chain: 24,

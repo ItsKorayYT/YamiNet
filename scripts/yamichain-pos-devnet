@@ -1,0 +1,6 @@
+#!/bin/sh
+set -eu
+ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+export YAMI_DEVNET_CONFIG=${YAMI_DEVNET_CONFIG:-$ROOT/docs/devnet/pos-network.json}
+export YAMI_DEVNET_DIR=${YAMI_DEVNET_DIR:-$ROOT/work/yamichain-pos-devnet}
+exec "$ROOT/scripts/yamichain-devnet" "$@"
