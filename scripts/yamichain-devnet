@@ -129,6 +129,7 @@ def own(command, i=None):
 
 
 def bootstrap():
+    if CONFIG.get('p2p_discovery') and not LIVE_POS:raise RuntimeError('permissionless peer discovery requires the live software PoS profile')
     if (DATA / 'policy.json').exists():
         pinned=read(DATA/'economic-policy.json') if (DATA/'economic-policy.json').exists() else None
         if read(DATA/'policy.json')['committee']['chain']!=CONFIG.get('chain',24):raise RuntimeError('chain ID is pinned at genesis')
@@ -169,6 +170,7 @@ def finalize(pending):
     for endpoint in VALIDATORS:
         try:
             http(endpoint + '/propose/' + str(height), {'payload': pending['payload']}, timeout=2)
+            if CONFIG.get('p2p_discovery'):break # One ingress; authenticated P2P relays to the other proposers.
         except Exception:
             pass
     receipts = []
@@ -212,6 +214,8 @@ def validator_start(i):
     directory = DATA / f'validator-{i}'
     directory.mkdir(parents=True, exist_ok=True)
     env = dict(os.environ, YAMI_NATIVE_POLICY=str(DATA / 'policy.json'), YAMI_NATIVE_VALIDATOR_ENDPOINTS=','.join(PEERS))
+    if CONFIG.get('p2p_discovery'):
+        env.update(YAMI_NATIVE_DISCOVERY='1',YAMI_NATIVE_DISCOVERY_LISTEN=PEERS[i],YAMI_NATIVE_DISCOVERY_SEEDS=','.join(CONFIG.get('discovery_seeds',[PEERS[0]])))
     keys=DATA/f'validator-key-{i}.bin'
     if keys.exists():env['YAMI_NATIVE_KEYS']=str(keys)
     return startchild([os.environ.get('YAMI_VALIDATOR_BINARY',str(ROOT / 'target/release/yami-validator')), 'run', '--dir', str(directory), '--index', str(i),

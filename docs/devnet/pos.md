@@ -128,3 +128,70 @@ cargo clippy -p yami-validator -p yami-chain-consensus -p yami-chain \
   -p yamichain-devnet-cert --all-targets --features insecure-devnet-input -- -D warnings
 cargo clippy --manifest-path experiments/yamichain-tee-m20/Cargo.toml --all-targets -- -D warnings
 ```
+
+## Signed discovery and certificate propagation
+
+The native software PoS profile supports permissionless peer admission with
+`"p2p_discovery": true` in the trusted network configuration. The existing fixed
+and isolated profiles retain their address and financial gates. Discovery does
+not authorize public deployment or real-money activity.
+
+Each node initially knows at most eight seeds (`discovery_seeds`, defaulting to
+the first consensus endpoint). It learns signed endpoint advertisements through
+other peers and dynamically establishes authenticated Malachite connections.
+The gateway submits an encrypted payment certificate to one reachable validator;
+nodes propagate and independently validate it. Other proposers no longer require
+separate gateway submissions. Only canonical witnessed private certificates are
+relayed: wallet keys, owners, balances, amounts, stake data and query payloads are
+not part of discovery or transaction gossip.
+
+A standalone joining process sets `YAMI_NATIVE_POLICY` to the independently pinned
+public policy, `YAMI_NATIVE_KEYS` to its own 64-byte consensus/transport secret-key
+file, `YAMI_NATIVE_DISCOVERY=1`, `YAMI_NATIVE_DISCOVERY_LISTEN=IP:PORT`, and
+`YAMI_NATIVE_DISCOVERY_SEEDS=IP:PORT,...`. Protect the identity file as mode 0600.
+It needs no validator RPC slot, backend credential or manually supplied peer
+identity. `--index` is a local store/fixture selector, not validator authority.
+The same explicit numeric IPv4 port serves consensus TCP and discovery UDP.
+Persist the whole node journal, WAL, identity and signed hint checkpoint when
+restarting. Candidate peers can synchronize before registration; voting requires
+the existing private registration, locked stake and finalized committee selection.
+
+Advertisements bind both key-possession signatures, the network scope, address
+and expiry. Known consensus identities must match the finalized transport key;
+unknown peer proofs cannot borrow reserved identities. Membership and voting
+power never come from endpoint hints. Discovery contains no owner-to-validator
+mapping, monetary weights or private financial state. Public development fixture
+keys cannot advertise or bind outside loopback. A distinct private-key node may
+participate in this software profile without changing that gate.
+
+Bounds: 40 retained peer hints, 16 dial targets, four dial changes per two-second
+window with 100 ms request deadlines, including uncertain updates in the 16-entry
+tracked dial cap. SDK target counts are eight inbound/16 outbound peers; its
+fourfold transport headroom gives hard caps of 32 incoming/64 outgoing TCP
+connections and four per peer, with eight per IP. Discovery pages contain at most eight
+advertisements. Certificates are at most 30,000 bytes; datagrams are bounded at
+32 KiB. Each window drains at most 128 packets and verifies at most 32 packets
+(four per non-loopback IP; 32 for a loopback process campaign). Advertisements
+expire after ten minutes, with 30 seconds of receive clock skew allowance.
+Nonvoting hints can be evicted from a full cache; active finalized identities
+are protected and prioritized. Expiry and stored endpoint freshness bound replay;
+certificate height/head validation and immutable admission prevent transaction
+reapplication or conflicting queue replacement.
+
+Reproduce the executed five-process demonstration on a fresh disposable network:
+
+```sh
+python3 tools/yamichain-p2p-smoke.py --out work/my-p2p-check --port-offset 5000
+```
+
+The fifth endpoint is absent from the configured inventory. It uses only its
+public policy, own identity and one seed, synchronizes before registration,
+registers/stakes, is selected, signs native finality, and catches up after a
+restart. The test also injects an invalid discovery burst and verifies private
+fields are absent from peer hints and relayed certificates. Results are in
+[permissionless-p2p-validation.json](permissionless-p2p-validation.json).
+These are independently running processes on one machine, not independently
+administered trust domains. WAN loss/fragmentation, NAT/IPv6 support, seed diversity,
+Sybil/eclipse resistance and cross-operator partition/adversarial campaigns still
+need release validation. UDP retransmission is periodic; this is not a claim of
+production networking readiness or a production randomness beacon.

@@ -60,9 +60,11 @@ Implemented next:
 
 Still requiring software implementation/validation (not claimed complete):
 
-1. Public permissionless peer discovery and admission integrated with the live
-   PoS identity directory; transaction propagation and independent multi-machine
-   fault/partition campaigns. Current demos use configured private bootstrap peers.
+1. Cross-operator/WAN validation, seed diversity, IPv6/NAT handling and stronger
+   Sybil/eclipse/partition campaigns. Signed permissionless admission, live PoS
+   identity binding, discovery, synchronization and single-ingress certificate
+   propagation are implemented in the native software profile. No public
+   production deployment has been authorized.
 2. Authenticated large-history checkpoint bootstrap/pruning and archival growth
    management beyond the finite authority budget. Ordinary private financial state
    now persists incrementally; M16 activation gates remain closed and native
@@ -101,10 +103,10 @@ Validated and pushed on the shared branch:
 - `8b4fdda`: encrypted outgoing history, verified status/retry, pinned HTTPS seed
   discovery and least-privilege wallet profile export.
 
-This session did **not** finish all remaining software. In particular, ordinary
-financial-state incremental persistence and permissionless P2P integration are
-still code work, not completed external validation. Do not reinterpret the
-external blockers below as completion of those implementations.
+At `303be4c`, incremental financial persistence and permissionless P2P integration
+were still unimplemented. Both priorities are now implemented and validated in
+this branch, as recorded below. Other release requirements remain unfinished;
+external dependencies are not completion claims for that remaining work.
 
 Validation completed:
 
@@ -148,32 +150,40 @@ Do not commit its credentials or use its seven-day localhost certificates for
 public deployment. Build/test logs are under `work/continuation-*.log` and are
 local diagnostics, not durable evidence after an environment replacement.
 
-Concrete next source work:
+Remaining release-candidate work after the two implemented priorities:
 
-1. Implement ordinary private financial incremental persistence, starting with
-   `Replica::{prepare_with_hook,commit_with_hook,checkpoint,restore_cache}` in
-   `experiments/yamichain-tee-m20/src/quorum.rs` and their witnessed callers in
-   `src/witness.rs`. Today they still rewrite full encrypted snapshots. Preserve
-   exact snapshot authentication, durable witness acknowledgment, poison-on-
-   uncertain-write behavior and all crash/rollback tests. Do not substitute a
-   final certificate for complete-prefix verification or activate M16 pruning.
-2. Integrate bounded signed endpoint discovery and transaction propagation with
-   live identities in `crates/yami-chain-consensus/src/{network,node,signing}.rs`.
-   Current public-address refusal remains a security gate. Endpoint hints must
-   never grant voting authority, overwrite finalized identities or expose private
-   owner/stake information. Configured private seeds are the only live P2P profile.
-3. Complete confidential executor provisioning/replacement/revocation and witness
-   custody changes in `src/{tdx_guest,attestation,witness}.rs` and `deployment/tdx`.
-   The recovery-custodian impersonation issue remains unresolved. Software TLS,
-   process isolation, copied measurements or ignored QVL tests are not substitutes.
-4. Implement incoming/restored-wallet history through an authenticated confidential
-   retention/query protocol. Existing public blinded transaction commitments do
-   not disclose historical transfers; the new local journal cannot reconstruct
-   incoming payments or submissions recorded on another wallet installation.
-5. Implement reviewed beacon/randomness and upgrade negotiation. Existing economic
-   policy versioning deliberately accepts only version 1; changing a JSON version
-   cannot activate new delegator rewards or monetary rules. Do not silently change
-   the current deterministic selection seed, fee shares or canonical state roots.
+1. **TDX custody:** complete attestation-bound enrollment and confidential state
+   transfer in `src/{tdx_guest,attestation,witness}.rs` and `deployment/tdx`.
+   Recovery-custodian impersonation remains unresolved. Genuine guest devices,
+   firmware/collateral and independently pinned native QVL verification are still
+   required; TLS, encrypted chunks, copied measurements and ignored tests do not
+   establish hardware security. Rebuild guest images and approve their genuine
+   new measurements for the changed execution/storage code.
+2. **Executor replacement/revocation:** implement attestation-bound recipient
+   authorization, generation/key revocation and rollback-resistant witness custody
+   changes. Preserve 3-of-4 financial authorization and sign-once/CAS guarantees.
+   A copied executor/custodian secret must not become a replacement capability.
+3. **Wallet recovery/history:** add authenticated confidential retention/query
+   support for incoming and restored-wallet historical activity. Existing public
+   blinded commitments cannot reconstruct private transfers. Local outgoing
+   sidecars remain separate backups; password loss has no recovery bypass.
+4. **Security validation:** independent review of the chunk format/manifest and
+   legacy migration, crash/quota/corruption behavior, custody and anti-rollback;
+   independent operator credentials/machines for partition, adversarial recovery,
+   Sybil/eclipse and WAN/loss campaigns. The five-process P2P test is one machine,
+   not five independent trust domains. New peers still gain no voting power from
+   advertisements or synchronization. Keep all production financial gates closed.
+5. **Scale and archival state:** checkpoint/root serialization and full witness
+   checkpoint RPCs remain linear in financial state size. Wire checkpoints retain
+   the 4 MiB limit, cache databases the 12 MiB page budget and authorities the
+   1 GiB page budget. Exhaustion refuses new work. Add scalable authenticated
+   large-history bootstrap/archival management before any reviewed pruning;
+   certified history, nonce reservations and vote locks are never deleted to
+   reclaim financial chunks. M16 writers/recovery/pruning remain inactive.
+6. **Production policy:** reviewed selection randomness, delegator reward policy
+   and upgrade negotiation/activation remain open. Only economic version 1 is
+   supported. Do not replace deterministic seeds, fee allocations or canonical
+   roots through configuration, or turn peer availability into validator weight.
 
 External resources still absent in this environment: `/dev/tdx_guest`,
 `/dev/tdx-guest` and `/dev/kvm`; configured outbound identities/secret bindings;
@@ -186,6 +196,8 @@ opening any corresponding production or public-network gate.
 
 
 ## Incremental financial persistence — implemented 2026-11-10
+
+Implementation commit: `3bc916d`.
 
 Executors now persist authenticated content-defined encrypted chunks and a small
 anchored manifest, reusing unchanged ciphertext. Witnesses persist those chunks
@@ -218,5 +230,70 @@ still linear in state size; incremental network transfer and scalable authentica
 financial-history pruning remain unfinished. Incremental storage exposes encrypted
 chunk sizes/reuse and I/O patterns; it is not ORAM or hardware confidentiality.
 
-Priority 2 P2P implementation continues next; this checkpoint is not a completion
-claim for the networking requirement.
+Permissionless software P2P implementation followed in the next component below.
+
+
+## Permissionless software P2P — implemented 2026-11-10
+
+Transport-proof binding commit: `b9f679e`; integrated discovery/propagation,
+operator controls and final evidence are in the commit containing this entry.
+
+The native live-PoS software profile now discovers signed endpoints, authenticates
+candidate peers, synchronizes new nodes and propagates canonical encrypted payment
+certificates through peers. Enable `p2p_discovery` in the devnet configuration;
+old fixed and isolated modes retain their gates. A gateway uses one successful
+proposal ingress rather than posting to every proposer. A joining node supplies
+only its own identity, independently pinned public policy, listening endpoint and
+up to eight seeds; no manually configured validator/RPC slot is required.
+
+Two key-possession signatures bind every advertisement to its network scope,
+endpoint and bounded lifetime. Finalized transport bindings always prevail.
+Unknown peers may synchronize but have zero voting authority until the existing
+registration/stake/committee protocol selects them. Endpoint hints never publish
+account owners, balances, amounts, stake weights or wallet secrets. Hint memory,
+peer dials, receive/signature work, packets, connections and per-IP admission are
+bounded. Uncertain SDK additions remain tracked until reconciliation; a delayed
+acknowledgment cannot escape the 16-entry dial cap. A full hint cache can admit
+new nonvoting candidates while protecting
+current finalized identities. The existing isolated private-address gate is
+unchanged; public development fixture keys remain loopback-only.
+
+The final five-process demonstration used an extra endpoint absent from the
+configured inventory and only a public policy/own key/one seed. It synchronized
+before registration, registered/staked, signed native finality at height 7,
+survived a restart/catch-up and an invalid discovery burst, and finalized through
+height 11. Each node discovered the other four. Evidence:
+[permissionless-p2p-validation.json](permissionless-p2p-validation.json).
+Operator controls and exact bounds: [PoS networking](pos.md).
+
+Validation: 51 core consensus tests passed (one manual scale campaign remains
+ignored); focused discovery, cache capacity, transport-binding and original
+isolated regressions passed. Strict Clippy passed with the development feature
+both enabled and disabled. All 65,536 production proof versions still reject;
+native wire gates passed with the feature enabled and disabled. The 23 existing
+wallet/RPC/supervision Python checks passed. Priority 1 additionally passed the
+complete 55-test all-feature release experiment suite and 10,009-account recovery
+measurement. No expensive hardware/scale tests were silently substituted.
+
+Reproduce only the relevant checks for a follow-up change:
+
+```sh
+cargo test --release --locked -p yami-chain-consensus --features insecure-devnet-input
+cargo clippy --locked -p yami-chain-consensus -p yami-validator --all-targets --features insecure-devnet-input -- -D warnings
+cargo clippy --locked -p yami-chain-consensus -p yami-validator --all-targets -- -D warnings
+cargo test --locked -p yami-chain-privacy --test non_test_boundary
+cargo test --locked -p yami-chain --test native_devnet
+cargo test --locked -p yami-chain --features insecure-devnet-input --test native_devnet
+python3 tools/yamichain-p2p-smoke.py --out work/next-p2p-check --port-offset 6000
+cargo test --release --locked --manifest-path experiments/yamichain-tee-m20/Cargo.toml --test witness_e2e large_financial_state -- --nocapture
+```
+
+Use the Rust environment setup earlier in this ledger and a fresh output path/free
+ports. This session's process demonstrations were stopped cleanly, retaining
+`work/permissionless-p2p`, `work/permissionless-p2p-final` and
+`work/permissionless-p2p-ack` for local diagnostics;
+private identities/configuration in those directories must never be committed.
+Durable evidence is the linked JSON, not ephemeral work logs. Continue with the
+TDX custody/replacement, wallet recovery and security-validation work above;
+do not restart the implemented persistence or peer discovery components.
+`main`, M16 activation and production financial verification remain unchanged.

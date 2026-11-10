@@ -1,5 +1,5 @@
-//! Fail-closed isolated-network profile. Discovery supplies endpoints, never votes.
-//! Numeric RFC1918 endpoints only; public deployment is intentionally unavailable.
+//! Discovery supplies endpoints, never votes. The isolated profile retains its
+//! private-IPv4 gate; software live-PoS discovery is separately feature-gated.
 use eyre::{eyre, Result};
 use std::{collections::BTreeMap, net::SocketAddrV4, path::Path};
 use yami_chain::{
@@ -425,6 +425,688 @@ pub fn announce_isolated_endpoint(
     std::fs::rename(temporary, path)?;
     std::fs::File::open(directory)?.sync_all()?;
     Ok(())
+}
+
+/// Permissionless software-PoS discovery. This does not open the isolated-network
+/// address gate or any production financial verifier. Discovery keys supply
+/// availability only; finalized committees remain the sole voting authority.
+#[cfg(feature = "insecure-devnet-input")]
+pub(crate) mod live {
+    use super::*;
+    use std::{
+        collections::{BTreeMap, BTreeSet},
+        net::{Ipv4Addr, SocketAddrV4},
+    };
+    const PAGE: &[u8; 8] = b"YCLIVE01";
+    const TRANSACTION: &[u8; 8] = b"YCTXGSP1";
+    const MAX_PEERS: usize = 40;
+    pub(crate) const MAX_PACKET: usize = 32768;
+    const ADVERT_BYTES: usize = 238;
+    const LIFETIME: u64 = 600;
+
+    #[derive(Clone, PartialEq, Eq)]
+    pub(crate) struct Advert {
+        network: [u8; 32],
+        pub(crate) consensus: [u8; 32],
+        pub(crate) transport: [u8; 32],
+        pub(crate) address: SocketAddrV4,
+        expires: u64,
+        signatures: [[u8; 64]; 2],
+    }
+    fn network(genesis: &Genesis) -> Result<[u8; 32]> {
+        let scope = genesis
+            .live_scope()
+            .ok_or_else(|| eyre!("live PoS policy required for discovery"))?;
+        let mut raw = genesis.id().0.to_vec();
+        raw.extend_from_slice(&scope);
+        Ok(yami_chain::hash(b"YC-LIVE-NETWORK-1", &raw).0)
+    }
+    fn address_allowed(address: SocketAddrV4) -> bool {
+        let ip = address.ip();
+        let first = ip.octets()[0];
+        !ip.is_unspecified()
+            && !ip.is_multicast()
+            && !ip.is_broadcast()
+            && !ip.is_link_local()
+            && first != 0
+            && first < 224
+            && (1024..65535).contains(&address.port())
+    }
+    fn fixture_key(key: &[u8; 32]) -> bool {
+        static KEYS: std::sync::OnceLock<BTreeSet<[u8; 32]>> = std::sync::OnceLock::new();
+        KEYS.get_or_init(|| {
+            (0..100)
+                .flat_map(|i| {
+                    ["consensus", "transport"].map(|role| {
+                        yami_chain::development_key(role, i)
+                            .verifying_key()
+                            .to_bytes()
+                    })
+                })
+                .collect()
+        })
+        .contains(key)
+    }
+    impl Advert {
+        fn message(&self) -> Vec<u8> {
+            let mut w = Writer::default();
+            w.raw(PAGE);
+            w.raw(&self.network);
+            w.raw(&self.consensus);
+            w.raw(&self.transport);
+            w.raw(&self.address.ip().octets());
+            w.u16(self.address.port());
+            w.u64(self.expires);
+            w.0
+        }
+        fn new(
+            g: &Genesis,
+            consensus: &SigningKey,
+            transport: &SigningKey,
+            address: SocketAddrV4,
+            now: u64,
+        ) -> Result<Self> {
+            let mut result = Self {
+                network: network(g)?,
+                consensus: consensus.verifying_key().to_bytes(),
+                transport: transport.verifying_key().to_bytes(),
+                address,
+                expires: now
+                    .checked_add(LIFETIME)
+                    .ok_or_else(|| eyre!("discovery clock overflow"))?,
+                signatures: [[0; 64]; 2],
+            };
+            result.signatures = [
+                consensus.sign(&result.message()).to_bytes(),
+                transport.sign(&result.message()).to_bytes(),
+            ];
+            result.verify(g, now)?;
+            Ok(result)
+        }
+        fn encode(&self, w: &mut Writer) {
+            w.raw(&self.network);
+            w.raw(&self.consensus);
+            w.raw(&self.transport);
+            w.raw(&self.address.ip().octets());
+            w.u16(self.address.port());
+            w.u64(self.expires);
+            for signature in self.signatures {
+                w.raw(&signature);
+            }
+        }
+        fn decode(r: &mut Reader<'_>) -> Result<Self> {
+            Ok(Self {
+                network: r.array()?,
+                consensus: r.array()?,
+                transport: r.array()?,
+                address: SocketAddrV4::new(Ipv4Addr::from(r.array::<4>()?), r.u16()?),
+                expires: r.u64()?,
+                signatures: [r.array()?, r.array()?],
+            })
+        }
+        fn verify(&self, g: &Genesis, now: u64) -> Result<()> {
+            if self.network != network(g)?
+                || self.consensus == self.transport
+                || !address_allowed(self.address)
+                || self.expires <= now
+                || self.expires > now.saturating_add(LIFETIME + 30)
+            {
+                return Err(eyre!("invalid discovery network, endpoint or lifetime"));
+            }
+            if !self.address.ip().is_loopback()
+                && (fixture_key(&self.consensus) || fixture_key(&self.transport))
+            {
+                return Err(eyre!("public fixture identities are loopback only"));
+            }
+            if let Some(expected) = g.live_transport(&self.consensus) {
+                if expected != self.transport {
+                    return Err(eyre!("finalized PoS transport binding mismatch"));
+                }
+            } else if g.is_reserved_key(&self.consensus) || g.is_reserved_key(&self.transport) {
+                return Err(eyre!("reserved identity cannot be relabeled by discovery"));
+            }
+            yami_chain::verify(&self.consensus, &self.message(), &self.signatures[0])?;
+            yami_chain::verify(&self.transport, &self.message(), &self.signatures[1])?;
+            Ok(())
+        }
+    }
+    pub(crate) struct View {
+        genesis: Genesis,
+        signing: SigningKey,
+        transport: SigningKey,
+        own: Advert,
+        records: BTreeMap<[u8; 32], Advert>,
+        height: u64,
+        seeds: Vec<SocketAddrV4>,
+    }
+    pub(crate) fn settings(
+        index: u8,
+        peer_base: u16,
+    ) -> Result<Option<(SocketAddrV4, Vec<SocketAddrV4>)>> {
+        if std::env::var("YAMI_NATIVE_DISCOVERY").ok().as_deref() != Some("1") {
+            return Ok(None);
+        }
+        let address = std::env::var("YAMI_NATIVE_DISCOVERY_LISTEN")
+            .unwrap_or_else(|_| format!("127.0.0.1:{}", peer_base + u16::from(index)))
+            .parse::<SocketAddrV4>()?;
+        let seeds = std::env::var("YAMI_NATIVE_DISCOVERY_SEEDS")
+            .unwrap_or_default()
+            .split(',')
+            .filter(|s| !s.is_empty())
+            .map(str::parse)
+            .collect::<std::result::Result<Vec<SocketAddrV4>, _>>()?;
+        if seeds.len() > 8
+            || !address_allowed(address)
+            || seeds.iter().any(|a| !address_allowed(*a))
+        {
+            return Err(eyre!("invalid bounded discovery configuration"));
+        }
+        Ok(Some((address, seeds)))
+    }
+    impl View {
+        pub(crate) fn new(
+            g: Genesis,
+            signing: SigningKey,
+            transport: SigningKey,
+            address: SocketAddrV4,
+            seeds: Vec<SocketAddrV4>,
+            journal: &yami_chain_storage::Journal,
+            now: u64,
+        ) -> Result<Self> {
+            let own = Advert::new(&g, &signing, &transport, address, now)?;
+            let mut result = Self {
+                genesis: g,
+                signing,
+                transport,
+                own,
+                records: BTreeMap::new(),
+                height: 1,
+                seeds,
+            };
+            match read_bounded(&journal.path().join("network-hints.bin"), 32768) {
+                Ok(raw) => {
+                    let mut r = Reader::new(&raw, 32768)?;
+                    if r.take(8)? != PAGE {
+                        return Err(eyre!("discovery checkpoint profile mismatch"));
+                    }
+                    let count = r.u8()? as usize;
+                    if count > MAX_PEERS {
+                        return Err(eyre!("discovery checkpoint capacity"));
+                    }
+                    for _ in 0..count {
+                        let advert = Advert::decode(&mut r)?;
+                        if advert.network != result.own.network {
+                            return Err(eyre!("discovery checkpoint network mismatch"));
+                        }
+                        if advert.expires > now {
+                            result.admit(advert, now)?;
+                        }
+                    }
+                    r.end()?;
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => (),
+                Err(error) => return Err(error.into()),
+            }
+            Ok(result)
+        }
+        pub(crate) fn set_height(&mut self, height: u64) {
+            self.height = height;
+        }
+        fn protected(&self, key: &[u8; 32]) -> bool {
+            self.genesis
+                .committee_at(self.height)
+                .is_ok_and(|c| c.member(key).is_some())
+        }
+        fn admit(&mut self, advert: Advert, now: u64) -> Result<()> {
+            advert.verify(&self.genesis, now)?;
+            if advert.consensus == self.own.consensus {
+                if advert.transport != self.own.transport {
+                    return Err(eyre!("own discovery identity mismatch"));
+                }
+                return Ok(());
+            }
+            if advert.address == self.own.address
+                || advert.transport == self.own.transport
+                || advert.consensus == self.own.transport
+                || advert.transport == self.own.consensus
+            {
+                return Err(eyre!("own endpoint/keys cannot be relabeled"));
+            }
+            if let Some(old) = self.records.get(&advert.consensus) {
+                if advert.expires < old.expires || (advert.expires == old.expires && advert != *old)
+                {
+                    return Err(eyre!("replayed or conflicting endpoint advertisement"));
+                }
+            }
+            if self.records.values().any(|r| {
+                r.consensus != advert.consensus
+                    && (r.transport == advert.transport
+                        || r.address == advert.address
+                        || r.transport == advert.consensus
+                        || r.consensus == advert.transport)
+            }) {
+                return Err(eyre!("duplicate discovery endpoint or identity"));
+            }
+            let per_ip = if advert.address.ip().is_loopback() {
+                16
+            } else {
+                4
+            };
+            if self
+                .records
+                .values()
+                .filter(|r| {
+                    r.consensus != advert.consensus && r.address.ip() == advert.address.ip()
+                })
+                .count()
+                >= per_ip
+            {
+                return Err(eyre!("discovery per-IP capacity"));
+            }
+            if !self.records.contains_key(&advert.consensus) && self.records.len() >= MAX_PEERS {
+                // The bounded hint cache is not a fixed permissioned roster.
+                // New authenticated candidates may replace other nonvoting hints;
+                // active finalized identities cannot be displaced this way.
+                let victim = self
+                    .records
+                    .keys()
+                    .find(|key| !self.protected(key))
+                    .copied()
+                    .ok_or_else(|| eyre!("discovery protected-peer capacity"))?;
+                self.records.remove(&victim);
+            }
+            self.records.insert(advert.consensus, advert);
+            Ok(())
+        }
+        pub(crate) fn refresh(&mut self, now: u64) -> Result<()> {
+            self.records
+                .retain(|_, a| a.verify(&self.genesis, now).is_ok());
+            self.own = Advert::new(
+                &self.genesis,
+                &self.signing,
+                &self.transport,
+                self.own.address,
+                now,
+            )?;
+            Ok(())
+        }
+        pub(crate) fn checkpoint(&self, journal: &yami_chain_storage::Journal) -> Result<()> {
+            let mut w = Writer::default();
+            w.raw(PAGE);
+            w.u8(self.records.len() as u8);
+            for record in self.records.values() {
+                record.encode(&mut w);
+            }
+            if read_bounded(&journal.path().join("network-hints.bin"), 32768)
+                .ok()
+                .as_deref()
+                != Some(&w.0)
+            {
+                journal.replace_network_hints(&w.0)?;
+            }
+            Ok(())
+        }
+        pub(crate) fn page(&self, cursor: usize) -> Vec<u8> {
+            let mut w = Writer::default();
+            w.raw(PAGE);
+            w.u8((1 + self.records.len().min(7)) as u8);
+            self.own.encode(&mut w);
+            if !self.records.is_empty() {
+                for record in self
+                    .records
+                    .values()
+                    .cycle()
+                    .skip(cursor % self.records.len())
+                    .take(7.min(self.records.len()))
+                {
+                    record.encode(&mut w);
+                }
+            }
+            w.0
+        }
+        pub(crate) fn targets(&self, cursor: usize) -> Vec<SocketAddrV4> {
+            let mut addresses: BTreeSet<_> = self
+                .seeds
+                .iter()
+                .copied()
+                .filter(|a| *a != self.own.address)
+                .collect();
+            if !self.records.is_empty() {
+                for record in self
+                    .records
+                    .values()
+                    .cycle()
+                    .skip(cursor % self.records.len())
+                    .take(8)
+                {
+                    addresses.insert(record.address);
+                }
+            }
+            addresses.into_iter().take(16).collect()
+        }
+        pub(crate) fn peers(&self, height: u64) -> Vec<(SocketAddrV4, [u8; 32])> {
+            let committee = self.genesis.committee_at(height).ok();
+            let mut records: Vec<_> = self.records.values().collect();
+            records.sort_by_key(|a| {
+                (
+                    committee
+                        .as_ref()
+                        .is_none_or(|c| c.member(&a.consensus).is_none()),
+                    a.consensus,
+                )
+            });
+            records
+                .into_iter()
+                .take(16)
+                .map(|a| (a.address, a.transport))
+                .collect()
+        }
+        pub(crate) fn ingest_page(
+            &mut self,
+            raw: &[u8],
+            source: SocketAddrV4,
+            now: u64,
+        ) -> Result<()> {
+            let mut r = Reader::new(raw, 8 + 1 + 8 * ADVERT_BYTES)?;
+            if r.take(8)? != PAGE {
+                return Err(eyre!("discovery packet domain"));
+            }
+            let count = r.u8()? as usize;
+            if !(1..=8).contains(&count) {
+                return Err(eyre!("discovery page capacity"));
+            }
+            let first = Advert::decode(&mut r)?;
+            if first.address != source {
+                return Err(eyre!("discovery source endpoint mismatch"));
+            }
+            // Validate every bounded record before changing the directory.
+            let mut records = vec![first];
+            for _ in 1..count {
+                records.push(Advert::decode(&mut r)?);
+            }
+            r.end()?;
+            for advert in &records {
+                advert.verify(&self.genesis, now)?;
+            }
+            for advert in records {
+                self.admit(advert, now)?;
+            }
+            Ok(())
+        }
+        pub(crate) fn transaction(&self, height: u64, payload: &[u8]) -> Result<Vec<u8>> {
+            if payload.len() > 30000 {
+                return Err(eyre!("transaction gossip byte cap"));
+            }
+            let mut w = Writer::default();
+            w.raw(TRANSACTION);
+            self.own.encode(&mut w);
+            w.u64(height);
+            w.bytes(payload)?;
+            let digest = yami_chain::hash(b"YC-LIVE-TRANSACTION-1", &w.0);
+            w.raw(&self.transport.sign(&digest.0).to_bytes());
+            Ok(w.0)
+        }
+        pub(crate) fn receive_transaction(
+            &mut self,
+            raw: &[u8],
+            source: SocketAddrV4,
+            now: u64,
+        ) -> Result<(u64, Vec<u8>)> {
+            let mut r = Reader::new(raw, MAX_PACKET)?;
+            if r.take(8)? != TRANSACTION {
+                return Err(eyre!("transaction gossip domain"));
+            }
+            let advert = Advert::decode(&mut r)?;
+            if advert.address != source {
+                return Err(eyre!("transaction gossip source"));
+            }
+            advert.verify(&self.genesis, now)?;
+            let height = r.u64()?;
+            let payload = r.bytes(30000)?.to_vec();
+            let signature = r.array::<64>()?;
+            r.end()?;
+            let digest = yami_chain::hash(b"YC-LIVE-TRANSACTION-1", &raw[..raw.len() - 64]);
+            yami_chain::verify(&advert.transport, &digest.0, &signature)?;
+            self.admit(advert, now)?;
+            Ok((height, payload))
+        }
+        pub(crate) fn is_page(raw: &[u8]) -> bool {
+            raw.starts_with(PAGE)
+        }
+    }
+    /// A fresh window has finite verification and receive budgets. Source maps
+    /// are bounded and never allocate one entry per packet or advertised identity.
+    pub(crate) struct Admission {
+        sources: BTreeMap<Ipv4Addr, u8>,
+        remaining: u16,
+    }
+    impl Admission {
+        pub(crate) fn new() -> Self {
+            Self {
+                sources: BTreeMap::new(),
+                remaining: 32,
+            }
+        }
+        pub(crate) fn allow(&mut self, source: Ipv4Addr) -> bool {
+            if self.remaining == 0
+                || (self.sources.len() >= 64 && !self.sources.contains_key(&source))
+            {
+                return false;
+            }
+            let count = self.sources.entry(source).or_default();
+            let limit = if source.is_loopback() { 32 } else { 4 };
+            if *count >= limit {
+                return false;
+            }
+            *count += 1;
+            self.remaining -= 1;
+            true
+        }
+    }
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+        struct Temporary(std::path::PathBuf);
+        impl Temporary {
+            fn new() -> Self {
+                static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+                let stamp = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap()
+                    .as_nanos();
+                let path = std::env::temp_dir().join(format!(
+                    "yami-live-peers-{}-{stamp}-{}",
+                    std::process::id(),
+                    NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+                ));
+                std::fs::create_dir(&path).unwrap();
+                Self(path)
+            }
+            fn path(&self) -> &Path {
+                &self.0
+            }
+        }
+        impl Drop for Temporary {
+            fn drop(&mut self) {
+                let _ = std::fs::remove_dir_all(&self.0);
+            }
+        }
+        fn genesis() -> Genesis {
+            let mut g = Genesis::local();
+            g.enable_live_committees([7; 32]).unwrap();
+            g
+        }
+        fn fixture(index: u8, port: u16, journal: &yami_chain_storage::Journal) -> View {
+            View::new(
+                genesis(),
+                yami_chain::development_key("consensus", index),
+                yami_chain::development_key("transport", index),
+                SocketAddrV4::new(Ipv4Addr::LOCALHOST, port),
+                vec![],
+                journal,
+                100,
+            )
+            .unwrap()
+        }
+        #[test]
+        fn gossip_discovers_unknown_candidates_without_granting_authority_and_survives_restart() {
+            let dir = Temporary::new();
+            let journal = yami_chain_storage::Journal::open(&dir.path().join("node")).unwrap();
+            let mut a = fixture(0, 32000, &journal);
+            let mut b = fixture(1, 32001, &journal);
+            let c = View::new(
+                genesis(),
+                SigningKey::from_bytes(&[101; 32]),
+                SigningKey::from_bytes(&[102; 32]),
+                "127.0.0.1:32002".parse().unwrap(),
+                vec![],
+                &journal,
+                100,
+            )
+            .unwrap();
+            b.ingest_page(&c.page(0), c.own.address, 100).unwrap();
+            a.ingest_page(&b.page(0), b.own.address, 100).unwrap();
+            assert!(a.records.contains_key(&c.own.consensus));
+            assert!(a
+                .genesis
+                .committee_at(1)
+                .unwrap()
+                .member(&c.own.consensus)
+                .is_none());
+            assert!(a.genesis.committee_at(2).is_err());
+            a.checkpoint(&journal).unwrap();
+            let restored = fixture(0, 32000, &journal);
+            assert_eq!(restored.records.len(), 2);
+            assert!(restored
+                .peers(1)
+                .iter()
+                .any(|(_, key)| *key == c.own.transport));
+        }
+        #[test]
+        fn source_forgery_replayed_endpoints_wrong_network_and_reserved_keys_refuse() {
+            let dir = Temporary::new();
+            let journal = yami_chain_storage::Journal::open(&dir.path().join("node")).unwrap();
+            let mut a = fixture(0, 32000, &journal);
+            let b = fixture(1, 32001, &journal);
+            a.ingest_page(&b.page(0), b.own.address, 100).unwrap();
+            assert!(a.ingest_page(&b.page(0), a.own.address, 100).is_err());
+            let mut forged = b.page(0);
+            *forged.last_mut().unwrap() ^= 1;
+            assert!(a.ingest_page(&forged, b.own.address, 100).is_err());
+            let old = Advert::new(
+                &genesis(),
+                &b.signing,
+                &b.transport,
+                "127.0.0.1:32003".parse().unwrap(),
+                99,
+            )
+            .unwrap();
+            assert!(a.admit(old, 100).is_err());
+            let mut foreign = genesis();
+            foreign.live_committees = Default::default();
+            foreign.enable_live_committees([8; 32]).unwrap();
+            let advert =
+                Advert::new(&foreign, &b.signing, &b.transport, b.own.address, 100).unwrap();
+            assert!(a.admit(advert, 100).is_err());
+            assert!(Advert::new(
+                &genesis(),
+                &b.signing,
+                &SigningKey::from_bytes(&[111; 32]),
+                b.own.address,
+                100
+            )
+            .is_err());
+            assert!(Advert::new(
+                &genesis(),
+                &b.signing,
+                &b.transport,
+                "10.2.3.4:32001".parse().unwrap(),
+                100
+            )
+            .is_err());
+            assert!(b.own.verify(&genesis(), 701).is_err());
+            assert_eq!(a.records.len(), 1);
+        }
+        #[test]
+        fn bounded_hint_cache_keeps_admitting_candidates_and_protects_finalized_identities() {
+            let dir = Temporary::new();
+            let journal = yami_chain_storage::Journal::open(&dir.path().join("node")).unwrap();
+            let mut a = fixture(0, 32000, &journal);
+            let b = fixture(1, 32001, &journal);
+            a.admit(b.own.clone(), 100).unwrap();
+            for index in 0..39u8 {
+                let advert = Advert::new(
+                    &genesis(),
+                    &SigningKey::from_bytes(&[120 + index; 32]),
+                    &SigningKey::from_bytes(&[170 + index; 32]),
+                    SocketAddrV4::new(Ipv4Addr::new(10, 1, index, 1), 32002),
+                    100,
+                )
+                .unwrap();
+                a.admit(advert, 100).unwrap();
+            }
+            let newcomer = Advert::new(
+                &genesis(),
+                &SigningKey::from_bytes(&[240; 32]),
+                &SigningKey::from_bytes(&[241; 32]),
+                "10.2.3.4:32002".parse().unwrap(),
+                100,
+            )
+            .unwrap();
+            let key = newcomer.consensus;
+            a.admit(newcomer, 100).unwrap();
+            assert_eq!(a.records.len(), MAX_PEERS);
+            assert!(a.records.contains_key(&key));
+            assert!(a.records.contains_key(&b.own.consensus));
+            assert!(a.genesis.committee_at(1).unwrap().member(&key).is_none());
+            let mut members = a.genesis.committee_at(1).unwrap().members().to_vec();
+            let retired = members
+                .iter()
+                .position(|m| m.consensus_key == b.own.consensus)
+                .unwrap();
+            members[retired] = Member {
+                consensus_key: key,
+                transport_key: a.records[&key].transport,
+                power: 1,
+            };
+            a.genesis
+                .install_finalized_committee(2, ValidatorSet::new(members).unwrap())
+                .unwrap();
+            a.set_height(2);
+            assert!(!a.protected(&b.own.consensus));
+            assert!(a.protected(&key));
+        }
+        #[test]
+        fn transaction_envelopes_bind_transport_network_payload_and_source_with_bounded_admission()
+        {
+            let dir = Temporary::new();
+            let journal = yami_chain_storage::Journal::open(&dir.path().join("node")).unwrap();
+            let mut a = fixture(0, 32000, &journal);
+            let b = fixture(1, 32001, &journal);
+            let packet = b.transaction(10, b"opaque certificate").unwrap();
+            assert_eq!(
+                a.receive_transaction(&packet, b.own.address, 100).unwrap(),
+                (10, b"opaque certificate".to_vec())
+            );
+            let mut tampered = packet.clone();
+            tampered[260] ^= 1;
+            assert!(a
+                .receive_transaction(&tampered, b.own.address, 100)
+                .is_err());
+            assert!(a.receive_transaction(&packet, a.own.address, 100).is_err());
+            let mut admission = Admission::new();
+            for _ in 0..4 {
+                assert!(admission.allow(Ipv4Addr::new(10, 2, 3, 4)));
+            }
+            assert!(!admission.allow(Ipv4Addr::new(10, 2, 3, 4)));
+            let mut admission = Admission::new();
+            for _ in 0..32 {
+                assert!(admission.allow(Ipv4Addr::LOCALHOST));
+            }
+            assert!(!admission.allow(Ipv4Addr::LOCALHOST));
+            assert!(b.transaction(10, &vec![0; 30001]).is_err());
+        }
+    }
 }
 
 #[cfg(test)]

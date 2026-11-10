@@ -1,0 +1,29 @@
+{
+  "software_only": true,
+  "production_activation": false,
+  "independent_validator_processes": 5,
+  "bootstrap_seeds_per_joiner": 1,
+  "joining_endpoint_not_in_inventory": true,
+  "joining_uses_only_public_policy": true,
+  "synchronization_before_registration": true,
+  "discovered_peers": [
+    4,
+    4,
+    4,
+    4,
+    4
+  ],
+  "one_gateway_ingress": true,
+  "selected_height": 7,
+  "signed_height": 7,
+  "restart_catchup": true,
+  "invalid_discovery_burst_survived": true,
+  "owner_and_recipient_absent_from_discovery": true,
+  "private_fields_absent_from_relayed_certificates": true,
+  "final_height": 11,
+  "core_consensus_tests_passed": 51,
+  "manual_scale_test_ignored": 1,
+  "strict_clippy_default_and_development_profiles": true,
+  "sdk_delayed_ack_keeps_peer_set_bounded": true,
+  "all_65536_production_proof_versions_rejected": true
+}

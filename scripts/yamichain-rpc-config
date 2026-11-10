@@ -26,7 +26,7 @@ try:
   return 'https://'+u.hostname+':'+str(u.port+a.port_offset)
  config['gateway']=tls(config['gateway'])
  for key in ['executors','validators']:config[key]=[tls(v) for v in config[key]]
- for key in ['witnesses','validator_peers']:
+ for key in ['witnesses','validator_peers']+(['discovery_seeds'] if 'discovery_seeds' in config else []):
   config[key]=[v.rsplit(':',1)[0]+':'+str(int(v.rsplit(':',1)[1])+a.port_offset) for v in config[key]]
  config['rpc']=dict(ca_file=str(out/'ca.pem'),certificate_file=str(out/'ca.pem'),key_file=str(out/'server.key'),tokens=tokens)
  config['witness_tls']=dict(server=dict(certificate_file=str(out/'ca.pem'),key_file=str(out/'server.key')),client=dict(certificate_pem=list((out/'ca.pem').read_bytes()),server_name='localhost'))

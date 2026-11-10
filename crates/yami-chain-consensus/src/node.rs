@@ -122,7 +122,7 @@ fn config(index: u8, base: u16, peer_base: u16, genesis: &Genesis, sparse: bool)
         })
         .collect::<Result<_>>()?;
     #[cfg(feature = "insecure-devnet-input")]
-    if native_devnet() {
+    if native_devnet() && crate::network::live::settings(index, peer_base)?.is_none() {
         if let Ok(raw) = std::env::var("YAMI_NATIVE_VALIDATOR_ENDPOINTS") {
             let addresses = raw
                 .split(',')
@@ -451,6 +451,41 @@ pub async fn run_node_with_storage(
         d.ephemeral_connection_timeout = Duration::from_secs(5);
         d.max_peers_per_response = 16;
     }
+    #[cfg(feature = "insecure-devnet-input")]
+    if let Some((listen, seeds)) =
+        crate::network::live::settings(options.index, options.peer_base_port)?
+    {
+        if !native_devnet() || options.isolated_network.is_some() {
+            return Err(eyre!(
+                "live discovery requires the native software PoS profile"
+            ));
+        }
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)?
+            .as_secs();
+        // Verify local identity, address policy and persisted network scope before
+        // opening either listener. No fixture identity can bind beyond loopback.
+        let _ = crate::network::live::View::new(
+            options.genesis.clone(),
+            signer.key.clone(),
+            node_key("transport", options.index)?,
+            listen,
+            seeds,
+            &journal,
+            now,
+        )?;
+        network_config.consensus.p2p.listen_addr =
+            format!("/ip4/{}/tcp/{}", listen.ip(), listen.port()).parse()?;
+        network_config.consensus.p2p.persistent_peers.clear();
+        let d = &mut network_config.consensus.p2p.discovery;
+        d.num_inbound_peers = 8;
+        d.num_outbound_peers = 16;
+        d.max_connections_per_peer = 1;
+        d.max_connections_per_ip = 8;
+        d.ip_throttle_duration = Duration::from_secs(2);
+        d.ephemeral_connection_timeout = Duration::from_secs(5);
+        d.max_peers_per_response = 8;
+    }
     let (mut channels, handle) = EngineBuilder::new(Context, network_config)
         .with_default_wal(WalContext::new(
             options.directory.join("wal/consensus.wal"),
@@ -559,6 +594,93 @@ fn proposal(part: &Part) -> Result<ProposedValue<Context>> {
         validity: m::Validity::Valid,
     })
 }
+#[cfg(feature = "insecure-devnet-input")]
+fn native_candidate(state: &State, payload: Vec<u8>) -> Result<Block> {
+    let owner = yami_chain::development_key("registry", 0);
+    let height = state
+        .height()
+        .checked_add(1)
+        .ok_or_else(|| eyre!("height exhausted"))?;
+    let tx = yami_chain::Transaction::devnet_certificate(
+        payload,
+        state.nonce(&owner.verifying_key().to_bytes()),
+        height,
+        &owner,
+    )?;
+    Ok(state.propose(vec![tx])?)
+}
+#[cfg(feature = "insecure-devnet-input")]
+#[derive(Clone)]
+struct LivePeer {
+    endpoint: (std::net::SocketAddrV4, [u8; 32]),
+    confirmed: bool,
+}
+#[cfg(feature = "insecure-devnet-input")]
+async fn update_live_peers(
+    current: &mut Vec<LivePeer>,
+    wanted: Vec<(std::net::SocketAddrV4, [u8; 32])>,
+    requests: &tokio::sync::mpsc::Sender<malachite::NetworkRequest>,
+) {
+    use malachite::app::engine::network::PersistentPeerError::{AlreadyExists, NotFound};
+    let mut budget = 4;
+    for peer in current
+        .clone()
+        .into_iter()
+        .filter(|p| !wanted.contains(&p.endpoint))
+    {
+        if budget == 0 {
+            return;
+        }
+        budget -= 1;
+        if let Ok(raw) = peer_multiaddr(&peer.endpoint).and_then(|s| Ok(s.parse()?)) {
+            if matches!(
+                tokio::time::timeout(
+                    Duration::from_millis(100),
+                    malachite::NetworkRequest::remove_persistent_peer(requests, raw)
+                )
+                .await,
+                Ok(Ok(Ok(()) | Err(NotFound)))
+            ) {
+                current.retain(|p| p.endpoint != peer.endpoint);
+            }
+        }
+    }
+    for endpoint in wanted {
+        if budget == 0 {
+            break;
+        }
+        let slot = if let Some(slot) = current.iter().position(|p| p.endpoint == endpoint) {
+            if current[slot].confirmed {
+                continue;
+            }
+            slot
+        } else {
+            if current.len() >= 16 {
+                continue;
+            }
+            // Retain uncertain additions BEFORE awaiting the ACK. Otherwise a
+            // delayed successful add can escape both cleanup and the dial cap.
+            current.push(LivePeer {
+                endpoint,
+                confirmed: false,
+            });
+            current.len() - 1
+        };
+        budget -= 1;
+        if let Ok(raw) = peer_multiaddr(&endpoint).and_then(|s| Ok(s.parse()?)) {
+            if matches!(
+                tokio::time::timeout(
+                    Duration::from_millis(100),
+                    malachite::NetworkRequest::add_persistent_peer(requests, raw)
+                )
+                .await,
+                Ok(Ok(Ok(()) | Err(AlreadyExists)))
+            ) {
+                current[slot].confirmed = true;
+            }
+        }
+    }
+}
 async fn app_loop(
     mut state: State,
     journal: Arc<Journal>,
@@ -602,6 +724,49 @@ async fn app_loop(
     let mut receive_budget = 64;
     let mut packet = [0u8; 1762];
     let mut page_cursor = 0usize;
+    #[cfg(feature = "insecure-devnet-input")]
+    let mut live_view = if let Some((listen, seeds)) =
+        crate::network::live::settings(options.index, options.peer_base_port)?
+    {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)?
+            .as_secs();
+        Some(crate::network::live::View::new(
+            state.genesis().clone(),
+            signer.key.clone(),
+            node_key("transport", options.index)?,
+            listen,
+            seeds,
+            &journal,
+            now,
+        )?)
+    } else {
+        None
+    };
+    #[cfg(feature = "insecure-devnet-input")]
+    if let Some(view) = &mut live_view {
+        view.set_height(state.height() + 1);
+    }
+    #[cfg(feature = "insecure-devnet-input")]
+    let live_socket = if live_view.is_some() {
+        let (listen, _) = crate::network::live::settings(options.index, options.peer_base_port)?
+            .expect("live discovery configured");
+        Some(tokio::net::UdpSocket::bind(listen).await?)
+    } else {
+        None
+    };
+    #[cfg(feature = "insecure-devnet-input")]
+    let mut live_tick = tokio::time::interval(Duration::from_secs(2));
+    #[cfg(feature = "insecure-devnet-input")]
+    let mut live_packet = [0u8; crate::network::live::MAX_PACKET + 1];
+    #[cfg(feature = "insecure-devnet-input")]
+    let mut live_admission = crate::network::live::Admission::new();
+    #[cfg(feature = "insecure-devnet-input")]
+    let mut live_receive_budget = 128;
+    #[cfg(feature = "insecure-devnet-input")]
+    let mut live_peers = Vec::new();
+    #[cfg(feature = "insecure-devnet-input")]
+    let mut live_cursor = 0usize;
     loop {
         let deadline = serve_deadline.unwrap_or_else(|| {
             if native_devnet() {
@@ -628,6 +793,58 @@ async fn app_loop(
                 #[cfg(not(feature="insecure-devnet-input"))]
                 continue;
             },
+            _ = async {
+                #[cfg(feature="insecure-devnet-input")]
+                if live_view.is_some() {live_tick.tick().await;return;}
+                std::future::pending::<()>().await;
+            } => {
+                #[cfg(feature="insecure-devnet-input")]
+                if let Some(view)=&mut live_view {
+                    let now=std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)?.as_secs();
+                    view.set_height(state.height()+1);view.refresh(now)?;view.checkpoint(&journal)?;
+                    update_live_peers(&mut live_peers,view.peers(state.height()+1),&channels.net_requests).await;
+                    let page=view.page(live_cursor);
+                    let mut outbound=vec![page];
+                    let height=state.height()+1;
+                    if let Ok(payload)=yami_chain_storage::read_bounded(&options.directory.join(format!("devnet-payment-{height}.json")),30000) {
+                        if native_candidate(&state,payload.clone()).is_ok() {outbound.push(view.transaction(height,&payload)?);}
+                    }
+                    let socket=live_socket.as_ref().expect("live discovery socket");
+                    if tokio::time::timeout(Duration::from_millis(20),socket.writable()).await.is_ok() {
+                        for target in view.targets(live_cursor) {for packet in &outbound {let _=socket.try_send_to(packet,target.into());}}
+                    }
+                    live_cursor=live_cursor.wrapping_add(7);
+                    live_admission=crate::network::live::Admission::new();live_receive_budget=128;
+                }
+                continue;
+            }
+            result = async {
+                #[cfg(feature="insecure-devnet-input")]
+                if live_receive_budget>0 {
+                    if let Some(socket)=&live_socket {return socket.recv_from(&mut live_packet).await;}
+                }
+                std::future::pending::<std::io::Result<(usize,std::net::SocketAddr)>>().await
+            } => {
+                #[cfg(feature="insecure-devnet-input")]
+                if let (Some(view),Ok((length,std::net::SocketAddr::V4(source))))=(&mut live_view,result) {
+                    live_receive_budget-=1;
+                    if length<=crate::network::live::MAX_PACKET && live_admission.allow(*source.ip()) {
+                        let now=std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)?.as_secs();
+                        let raw=&live_packet[..length];
+                        if crate::network::live::View::is_page(raw) {let _=view.ingest_page(raw,source,now);}
+                        else if let Ok((height,payload))=view.receive_transaction(raw,source,now) {
+                            if height==state.height()+1 && native_candidate(&state,payload.clone()).is_ok() {
+                                // Idempotent immutable admission. Conflicting or replayed
+                                // certificates cannot overwrite an existing reservation.
+                                let _=journal.write_once(&format!("devnet-payment-{height}.json"),&payload);
+                            }
+                        }
+                    }
+                }
+                #[cfg(not(feature="insecure-devnet-input"))]
+                let _=result;
+                continue;
+            }
             _ = discovery_tick.tick(), if network_view.is_some() => {
                 let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)?.as_secs();
                 let n = network_view.as_ref().expect("isolated profile");
@@ -751,14 +968,7 @@ async fn app_loop(
                             .join(format!("devnet-payment-{}.json", height.0)),
                         30000,
                     )?;
-                    let owner = yami_chain::development_key("registry", 0);
-                    let tx = yami_chain::Transaction::devnet_certificate(
-                        payload,
-                        state.nonce(&owner.verifying_key().to_bytes()),
-                        height.0,
-                        &owner,
-                    )?;
-                    state.propose(vec![tx])?
+                    native_candidate(&state, payload)?
                 } else {
                     legacy_block()?
                 };
@@ -1363,5 +1573,76 @@ mod startup_tests {
                 .is_none()
         );
         assert!(startup_deadline(None, wall, clock).unwrap().is_none());
+    }
+}
+
+#[cfg(all(test, feature = "insecure-devnet-input"))]
+mod live_peer_update_tests {
+    use super::*;
+    #[tokio::test]
+    async fn delayed_sdk_ack_cannot_escape_the_bounded_peer_set() {
+        use malachite::app::engine::network::{PersistentPeerError, PersistentPeersOp};
+        let (sender, mut receiver) = tokio::sync::mpsc::channel(16);
+        let actor = tokio::spawn(async move {
+            let mut peers = std::collections::BTreeSet::new();
+            let mut first = true;
+            type PeerAck =
+                tokio::sync::oneshot::Sender<std::result::Result<(), PersistentPeerError>>;
+            let mut withheld: Option<PeerAck> = None;
+            while let Some(request) = receiver.recv().await {
+                if let malachite::NetworkRequest::UpdatePersistentPeers(operation, reply) = request
+                {
+                    if let Some(late) = withheld.take() {
+                        let _: std::result::Result<(), _> = late.send(Ok(()));
+                    }
+                    let result = match operation {
+                        PersistentPeersOp::Add(address) => {
+                            let added = peers.insert(address);
+                            if first {
+                                first = false;
+                                // Apply the update, but withhold its ACK until
+                                // the next operation, beyond the caller deadline.
+                                withheld = Some(reply);
+                                continue;
+                            }
+                            if added {
+                                Ok(())
+                            } else {
+                                Err(PersistentPeerError::AlreadyExists)
+                            }
+                        }
+                        PersistentPeersOp::Remove(address) => {
+                            if peers.remove(&address) {
+                                Ok(())
+                            } else {
+                                Err(PersistentPeerError::NotFound)
+                            }
+                        }
+                    };
+                    let _ = reply.send(result);
+                }
+            }
+            peers.len()
+        });
+        let first = (
+            "127.0.0.1:32000".parse().unwrap(),
+            development_key("transport", 0).verifying_key().to_bytes(),
+        );
+        let second = (
+            "127.0.0.1:32001".parse().unwrap(),
+            development_key("transport", 1).verifying_key().to_bytes(),
+        );
+        let mut tracked = Vec::new();
+        update_live_peers(&mut tracked, vec![first], &sender).await;
+        assert_eq!(tracked.len(), 1);
+        assert!(!tracked[0].confirmed);
+        update_live_peers(&mut tracked, vec![second], &sender).await;
+        assert_eq!(tracked.len(), 1);
+        assert_eq!(tracked[0].endpoint, second);
+        assert!(tracked[0].confirmed);
+        update_live_peers(&mut tracked, vec![], &sender).await;
+        assert!(tracked.is_empty());
+        drop(sender);
+        assert_eq!(actor.await.unwrap(), 0);
     }
 }
