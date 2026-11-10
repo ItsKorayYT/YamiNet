@@ -374,3 +374,35 @@ fn live_objective_slash_covers_unbonding_and_rejects_replays_and_foreign_domains
     assert!(transition(&s, &tx(&s, 1, id(1), 0, action)).is_err());
     e.invariant(&s.accounts).unwrap();
 }
+
+#[test]
+fn portfolio_explains_private_delegations_and_actual_fee_policy_without_changing_state() {
+    let mut s = state();
+    s = run(&s, 1, id(3), 0, registration(&s));
+    s = run(&s, 1, id(3), 400, Action::Bond { validator: id(3) });
+    s = run(&s, 2, id(3), 200, Action::Bond { validator: id(3) });
+    let before = s.clone();
+    let e = s.economics.as_ref().unwrap();
+    let p = e.portfolio(id(2), s.epoch);
+    assert_eq!(p.delegations.len(), 1);
+    assert_eq!(p.delegations[0].owner, id(2));
+    assert_eq!(p.delegations[0].validator, id(3));
+    assert_eq!(p.delegations[0].amount, p.bonded);
+    let rewards = p.rewards.unwrap();
+    assert!(!rewards.direct_delegator_rewards);
+    assert!(!rewards.current_fee_recipient);
+    assert_eq!(rewards.validator_commission_bps, 10000);
+    assert!(
+        e.portfolio(id(10), s.epoch)
+            .rewards
+            .unwrap()
+            .current_fee_recipient
+    );
+    assert!(e.portfolio(id(99), s.epoch).delegations.is_empty());
+    assert_eq!(s, before);
+    s = run(&s, 2, id(3), 200, Action::Unbond { validator: id(3) });
+    let p = s.economics.as_ref().unwrap().portfolio(id(2), s.epoch);
+    assert!(p.delegations.is_empty());
+    assert_eq!(p.unbonding, 200);
+    assert_eq!(p.withdrawable, 0);
+}

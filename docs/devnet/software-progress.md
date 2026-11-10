@@ -26,6 +26,12 @@ Implemented next:
   progress, full-prefix verification before state installation and live TLS PoS
   interruption/restart validation. See [recovery contracts](recovery-pages.md).
 
+- Private quorum-authenticated wallet portfolio replies now include per-validator
+  delegations and explicit fee-recipient eligibility/reward terms. These query
+  additions do not change state encoding, supply, fee allocation or selection.
+  Validation: six economics tests and strict all-target/all-feature Clippy in
+  `experiments/yamichain-tee-m20` passed on 2026-11-10.
+
 Still requiring software implementation/validation (not claimed complete):
 
 1. Public permissionless peer discovery and admission integrated with the live
@@ -39,7 +45,7 @@ Still requiring software implementation/validation (not claimed complete):
    changes. In particular, recovery-custodian
    impersonation is not solved by TLS or process supervision.
 4. Wallet transaction-history/status UX, automatic secure network discovery and
-   clearer delegation/reward information beyond the existing portfolio queries.
+   further delegation/reward UX beyond the authenticated portfolio details.
 5. Production-quality selection randomness, justified delegator reward policy,
    upgrade negotiation and economic policy versioning. The current disposable
    deterministic seed is explicitly not a production randomness beacon.

@@ -132,6 +132,18 @@ pub struct Portfolio {
     pub unbonding: u64,
     pub withdrawable: u64,
     pub withdrawals: Vec<Ticket>,
+    /// Private, quorum-authenticated details. These are query data, never state.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub delegations: Vec<Bond>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rewards: Option<RewardTerms>,
+}
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct RewardTerms {
+    pub policy: String,
+    pub direct_delegator_rewards: bool,
+    pub current_fee_recipient: bool,
+    pub validator_commission_bps: u16,
 }
 pub fn registration_message(
     chain: u64,
@@ -261,6 +273,27 @@ impl Economics {
                 .filter(|t| t.owner == owner && t.unlock <= height)
                 .map(|t| t.amount)
                 .sum(),
+            delegations: self
+                .bonds
+                .iter()
+                .filter(|b| b.owner == owner)
+                .cloned()
+                .collect(),
+            rewards: Some(RewardTerms {
+                policy: "devnet-equal-active-owner-fees-v1".into(),
+                direct_delegator_rewards: false,
+                current_fee_recipient: self.live.as_ref().map_or_else(
+                    || self.policy.fee_recipients.contains(&owner),
+                    |live| {
+                        live.active.iter().any(|(c, _)| {
+                            self.validators
+                                .iter()
+                                .any(|v| v.consensus == *c && v.owner == owner)
+                        })
+                    },
+                ),
+                validator_commission_bps: 10000,
+            }),
             withdrawals: self
                 .tickets
                 .iter()
