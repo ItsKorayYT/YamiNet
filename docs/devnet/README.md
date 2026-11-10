@@ -180,3 +180,6 @@ candidate synchronization, deterministic rewards and evidence-based slashing.
 
 Remote HTTP service endpoints now require [authenticated TLS RPC](rpc.md);
 legacy plaintext compatibility is limited to loopback.
+
+See [service supervision and the unified demo](operations.md) and the
+[remaining software implementation ledger](software-progress.md).

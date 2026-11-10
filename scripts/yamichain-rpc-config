@@ -5,7 +5,10 @@ root=pathlib.Path(__file__).resolve().parents[1]
 p=argparse.ArgumentParser(description=__doc__)
 p.add_argument('--base',type=pathlib.Path,default=root/'docs/devnet/pos-network.json')
 p.add_argument('--out',type=pathlib.Path,required=True)
-a=p.parse_args();out=a.out.resolve();out.mkdir(mode=0o700,parents=True,exist_ok=False)
+p.add_argument('--port-offset',type=int,default=1000)
+a=p.parse_args()
+if not 1<=a.port_offset<=20000:raise SystemExit('port offset must be 1..20000')
+out=a.out.resolve();out.mkdir(mode=0o700,parents=True,exist_ok=False)
 try:
  subprocess.run(['openssl','req','-x509','-newkey','rsa:3072','-nodes','-days','7','-keyout',str(out/'server.key'),'-out',str(out/'ca.pem'),'-subj','/CN=YamiChain disposable localhost RPC','-addext','subjectAltName=DNS:localhost,IP:127.0.0.1'],check=True,capture_output=True)
  (out/'server.key').chmod(0o600)
@@ -20,11 +23,11 @@ try:
  def tls(url):
   u=urlsplit(url)
   if u.hostname not in ('127.0.0.1','localhost'):raise ValueError('this helper provisions loopback certificates only')
-  return 'https://'+u.hostname+':'+str(u.port+1000)
+  return 'https://'+u.hostname+':'+str(u.port+a.port_offset)
  config['gateway']=tls(config['gateway'])
  for key in ['executors','validators']:config[key]=[tls(v) for v in config[key]]
  for key in ['witnesses','validator_peers']:
-  config[key]=[v.rsplit(':',1)[0]+':'+str(int(v.rsplit(':',1)[1])+1000) for v in config[key]]
+  config[key]=[v.rsplit(':',1)[0]+':'+str(int(v.rsplit(':',1)[1])+a.port_offset) for v in config[key]]
  config['rpc']=dict(ca_file=str(out/'ca.pem'),certificate_file=str(out/'ca.pem'),key_file=str(out/'server.key'),tokens=tokens)
  (out/'network.json').write_text(json.dumps(config,indent=2)+'\n')
  print(json.dumps(dict(config=str(out/'network.json'),data=str(out/'data'),gateway=config['gateway'],software_only=True,production_activation=False)))

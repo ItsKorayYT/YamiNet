@@ -10,12 +10,15 @@ import signal
 import subprocess
 import sys
 import time
+import threading
 import urllib.request
 
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'tools'))
 from yamichain_rpc import Transport, Handler as RpcHandler
+from yamichain_services import Services
+from yamichain_worker_io import exchange
 
 DATA = pathlib.Path(os.environ.get('YAMI_DEVNET_DIR', ROOT / 'work/yamichain-native-devnet')).resolve()
 BIN = ROOT / 'experiments/yamichain-tee-m20/target/release'
@@ -104,10 +107,14 @@ def wait(url):
     raise RuntimeError('unreachable ' + url)
 
 
+def child_args(args):
+    return [sys.executable,str(ROOT/'tools/yamichain_child.py'),str(os.getpid()),*map(str,args)]
+
+
 def startchild(args, name, env=None):
     children[:]=[p for p in children if p.poll() is None]
     f = open(DATA / (name + '.log'), 'a')
-    p = subprocess.Popen(args, stdout=f, stderr=f, env=env)
+    p = subprocess.Popen(child_args(args), stdout=f, stderr=f, env=env)
     children.append(p)
     save(DATA / (name + '.pid'), p.pid)
     return p
@@ -243,16 +250,15 @@ class Handler(RpcHandler):
                 else:
                     result = {'validator': index, 'consensus_pid': proc.pid, 'insecure': True}
             elif role == 'executor':
-                proc.stdin.write(json.dumps('Head' if value is None else value) + '\n')
-                proc.stdin.flush()
-                line = proc.stdout.readline()
-                if not line:
-                    raise RuntimeError('executor stopped')
-                result = json.loads(line)
+                result = exchange(proc, 'Head' if value is None else value)
                 if value is None and (not isinstance(result, dict) or 'Head' not in result):
                     raise RuntimeError('executor/witness not ready')
             elif self.path == '/committee' and value is None:
                 result=bridge('live-committee',policy=read(DATA/'policy.json'),records=history_records(read(DATA/'state.json')['height']))
+            elif self.path == '/recovery' and value is None:
+                result=read(DATA/'recovery-status.json')
+            elif self.path == '/services' and value is None:
+                result=read(DATA/'services.json')
             elif self.path == '/fees' and value is None:
                 result=read(DATA/'economic-policy.json') if (DATA/'economic-policy.json').exists() else None
             elif self.path == '/policy' and value is None:
@@ -389,6 +395,8 @@ def recover():
             bundle = worker(source, {'ExportSince': {'index': i, 'after': h['epoch']}})['Recovery']
             if worker(i, {'Recover': bundle}) != 'Committed':
                 raise RuntimeError('executor recovery failed')
+            heads[i]=state['head']
+    return sum(h==state['head'] for h in heads)
 
 
 if __name__ == '__main__':
@@ -416,33 +424,47 @@ if __name__ == '__main__':
         print('Provisioned ' + str(DATA))
     elif a.command == 'supervise':
         role = 'gateway'
+        manager=Services()
         lock = open(DATA / 'supervisor.lock', 'w')
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         save(DATA/'supervisor.pid',os.getpid())
         bootstrap()
         signal.signal(signal.SIGTERM, shutdown)
         for i in range(4):
-            startchild([str(BIN / 'witness-node'), str(DATA / f'witness-{i}.json')], f'witness-{i}')
+            manager.add(f'witness-{i}',lambda i=i:startchild([str(BIN / 'witness-node'), str(DATA / f'witness-{i}.json')], f'witness-{i}'))
         time.sleep(.5)
         for i in range(4):
             if not (DATA / f'executor-{i}.state').exists():
                 bridge('init', config=read(DATA / f'executor-{i}.json'), allocations=read(DATA / 'allocations.json'))
-            startchild(own('executor', i), f'executor-{i}')
+            manager.add(f'executor-{i}',lambda i=i:startchild(own('executor', i), f'executor-{i}'))
             wait(EXECUTORS[i])
         for i in range(4):
-            startchild(own('validator', i), f'validator-{i}')
+            manager.add(f'validator-{i}',lambda i=i:startchild(own('validator', i), f'validator-{i}'))
             wait(VALIDATORS[i])
         for i in range(4,len(VALIDATORS)):
             if (DATA/f'validator-key-{i}.bin').exists():
-                startchild(own('validator',i),f'validator-{i}');wait(VALIDATORS[i])
+                manager.add(f'validator-{i}',lambda i=i:startchild(own('validator',i),f'validator-{i}'));wait(VALIDATORS[i])
         recover()
         server=RPC.server(URL, Handler);server.timeout=1
+        save(DATA/'services.json',manager.status())
+        def recovery_monitor():
+            while True:
+                try:
+                    with server.service_lock:healthy=recover()
+                    save(DATA/'recovery-status.json',dict(ok=healthy>=3,healthy_executors=healthy,checked_at=int(time.time())))
+                except Exception:
+                    # Diagnostic state grants no restore or signing authority.
+                    save(DATA/'recovery-status.json',dict(ok=False,checked_at=int(time.time())))
+                time.sleep(5)
+        threading.Thread(target=recovery_monitor,daemon=True).start()
         launched={i for i in range(len(VALIDATORS)) if i<4 or (DATA/f'validator-key-{i}.bin').exists()}
         while True:
             server.handle_request()
+            manager.tick()
+            save(DATA/'services.json',manager.status())
             for i in range(4,len(VALIDATORS)):
                 if i not in launched and (DATA/f'validator-key-{i}.bin').exists():
-                    startchild(own('validator',i),f'validator-{i}')
+                    manager.add(f'validator-{i}',lambda i=i:startchild(own('validator',i),f'validator-{i}'))
                     launched.add(i)
     elif a.command in ('executor', 'validator', 'witness'):
         role, index = a.command, int(a.args[0])
@@ -451,7 +473,7 @@ if __name__ == '__main__':
         if role == 'executor':
             if not (DATA / f'executor-{index}.state').exists():
                 bridge('init', config=read(DATA / f'executor-{index}.json'), allocations=read(DATA / 'allocations.json'))
-            proc = subprocess.Popen([str(BIN / 'witnessed-worker'), str(DATA / f'executor-{index}.json')], stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True)
+            proc = subprocess.Popen(child_args([str(BIN / 'witnessed-worker'), str(DATA / f'executor-{index}.json')]), stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True)
             children.append(proc)
         else:
             proc = validator_start(index)
@@ -461,11 +483,16 @@ if __name__ == '__main__':
         delay=1;next_restart=0
         while True:
             server.handle_request()
-            if role=='validator' and proc.poll() is not None and time.monotonic()>=next_restart:
+            if proc.poll() is not None and time.monotonic()>=next_restart:
                 # Reopen the SAME durable journal, WAL and signing reservations.
                 # Storage/configuration refusal remains fail-closed; never recreate safety state.
                 next_restart=time.monotonic()+delay;delay=min(delay*2,60)
-                proc=validator_start(index)
+                if role=='validator':proc=validator_start(index)
+                else:
+                    proc.stdin.close();proc.stdout.close()
+                    children[:]=[p for p in children if p.poll() is None]
+                    proc=subprocess.Popen(child_args([str(BIN/'witnessed-worker'),str(DATA/f'executor-{index}.json')]),stdin=subprocess.PIPE,stdout=subprocess.PIPE,text=True)
+                    children.append(proc)
 
     elif a.command == 'gateway':
         role = 'gateway'

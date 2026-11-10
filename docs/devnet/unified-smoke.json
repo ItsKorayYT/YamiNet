@@ -1,0 +1,49 @@
+{
+  "software_only": true,
+  "production_activation": false,
+  "transport": "authenticated TLS RPC; configured bootstrap P2P peers",
+  "gateway": "https://127.0.0.1:32780",
+  "pos": {
+    "software_only": true,
+    "production_activation": false,
+    "live_pos": true,
+    "registered": "41ab6cacb5fdba64ac6f5540a0817ec11fdaeba21f5fc92a0ea3b5739766f68a",
+    "joined_height": 7,
+    "earned": {
+      "height": 7,
+      "amount": 1
+    },
+    "signed_height": 17,
+    "candidate_crash_recovered": true,
+    "lag_across_epoch_recovered": true,
+    "slash_unbonding_penalty": 100,
+    "replayed_evidence_rejected": true,
+    "left_safely": true,
+    "withdrawal_after_unlock": 34,
+    "restart_preserved": true,
+    "history_verified": 35,
+    "gapped_history_rejected": true,
+    "final_height": 35,
+    "final_balance": {
+      "balance": 887,
+      "nonce": 6,
+      "portfolio": {
+        "bonded": 0,
+        "unbonding": 0,
+        "withdrawable": 0,
+        "withdrawals": []
+      }
+    }
+  },
+  "encrypted_payments": {
+    "software_only": true,
+    "production_activation": false,
+    "tls_native_finality": true,
+    "unauthenticated_rpc_rejected": true,
+    "alice_after_payment": 898,
+    "bob_received_offline": 100,
+    "restart_preserved": true,
+    "verified_height": 37,
+    "block": "b1c044ca860538fc222c2b3b3977e741b1a7c7f06591c8d11b3fa6c088f0bd2f"
+  }
+}

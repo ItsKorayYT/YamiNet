@@ -1,0 +1,50 @@
+# Remaining software engineering — implementation ledger
+
+Base assignment: `c1e749f8a84139bc61a9bec2b483a609a8012b4d` on
+`development/yamichain`. This is a progress ledger, not a production-readiness
+claim or a substitute for the remaining implementations.
+
+Completed before this assignment: encrypted wallets, private native payments,
+locked staking lifecycle, live stake-selected committees, fee accounting,
+objective slashing and a real validator join/earn/exit/recovery demonstration.
+
+Implemented next:
+
+- Authenticated HTTPS gateway/executor/validator RPC, per-role credentials,
+  certificate/hostname verification, redirect refusal and bounded admission.
+- Independent development TLS configuration with distinct ports/data, retaining
+  existing devnets; wallet configurations need no backend credentials.
+- Bounded service restarts, Linux child-lifetime enforcement, deadline-bounded
+  worker pipes, periodic authenticated executor recovery and monitoring.
+- A unified reproducible TLS software demonstration using the existing PoS and
+  encrypted-wallet implementations, plus measured idle resource observations.
+
+Still requiring software implementation/validation (not claimed complete):
+
+1. Public permissionless peer discovery and admission integrated with the live
+   PoS identity directory; transaction propagation and independent multi-machine
+   fault/partition campaigns. Current demos use configured private bootstrap peers.
+2. Financial-state incremental persistence, authenticated large-history checkpoint
+   bootstrap/pruning and bounded long-term disk growth. M16 activation gates stay
+   closed; the current native financial profile retains full certified history.
+3. Attestation-bound executor provisioning, confidential transfer, revocation,
+   replacement and witness custody changes. In particular, recovery-custodian
+   impersonation is not solved by TLS or process supervision.
+4. Wallet transaction-history/status UX, automatic secure network discovery and
+   clearer delegation/reward information beyond the existing portfolio queries.
+5. Production-quality selection randomness, justified delegator reward policy,
+   upgrade negotiation and economic policy versioning. The current disposable
+   deterministic seed is explicitly not a production randomness beacon.
+
+External validation dependencies:
+
+- Genuine TDX hosts, firmware and collateral/QVL verification for actual guest
+  measurements and hardware recovery trials. No software-attestation fallback.
+- Independently operated machines and credentials for cross-operator deployment,
+  partition and adversarial recovery campaigns.
+- Independent review of financial custody, rollback/revocation, randomness,
+  checkpoints and monetary-policy transitions before production authorization.
+
+Production financial proofs remain rejected for all 65,536 versions. No real
+money, public deployment or production checkpoint writer/recovery/pruning is
+activated by these commits. `main` is not modified or merged.

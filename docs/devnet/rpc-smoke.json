@@ -6,6 +6,6 @@
   "alice_after_payment": 898,
   "bob_received_offline": 100,
   "restart_preserved": true,
-  "verified_height": 2,
-  "block": "4dacf2bda43db9bb518d938cd52b699c5ebd77367d196a5ed9b5071f55d0fd19"
+  "verified_height": 4,
+  "block": "1c3e8588ba4e2325867e187491b3744ac9c2a1e4a901bd2c17986f0e06f0db1b"
 }

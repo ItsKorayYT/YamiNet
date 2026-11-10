@@ -1,10 +1,16 @@
 #!/usr/bin/env python3
 """Live disposable-stake Malachite lifecycle, recovery and objective slashing."""
-import json,os,pathlib,signal,subprocess,time,urllib.request
+import json,os,pathlib,signal,subprocess,time,urllib.request,sys
 ROOT=pathlib.Path(__file__).resolve().parents[1]
 CLI=ROOT/'scripts/yamichain-pos-devnet'
 DATA=pathlib.Path(os.environ.get('YAMI_DEVNET_DIR',ROOT/'work/yamichain-pos-devnet'))
-URL='http://127.0.0.1:30780'
+sys.path.insert(0,str(ROOT/'tools'))
+from yamichain_rpc import Transport
+CONFIG=json.loads(pathlib.Path(os.environ.get('YAMI_DEVNET_CONFIG',ROOT/'docs/devnet/pos-network.json')).read_text())
+URL=CONFIG['gateway']
+RPC=Transport(CONFIG.get('rpc'),{'gateway':[URL]})
+WALLETS=pathlib.Path(os.environ.get('YAMI_POS_SMOKE_WALLET_DIR',ROOT/'work')).resolve()
+WALLETS.mkdir(mode=0o700,parents=True,exist_ok=True)
 BRIDGE=ROOT/'experiments/yamichain-tee-m20/target/release/devnet-bridge'
 def run(*args,success=True):
  p=subprocess.run([str(CLI),*map(str,args)],capture_output=True,text=True)
@@ -14,7 +20,7 @@ def run(*args,success=True):
   return
  return p.stdout.strip()
 def get(path='/status'):
- with urllib.request.urlopen(URL+path,timeout=15) as r:return json.load(r)
+ return RPC.request(URL+path,timeout=15)
 def bridge(op,success=True,**kw):
  p=subprocess.run([str(BRIDGE)],input=json.dumps(dict(op=op,**kw)),capture_output=True,text=True)
  if not success:
@@ -31,7 +37,7 @@ def wait_record(slot,height,timeout=60):
  raise RuntimeError(f'validator {slot} did not synchronize to {height}')
 run('start')
 assert get()['height']==0,'use a fresh dedicated PoS ledger'
-wallet=ROOT/'work/pos-operator.wallet';other=ROOT/'work/pos-recipient.wallet';key=ROOT/'work/pos-operator.validator'
+wallet=WALLETS/'pos-operator.wallet';other=WALLETS/'pos-recipient.wallet';key=WALLETS/'pos-operator.validator'
 run('wallet',wallet);run('wallet',other);validator=run('validator-key',key)
 run('faucet',wallet,1000)
 run('register',wallet,key)
@@ -71,7 +77,7 @@ for _ in range(30):
 else:raise RuntimeError('restarted candidate did not sign')
 records=[get('/history/'+str(h))['finality']['record'] for h in range(1,signed+1)]
 fixture=bridge('devnet-double-vote-fixture',policy=get('/policy'),records=records,secret=json.loads(key.read_text())['consensus_secret'],height=signed)
-left=ROOT/'work/pos-double-vote-a.bin';right=ROOT/'work/pos-double-vote-b.bin'
+left=WALLETS/'pos-double-vote-a.bin';right=WALLETS/'pos-double-vote-b.bin'
 left.write_bytes(bytes(fixture['left']));right.write_bytes(bytes(fixture['right']))
 run('exit',wallet,validator)
 unbond=json.loads(run('unstake',wallet,validator,200));ticket=unbond['withdrawal_ticket']
