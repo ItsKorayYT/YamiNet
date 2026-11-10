@@ -1,12 +1,26 @@
 //! Finite-supply accounting executed inside the existing witnessed private ledger.
 //! Opt-in genesis policy only. Live devnet membership is witnessed; production PoS stays closed.
 use crate::*;
+pub const ECONOMIC_POLICY_VERSION: u16 = 1;
+fn legacy_policy_version() -> u16 {
+    ECONOMIC_POLICY_VERSION
+}
+fn is_legacy_policy_version(version: &u16) -> bool {
+    *version == ECONOMIC_POLICY_VERSION
+}
 const MAX_VALIDATORS: usize = 128;
 const MAX_BONDS: usize = 4096;
 const MAX_TICKETS: usize = 4096;
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct Policy {
+    /// Version 1 retains its original canonical bytes. Future policies require
+    /// explicit implementation and activation; unknown versions always refuse.
+    #[serde(
+        default = "legacy_policy_version",
+        skip_serializing_if = "is_legacy_policy_version"
+    )]
+    pub version: u16,
     pub base_fee: u64,
     pub unit_fee: u64,
     pub max_units: u64,
@@ -20,6 +34,7 @@ pub struct Policy {
 }
 impl Policy {
     pub fn validate(&self) -> Result<()> {
+        check(self.version == ECONOMIC_POLICY_VERSION)?;
         check(
             self.max_units >= 4
                 && self.max_units <= 1024
@@ -91,6 +106,11 @@ impl Action {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct Intent {
+    #[serde(
+        default = "legacy_policy_version",
+        skip_serializing_if = "is_legacy_policy_version"
+    )]
+    pub policy_version: u16,
     pub fee_limit: u64,
     pub action: Action,
 }
@@ -326,6 +346,10 @@ impl Economics {
         Ok(result)
     }
     pub(crate) fn apply(&mut self, s: &mut State, t: &Transfer, intent: &Intent) -> Result<()> {
+        check(
+            intent.policy_version == self.policy.version
+                && intent.policy_version == ECONOMIC_POLICY_VERSION,
+        )?;
         self.invariant(&s.accounts)?;
         let fee = self.policy.fee(intent.action.units())?;
         check(intent.fee_limit >= fee)?;

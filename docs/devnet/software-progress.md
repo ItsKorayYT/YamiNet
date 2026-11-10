@@ -32,6 +32,12 @@ Implemented next:
   Validation: six economics tests and strict all-target/all-feature Clippy in
   `experiments/yamichain-tee-m20` passed on 2026-11-10.
 
+- Explicit economic policy and signed fee-authorization versioning, with legacy
+  version 1 canonical bytes retained and every unsupported 16-bit policy version
+  rejected. No automatic policy upgrade or activation is provided. Seven economics
+  tests and strict all-target/all-feature Clippy passed; see
+  [policy versions](economic-policy-versions.md).
+
 Still requiring software implementation/validation (not claimed complete):
 
 1. Public permissionless peer discovery and admission integrated with the live
@@ -47,7 +53,7 @@ Still requiring software implementation/validation (not claimed complete):
 4. Wallet transaction-history/status UX, automatic secure network discovery and
    further delegation/reward UX beyond the authenticated portfolio details.
 5. Production-quality selection randomness, justified delegator reward policy,
-   upgrade negotiation and economic policy versioning. The current disposable
+   upgrade negotiation and activation of future economic policy versions. The current disposable
    deterministic seed is explicitly not a production randomness beacon.
 
 External validation dependencies:

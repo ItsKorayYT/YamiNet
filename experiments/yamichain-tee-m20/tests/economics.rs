@@ -30,6 +30,7 @@ fn state() -> State {
         economics: None,
     };
     s.enable_economics(Policy {
+        version: ECONOMIC_POLICY_VERSION,
         live_pos: false,
         base_fee: 1,
         unit_fee: 1,
@@ -52,6 +53,7 @@ fn tx(s: &State, owner: u8, recipient: Id, amount: u64, action: Action) -> Signe
             nonce: s.accounts[&id(owner)].nonce,
             chain: 24,
             finance: Some(Intent {
+                policy_version: ECONOMIC_POLICY_VERSION,
                 fee_limit: 100,
                 action,
             }),
@@ -220,6 +222,7 @@ fn live_state() -> State {
         economics: None,
     };
     s.enable_economics(Policy {
+        version: ECONOMIC_POLICY_VERSION,
         live_pos: true,
         base_fee: 1,
         unit_fee: 1,
@@ -405,4 +408,31 @@ fn portfolio_explains_private_delegations_and_actual_fee_policy_without_changing
     assert!(p.delegations.is_empty());
     assert_eq!(p.unbonding, 200);
     assert_eq!(p.withdrawable, 0);
+}
+
+#[test]
+fn economic_policy_and_signed_authorization_versions_fail_closed_with_legacy_bytes() {
+    let s = state();
+    let policy = &s.economics.as_ref().unwrap().policy;
+    let legacy = bytes(policy);
+    assert!(!String::from_utf8(legacy.clone())
+        .unwrap()
+        .contains("version"));
+    assert_eq!(serde_json::from_slice::<Policy>(&legacy).unwrap(), *policy);
+    let t = tx(&s, 1, id(2), 1, Action::Transfer);
+    assert!(!String::from_utf8(bytes(&t))
+        .unwrap()
+        .contains("policy_version"));
+    for version in 0..=u16::MAX {
+        if version == ECONOMIC_POLICY_VERSION {
+            continue;
+        }
+        let mut changed = policy.clone();
+        changed.version = version;
+        assert!(changed.validate().is_err());
+    }
+    let mut unsupported = t.transfer.clone();
+    unsupported.finance.as_mut().unwrap().policy_version = 2;
+    assert!(transition(&s, &Signed::sign(unsupported, &key(1))).is_err());
+    assert_eq!(s, state());
 }
