@@ -73,3 +73,26 @@ fee-bearing transitions across an epoch boundary and retained balance 7 after a
 full restart. [Validation results](recovery-validation.json) record the separate
 273-transition process regression, direct authority bypass refusals, strict
 Clippy, production proof rejection and unchanged compact-checkpoint regressions.
+
+Private financial snapshots now use `YCFULL01` encrypted content-defined chunks.
+An executor's `YCMANF01` file is a small manifest referencing ciphertext hashes in
+its `.chunks.sqlite` sidecar. The external anchor authenticates the complete
+manifest, and the witness confirmation authenticates the complete portable
+checkpoint. Chunks use a separate AEAD domain; plaintext financial encoding and
+state roots are unchanged. Missing, altered or wrongly keyed chunks refuse to
+load or sign. Debit/credit changes install through one authenticated manifest.
+
+New chunks are durable before either existing local durability hook. Unreachable
+cache chunks are reclaimed only after both manifest and anchor are durable.
+Witness chunk changes and the revision, nonce, sign-once lock and metadata update
+commit in one synchronous SQLite WAL transaction before any confirmation leaves
+the authority. Recovery pages still verify the entire certified prefix before
+installing a distant state; no final-certificate-only import is added.
+
+Older full encrypted snapshots migrate during the next successful state change,
+including retained witness rows. Include `.chunks.sqlite` in standalone backups;
+copying just the manifest is insufficient. A witnessed executor can reconstruct
+its disposable cache from the live authority's authenticated complete checkpoint.
+Old binaries cannot read the new format and must not be rolled back onto migrated
+state. This format change does not activate M16 checkpoint pruning or authorize
+production financial proofs.

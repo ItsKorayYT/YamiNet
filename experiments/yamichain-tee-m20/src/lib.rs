@@ -477,3 +477,5 @@ impl State {
 }
 
 pub mod vault;
+
+mod incremental;

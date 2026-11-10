@@ -148,6 +148,9 @@ impl Drop for Lab {
 }
 impl Lab {
     fn new() -> Self {
+        Self::with_accounts(0)
+    }
+    fn with_accounts(extra: u32) -> Self {
         let dir = tempfile::tempdir().unwrap();
         let keys: Vec<_> = (0..4)
             .map(|_| ReplicaKeys {
@@ -182,6 +185,15 @@ impl Lab {
                 w.verifying_key().to_bytes(),
                 Account {
                     balance: 100,
+                    nonce: 0,
+                },
+            );
+        }
+        for i in 0..extra {
+            accounts.insert(
+                hash(&bytes(&("large account fixture", i))),
+                Account {
+                    balance: 777,
                     nonce: 0,
                 },
             );
@@ -1038,4 +1050,73 @@ fn host_cannot_swap_ciphertext_between_preparation_and_remote_confirmation() {
     lab.pay(&p, [true; 4]);
     let bob = lab.bob.clone();
     assert_eq!(lab.balance(&bob, [true; 4]).balance, 10);
+}
+
+#[test]
+fn large_financial_state_incremental_writes_restart_and_certified_recovery() {
+    fn writes(path: &Path) -> u64 {
+        rusqlite::Connection::open(path)
+            .unwrap()
+            .query_row(
+                "SELECT chunk_bytes FROM financial_stats WHERE id=1",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap()
+    }
+    let mut lab = Lab::with_accounts(10000);
+    let baseline = lab.observers[0].get().unwrap().snapshot.len() as u64;
+    let databases: Vec<_> = lab
+        .configs
+        .iter()
+        .map(|c| PathBuf::from(format!("{}.chunks.sqlite", c.snapshot.display())))
+        .chain(lab.nodes.iter().map(|n| n.config.database.clone()))
+        .collect();
+    let before: u64 = databases.iter().map(|path| writes(path)).sum();
+    let selected = [true, true, true, false];
+    for nonce in 0..3 {
+        let payment = lab.payment(nonce, 1, selected);
+        lab.pay(&payment, selected);
+    }
+    let after: u64 = databases.iter().map(|path| writes(path)).sum();
+    let changed = after - before;
+    // This counter measures ciphertext payloads actually INSERTed, not bytes
+    // sent over RPC or filesystem counters that can be unavailable on tmpfs.
+    assert!(
+        changed > 0 && changed < baseline * 8 * 3 / 4,
+        "changed={changed}, snapshot={baseline}"
+    );
+    for node in &mut lab.nodes {
+        node.restart();
+    }
+    for worker in &mut lab.workers {
+        worker.restart();
+    }
+    let bundle = match lab.workers[0].call(WorkerCommand::Export(3)) {
+        WorkerReply::Recovery(bundle) => bundle,
+        _ => panic!("large recovery export"),
+    };
+    assert!(matches!(
+        lab.workers[3].call(WorkerCommand::Recover(bundle)),
+        WorkerReply::Committed
+    ));
+    assert_eq!(lab.observers[3].get().unwrap().head, lab.head);
+    for node in &lab.nodes {
+        let connection = rusqlite::Connection::open(&node.config.database).unwrap();
+        let stored: Vec<u8> = connection
+            .query_row("SELECT payload FROM state WHERE id=1", [], |r| r.get(0))
+            .unwrap();
+        let record: Record = serde_json::from_slice(&stored).unwrap();
+        assert!(record.snapshot.is_empty());
+        assert!(stored.len() < 32000);
+        let live: u64 = connection
+            .query_row(
+                "SELECT sum(length(payload)) FROM financial_chunks",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert!(live < baseline + 131072);
+    }
+    println!("10,009 accounts: full checkpoint={baseline} bytes; three transfers across eight processes inserted {changed} encrypted chunk bytes; restart/recovery passed");
 }

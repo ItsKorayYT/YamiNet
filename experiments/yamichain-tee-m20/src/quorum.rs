@@ -1,6 +1,7 @@
 //! M21: fixed-membership, sign-once 3-of-4 SOFTWARE quorum. No hardware claims.
 //! Trusted anchors must live outside the rollback domain of the encrypted files.
 use super::*;
+use crate::incremental::{self, Snapshot};
 use std::collections::BTreeSet;
 
 pub const PAYMENT_DOMAIN: &[u8] = b"YAMI-M21-payment-v1";
@@ -330,12 +331,60 @@ impl Replica {
                 && m.transport == PublicKey::from(&k.transport).to_bytes(),
         )
     }
-    fn packed(d: &ReplicaDisk, storage: Id) -> Result<Vec<u8>> {
-        Ok(bytes(&seal(
-            storage,
-            &bytes(d),
-            b"YAMI-M21-replica-disk-v1",
-        )?))
+    fn unpack(raw: &[u8], storage: Id) -> Result<ReplicaDisk> {
+        let plain = if Snapshot::is_full(raw) {
+            Snapshot::parse(raw)?.plaintext(storage)?
+        } else {
+            let envelope: Envelope = serde_json::from_slice(raw)?;
+            open(storage, &envelope, b"YAMI-M21-replica-disk-v1")?
+        };
+        Ok(serde_json::from_slice(&plain)?)
+    }
+    fn stored_snapshot(&self) -> Result<Vec<u8>> {
+        let raw = fs::read(&self.file.path)?;
+        if Snapshot::is_manifest(&raw) {
+            let connection = incremental::connect(&self.file.path)?;
+            Snapshot::load(&connection, &raw)?.pack()
+        } else {
+            Ok(raw)
+        }
+    }
+    fn persist_disk(
+        &mut self,
+        disk: &ReplicaDisk,
+        hook: &mut impl FnMut(&str) -> Result<()>,
+    ) -> Result<()> {
+        check(!self.file.poisoned)?;
+        let previous = if self.file.path.exists() {
+            let raw = self.checkpoint()?;
+            if Snapshot::is_full(&raw) {
+                Some(Snapshot::parse(&raw)?)
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+        let snapshot = Snapshot::build(&bytes(disk), self.keys.storage, previous.as_ref())?;
+        let mut connection = incremental::connect(&self.file.path)?;
+        self.file.poisoned = true;
+        {
+            let tx = connection.transaction()?;
+            snapshot.store(&tx, None)?;
+            tx.commit()?;
+        }
+        // New chunks are durable before the manifest/anchor is advanced. Old
+        // chunks remain available until BOTH existing durability barriers pass.
+        self.file.poisoned = false;
+        self.file.persist(&snapshot.manifest(), hook)?;
+        self.file.poisoned = true;
+        {
+            let tx = connection.transaction()?;
+            snapshot.retain(&tx)?;
+            tx.commit()?;
+        }
+        self.file.poisoned = false;
+        Ok(())
     }
     pub fn create(
         path: &Path,
@@ -359,14 +408,17 @@ impl Replica {
             pending: None,
             certificate: None,
         };
-        let file = AnchoredFile::create(path, anchor, &Self::packed(&disk, keys.storage)?)?;
-        Ok(Self {
+        let file = AnchoredFile::locked(path, anchor)?;
+        check(!path.exists() && !anchor.exists() && !incremental::sidecar(path).exists())?;
+        let mut result = Self {
             committee: c,
             index,
             keys,
-            disk,
+            disk: disk.clone(),
             file,
-        })
+        };
+        result.persist_disk(&disk, &mut |_| Ok(()))?;
+        Ok(result)
     }
     pub fn load(
         path: &Path,
@@ -377,9 +429,12 @@ impl Replica {
     ) -> Result<Self> {
         Self::check_keys(&c, index, &keys)?;
         let (file, raw) = AnchoredFile::load(path, anchor)?;
-        let envelope: Envelope = serde_json::from_slice(&raw)?;
-        let disk: ReplicaDisk =
-            serde_json::from_slice(&open(keys.storage, &envelope, b"YAMI-M21-replica-disk-v1")?)?;
+        let raw = if Snapshot::is_manifest(&raw) {
+            Snapshot::load(&incremental::connect(path)?, &raw)?.pack()?
+        } else {
+            raw
+        };
+        let disk = Self::unpack(&raw, keys.storage)?;
         check(disk.committee == c.id() && disk.member == c.members[index].signing)?;
         let state = disk.state.state()?;
         check(state.chain == c.chain)?;
@@ -404,13 +459,8 @@ impl Replica {
     }
     /// M23 disposable cache interface: the external authenticated witness supplies authority.
     pub(crate) fn checkpoint(&self) -> Result<Vec<u8>> {
-        let raw = fs::read(&self.file.path)?;
-        let envelope: Envelope = serde_json::from_slice(&raw)?;
-        let stored: ReplicaDisk = serde_json::from_slice(&open(
-            self.keys.storage,
-            &envelope,
-            b"YAMI-M21-replica-disk-v1",
-        )?)?;
+        let raw = self.stored_snapshot()?;
+        let stored = Self::unpack(&raw, self.keys.storage)?;
         // A hostile host may swap ciphertext after local preparation. Never confirm a
         // recovery snapshot that differs from the actual private state being signed.
         check(bytes(&stored) == bytes(&self.disk))?;
@@ -443,8 +493,29 @@ impl Replica {
             .write(true)
             .open(path.with_extension("lock"))?;
         fs2::FileExt::try_lock_exclusive(&lock)?;
-        atomic(path, blob)?;
-        atomic(&anchor, &bytes(&hash(blob)))?;
+        // Restore only an authority-authenticated complete snapshot. Legacy
+        // keystores stay readable; the next successful mutation migrates them.
+        Self::check_keys(&c, index, &keys)?;
+        Self::unpack(blob, keys.storage)?;
+        let manifest = if Snapshot::is_full(blob) {
+            let snapshot = Snapshot::parse(blob)?;
+            let mut connection = incremental::connect(path)?;
+            let tx = connection.transaction()?;
+            snapshot.store(&tx, None)?;
+            tx.commit()?;
+            snapshot.manifest()
+        } else {
+            blob.to_vec()
+        };
+        atomic(path, &manifest)?;
+        atomic(&anchor, &bytes(&hash(&manifest)))?;
+        if Snapshot::is_full(blob) {
+            let snapshot = Snapshot::parse(blob)?;
+            let mut connection = incremental::connect(path)?;
+            let tx = connection.transaction()?;
+            snapshot.retain(&tx)?;
+            tx.commit()?;
+        }
         drop(lock);
         Self::load(path, &anchor, c, index, keys)
     }
@@ -521,8 +592,7 @@ impl Replica {
             statement: statement.clone(),
             next: LedgerWire::from_state(&next),
         });
-        self.file
-            .persist(&Self::packed(&disk, self.keys.storage)?, &mut hook)?;
+        self.persist_disk(&disk, &mut hook)?;
         self.disk = disk;
         Ok(self.approval(statement))
     }
@@ -556,8 +626,7 @@ impl Replica {
         disk.state = p.next.clone();
         disk.pending = None;
         disk.certificate = Some(qc.clone());
-        self.file
-            .persist(&Self::packed(&disk, self.keys.storage)?, &mut hook)?;
+        self.persist_disk(&disk, &mut hook)?;
         self.disk = disk;
         Ok(())
     }
@@ -604,8 +673,7 @@ impl Replica {
         disk.state = data.state;
         disk.pending = None;
         disk.certificate = Some(data.certificate);
-        self.file
-            .persist(&Self::packed(&disk, self.keys.storage)?, &mut |_| Ok(()))?;
+        self.persist_disk(&disk, &mut |_| Ok(()))?;
         self.disk = disk;
         Ok(())
     }
@@ -650,8 +718,7 @@ impl Replica {
         disk.state = data.state;
         disk.pending = None;
         disk.certificate = Some(data.certificate);
-        self.file
-            .persist(&Self::packed(&disk, self.keys.storage)?, &mut |_| Ok(()))?;
+        self.persist_disk(&disk, &mut |_| Ok(()))?;
         self.disk = disk;
         Ok(())
     }
@@ -881,4 +948,150 @@ pub fn tdx_report_data(
     let mut report = [0; 64];
     report[..32].copy_from_slice(&digest);
     Ok(report)
+}
+
+#[cfg(test)]
+mod incremental_migration_tests {
+    use super::*;
+    #[test]
+    fn legacy_encrypted_state_migrates_atomically_without_changing_financial_roots() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("replica.json");
+        let anchor = dir.path().join("anchor.json");
+        let signing: Vec<_> = (10..14).map(|n| SigningKey::from_bytes(&[n; 32])).collect();
+        let transport: Vec<_> = (20..24).map(|n| StaticSecret::from([n; 32])).collect();
+        let committee = Committee {
+            chain: 24,
+            members: std::array::from_fn(|i| Member {
+                signing: signing[i].verifying_key().to_bytes(),
+                transport: PublicKey::from(&transport[i]).to_bytes(),
+            }),
+        };
+        let alice = SigningKey::from_bytes(&[1; 32]);
+        let bob = SigningKey::from_bytes(&[2; 32]);
+        let state = State {
+            chain: 24,
+            epoch: 0,
+            economics: None,
+            accounts: BTreeMap::from([(
+                alice.verifying_key().to_bytes(),
+                Account {
+                    balance: 1000,
+                    nonce: 0,
+                },
+            )]),
+        };
+        let keys = ReplicaKeys {
+            signing: signing[0].clone(),
+            transport: transport[0].clone(),
+            storage: [3; 32],
+            root_secret: [4; 32],
+        };
+        let disk = ReplicaDisk {
+            committee: committee.id(),
+            member: committee.members[0].signing,
+            state: LedgerWire::from_state(&state),
+            pending: None,
+            certificate: None,
+        };
+        let legacy =
+            bytes(&seal(keys.storage, &bytes(&disk), b"YAMI-M21-replica-disk-v1").unwrap());
+        fs::write(&path, &legacy).unwrap();
+        fs::write(&anchor, bytes(&hash(&legacy))).unwrap();
+        use crate::witness::{
+            Operation, Outcome, Record, Request, Service, ServiceConfig, WitnessPolicy,
+        };
+        let authorities: Vec<_> = (30..34).map(|n| SigningKey::from_bytes(&[n; 32])).collect();
+        let policy = WitnessPolicy {
+            committee: committee.clone(),
+            genesis: state_head(&state, keys.root_secret),
+            authorities: std::array::from_fn(|i| authorities[i].verifying_key().to_bytes()),
+            observer: SigningKey::from_bytes(&[40; 32]).verifying_key().to_bytes(),
+            native_scope: None,
+        };
+        let database = dir.path().join("legacy-authority.sqlite");
+        let mut authority = Service::open(ServiceConfig {
+            listen: "127.0.0.1:0".parse().unwrap(),
+            database: database.clone(),
+            policy: policy.clone(),
+            index: 0,
+            signing_secret: authorities[0].to_bytes(),
+            tls: None,
+            test_crash_after_prepare_commit: false,
+        })
+        .unwrap();
+        let initialize = Request::signed(
+            &policy,
+            0,
+            &signing[0],
+            0,
+            Operation::Initialize {
+                snapshot: legacy.clone(),
+            },
+        )
+        .unwrap();
+        assert!(matches!(
+            authority.handle(&initialize).outcome,
+            Outcome::Record(_)
+        ));
+        let mut replica =
+            Replica::load(&path, &anchor, committee.clone(), 0, keys.clone()).unwrap();
+        let transfer = Signed::sign(
+            Transfer {
+                chain: 24,
+                sender: alice.verifying_key().to_bytes(),
+                recipient: bob.verifying_key().to_bytes(),
+                amount: 10,
+                nonce: 0,
+                finance: None,
+            },
+            &alice,
+        );
+        let next = transition(&state, &transfer).unwrap();
+        let payment = Payment::software(&committee, &replica.head().unwrap(), transfer).unwrap();
+        let vote = replica.prepare(&payment).unwrap();
+        let snapshot = replica.checkpoint().unwrap();
+        let request = Request::signed(
+            &policy,
+            0,
+            &signing[0],
+            1,
+            Operation::Prepare {
+                statement: vote.statement.clone(),
+                snapshot: snapshot.clone(),
+            },
+        )
+        .unwrap();
+        let record = match authority.handle(&request).outcome {
+            Outcome::Record(record) => record,
+            _ => panic!("legacy witness migration"),
+        };
+        assert_eq!(record.snapshot, snapshot);
+        assert!(matches!(
+            authority.handle(&request).outcome,
+            Outcome::Rejected(_)
+        ));
+        let connection = rusqlite::Connection::open(&database).unwrap();
+        let stored: Vec<u8> = connection
+            .query_row("SELECT payload FROM state WHERE id=1", [], |r| r.get(0))
+            .unwrap();
+        assert!(serde_json::from_slice::<Record>(&stored)
+            .unwrap()
+            .snapshot
+            .is_empty());
+        assert!(Snapshot::is_manifest(&fs::read(&path).unwrap()));
+        let votes = signing[..3]
+            .iter()
+            .map(|key| Approval {
+                member: key.verifying_key().to_bytes(),
+                statement: vote.statement.clone(),
+                signature: key.sign(&vote.statement.message()).to_bytes().to_vec(),
+            })
+            .collect();
+        let certificate = Certificate::assemble(&committee, &payment.previous, votes).unwrap();
+        replica.commit(&certificate).unwrap();
+        drop(replica);
+        let replica = Replica::load(&path, &anchor, committee, 0, keys.clone()).unwrap();
+        assert_eq!(replica.head().unwrap(), state_head(&next, keys.root_secret));
+    }
 }

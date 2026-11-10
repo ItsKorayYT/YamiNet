@@ -1,0 +1,16 @@
+{
+  "software_only": true,
+  "production_activation": false,
+  "accounts": 10009,
+  "executor_processes": 4,
+  "witness_processes": 4,
+  "transfers": 3,
+  "checkpoint_bytes": 1447518,
+  "inserted_ciphertext_bytes": 1233270,
+  "metric": "actual SQLite financial chunk payload bytes inserted across all eight processes; excludes manifests/authority metadata and is not a physical-device I/O measurement",
+  "restart_and_certified_recovery": true,
+  "legacy_migration": true,
+  "root_encoding_unchanged": true,
+  "regression_tests_passed": 55,
+  "ignored_native_qvl_tests": 11
+}

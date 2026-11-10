@@ -1027,6 +1027,14 @@ fn rewinding_the_trusted_anchor_too_voids_the_software_rollback_guarantee() {
     let c = lab.configs[0].clone();
     let old_snapshot = fs::read(&c.snapshot).unwrap();
     let old_anchor = fs::read(&c.trusted_anchor).unwrap();
+    // The incremental cache is part of the SAME hostile rollback domain. Rewind
+    // it too; losing the external anchor must not acquire a fictitious guarantee.
+    let chunks = PathBuf::from(format!("{}.chunks.sqlite", c.snapshot.display()));
+    let backup = lab._dir.path().join("old-chunks.sqlite");
+    rusqlite::Connection::open(&chunks)
+        .unwrap()
+        .execute("VACUUM INTO ?1", [backup.to_str().unwrap()])
+        .unwrap();
     let a = lab.packet(0, 10);
     let b = lab.packet(0, 20);
     let vote_a = match lab.workers[0].call(Command::Prepare(Box::new(a))) {
@@ -1035,6 +1043,7 @@ fn rewinding_the_trusted_anchor_too_voids_the_software_rollback_guarantee() {
     };
     lab.workers[0].child.kill().unwrap();
     lab.workers[0].child.wait().unwrap();
+    fs::copy(&backup, &chunks).unwrap();
     fs::write(&c.snapshot, old_snapshot).unwrap();
     fs::write(&c.trusted_anchor, old_anchor).unwrap();
     lab.restart(0);

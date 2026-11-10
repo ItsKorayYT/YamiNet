@@ -58,9 +58,10 @@ Still requiring software implementation/validation (not claimed complete):
 1. Public permissionless peer discovery and admission integrated with the live
    PoS identity directory; transaction propagation and independent multi-machine
    fault/partition campaigns. Current demos use configured private bootstrap peers.
-2. Ordinary financial-state incremental persistence, authenticated large-history checkpoint
-   bootstrap/pruning and bounded long-term disk growth. M16 activation gates stay
-   closed; the current native financial profile retains full certified history.
+2. Authenticated large-history checkpoint bootstrap/pruning and archival growth
+   management beyond the finite authority budget. Ordinary private financial state
+   now persists incrementally; M16 activation gates remain closed and native
+   financial history/sign-once records are retained.
 3. Attestation-bound executor provisioning, confidential transfer, revocation,
    replacement, measured-guest encrypted RPC packaging and witness custody
    changes. In particular, recovery-custodian
@@ -177,3 +178,40 @@ remain blocked. Resource references were requested without asking for credential
 in chat. No such resources are inferred from the local TLS software demonstration.
 Independent custody/checkpoint/randomness/economic review is still required before
 opening any corresponding production or public-network gate.
+
+
+## Incremental financial persistence — implemented 2026-11-10
+
+Executors now persist authenticated content-defined encrypted chunks and a small
+anchored manifest, reusing unchanged ciphertext. Witnesses persist those chunks
+in the same SQLite transaction as revision CAS, nonce reservations, vote locks,
+certificates and small authority metadata. There is no account identifier,
+plaintext balance, amount or plaintext content hash in the chunk database.
+Canonical financial roots, signatures and monetary policy are unchanged.
+
+Legacy full encrypted snapshots and legacy witness rows are readable and migrate
+on the next successful mutation; old binaries fail closed on the new format.
+The existing durability hooks, poison-on-uncertain-write behavior and all sign-once,
+rollback, crash, replay and recipient-bound recovery tests pass. Keep the new
+`.chunks.sqlite` executor sidecar with standalone backups. Witnessed caches can
+be rebuilt from their authenticated authority checkpoint.
+
+The four-executor/four-witness process test transferred funds with 10,009 accounts,
+restarted every process and recovered the lagging executor. Measured checkpoint
+and inserted-ciphertext byte counts are in
+[incremental-persistence-validation.json](incremental-persistence-validation.json).
+The full all-feature release experiment suite and strict all-target/all-feature
+Clippy passed. Eleven Intel/QVL-only tests remain explicitly ignored.
+
+Only unreachable encrypted state chunks are reclaimed. Certified history, nonce
+reservations and sign-once records are never pruned. Each wire checkpoint remains
+bounded at 4 MiB; executor chunk databases have a 12 MiB page budget and authority
+databases a 1 GiB page budget, with bounded WAL checkpoint intervals. Exhaustion
+fails closed. These are software limits, not production capacity authorization.
+Full snapshot serialization/root hashing and witness RPC checkpoint transfer are
+still linear in state size; incremental network transfer and scalable authenticated
+financial-history pruning remain unfinished. Incremental storage exposes encrypted
+chunk sizes/reuse and I/O patterns; it is not ORAM or hardware confidentiality.
+
+Priority 2 P2P implementation continues next; this checkpoint is not a completion
+claim for the networking requirement.

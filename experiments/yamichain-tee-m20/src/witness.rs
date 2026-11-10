@@ -1,4 +1,5 @@
 //! M23: authenticated remote sign-once authorities. No local directory is an independence claim.
+use crate::incremental::Snapshot;
 use crate::witness_tls::{ClientTls, DeadlineStream, ServerTls};
 use crate::{quorum::*, *};
 use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
@@ -517,6 +518,16 @@ impl Service {
         fs2::FileExt::try_lock_exclusive(&lock)?;
         let connection = Connection::open(&config.database)?;
         connection.execute_batch("PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; CREATE TABLE IF NOT EXISTS metadata(id INTEGER PRIMARY KEY, policy BLOB NOT NULL, member BLOB NOT NULL); CREATE TABLE IF NOT EXISTS state(id INTEGER PRIMARY KEY, payload BLOB NOT NULL); CREATE TABLE IF NOT EXISTS nonces(nonce BLOB PRIMARY KEY); CREATE TABLE IF NOT EXISTS votes(sequence INTEGER PRIMARY KEY, statement BLOB NOT NULL, confirmation BLOB NOT NULL); CREATE TABLE IF NOT EXISTS certificates(sequence INTEGER PRIMARY KEY, certificate BLOB NOT NULL); CREATE TABLE IF NOT EXISTS recovery_progress(id INTEGER PRIMARY KEY, revision INTEGER NOT NULL, progress BLOB NOT NULL);")?;
+        Snapshot::create_table(&connection)?;
+        connection
+            .execute_batch("PRAGMA wal_autocheckpoint=256; PRAGMA journal_size_limit=2097152;")?;
+        // Fail closed at a finite authority budget. Votes, replay reservations and
+        // certified history are NEVER deleted to make room for financial state.
+        let page_size: u64 = connection.query_row("PRAGMA page_size", [], |r| r.get(0))?;
+        let pages = (1024u64 * 1024 * 1024) / page_size;
+        let actual: u64 =
+            connection.query_row(&format!("PRAGMA max_page_count={pages}"), [], |r| r.get(0))?;
+        check(actual <= pages)?;
         let member = config.policy.member(config.index)?;
         let policy = config.policy.id();
         connection.execute(
@@ -562,6 +573,13 @@ impl Service {
             .query_row("SELECT payload FROM state WHERE id=1", [], |r| r.get(0))
             .optional()?;
         let mut current: Option<Record> = old.map(|b| serde_json::from_slice(&b)).transpose()?;
+        if let Some(record) = &mut current {
+            if record.snapshot.is_empty() {
+                let manifest =
+                    Snapshot::stored_manifest(&tx)?.ok_or("missing authority snapshot manifest")?;
+                record.snapshot = Snapshot::load(&tx, &manifest)?.pack()?;
+            }
+        }
         let staged: Option<(i64, Vec<u8>)> = tx
             .query_row(
                 "SELECT revision,progress FROM recovery_progress WHERE id=1",
@@ -841,9 +859,18 @@ impl Service {
                 ],
             )?;
         } else if !read_only {
+            let mut stored = record.clone();
+            if Snapshot::is_full(&record.snapshot) {
+                let snapshot = Snapshot::parse(&record.snapshot)?;
+                let old_manifest = Snapshot::stored_manifest(&tx)?;
+                snapshot.store(&tx, old_manifest.as_deref())?;
+                // Only the small financial/authority metadata is rewritten. The
+                // complete opaque snapshot is reconstructed for signed replies.
+                stored.snapshot.clear();
+            }
             tx.execute(
                 "INSERT OR REPLACE INTO state VALUES(1,?1)",
-                params![bytes(&record)],
+                params![bytes(&stored)],
             )?;
         }
         // SQLite WAL synchronous=FULL: durable state, nonce and sign-once record precede ANY reply.
